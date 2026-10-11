@@ -7,8 +7,6 @@ use std::{
 
 use crate::{git::Git, running::Running};
 
-/// How many repositories the recent list keeps.
-
 /// A work tree and its Git directory.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Repo {
@@ -38,9 +36,9 @@ pub fn open(git: &Git, path: &Path) -> io::Result<Repo> {
     let common = ["rev-parse", "--path-format=absolute", "--git-common-dir"];
     let common_dir = text(git.run(path, &common)?)?;
     let repo = Repo {
-        root: std::fs::canonicalize(root)?,
-        git_dir: std::fs::canonicalize(git_dir)?,
-        common_dir: std::fs::canonicalize(common_dir)?,
+        root: dunce::canonicalize(root)?,
+        git_dir: dunce::canonicalize(git_dir)?,
+        common_dir: dunce::canonicalize(common_dir)?,
     };
     log::info!("tree: opened {}", repo.root.display());
     Ok(repo)

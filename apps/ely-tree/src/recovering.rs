@@ -113,14 +113,14 @@ impl Tree {
                 if tree.active != Some(repo) {
                     return;
                 }
-                tree.ask = Some(match plan {
+                let ask = match plan {
                     Ok(plan) => Ask::Move { repo, plan },
                     Err(error) => Ask::Failed {
                         title: text(cx, "tree.op.failed", &[]),
                         detail: error.to_string().into(),
                     },
-                });
-                cx.notify();
+                };
+                tree.offer(ask, cx);
             })
             .ok();
         })
@@ -205,9 +205,10 @@ impl Tree {
                 let short = |oid: &str| oid[..oid.len().min(7)].to_string();
                 let left = match plan.left.len() {
                     0 => label("tree.move.nothing"),
-                    n => text(
+                    n => ely_ui::i18n::counted(
                         cx,
                         "tree.move.left",
+                        n as u64,
                         &[("n", &n.to_string()), ("commits", &plan.left.join("\n"))],
                     ),
                 };

@@ -1,6 +1,6 @@
 //! Protected copies and what they allow (PDF-11).
 
-use std::{io::ErrorKind, path::Path};
+use std::path::Path;
 
 use ely_pdf_engine::{
     Doc, Lock, Worker,
@@ -43,7 +43,7 @@ fn a_protected_copy_asks_and_holds_its_limits() {
     let allowed = worker.permissions(opened.doc).expect("reads");
     assert_eq!(allowed & (may::PRINT | may::COPY | may::EDIT | may::OWNER), may::PRINT);
     let refused = worker.rotate_pages(opened.doc, &[0], 90).expect_err("refused");
-    assert_eq!((refused.kind(), refused.to_string()), (ErrorKind::PermissionDenied, "assemble".to_string()));
+    assert_eq!(ely_pdf_engine::refused(&refused), Some("assemble"));
     let text: String = worker.text(opened.doc, 0).expect("still reads").iter().map(|c| c.c).collect();
     assert!(text.contains("Hello"));
 }
@@ -72,7 +72,7 @@ fn changing_protection_needs_the_owner() {
     worker.unlock(doc, "user").expect("unlocks");
     let bare = dir.path().join("bare.pdf");
     let refused = worker.protect(doc, &bare, None).expect_err("refused");
-    assert_eq!(refused.kind(), ErrorKind::PermissionDenied);
+    assert!(ely_pdf_engine::refused(&refused).is_some(), "refused: {refused}");
     assert!(!bare.exists());
     worker.owner(doc, "owner").expect("tries");
     worker.protect(doc, &bare, None).expect("unprotects");
@@ -103,7 +103,7 @@ fn a_file_with_no_open_password_still_holds_limits() {
     let opened = other.open(&out).expect("opens");
     assert!(!opened.locked);
     let refused = other.annotate(opened.doc, &[]).expect_err("refused");
-    assert_eq!((refused.kind(), refused.to_string()), (ErrorKind::PermissionDenied, "annotate".to_string()));
+    assert_eq!(ely_pdf_engine::refused(&refused), Some("annotate"));
 }
 
 #[test]

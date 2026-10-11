@@ -116,7 +116,7 @@ impl Book {
                 let name = cx.new(|cx| TextInput::new(window, cx));
                 let range = cx.new(|cx| TextInput::new(window, cx));
                 range.update(cx, |range, cx| range.set_text(refers, cx));
-                book.dialog = Some(Dialog::Define {
+                book.open_dialog(Dialog::Define {
                     tab: id,
                     name,
                     range,
@@ -206,7 +206,7 @@ impl Book {
                 let range = cx.new(|cx| TextInput::new(window, cx));
                 let formula = first.formula.clone();
                 range.update(cx, |range, cx| range.set_text(formula, cx));
-                book.dialog = Some(Dialog::Names {
+                book.open_dialog(Dialog::Names {
                     tab: id,
                     names,
                     chosen: 0,

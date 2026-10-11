@@ -113,43 +113,55 @@ impl Props {
         self.read_styles(cx);
     }
 
+    /// The installed fonts, read off the window thread.
     fn read_fonts(&mut self, doc: &Doc, cx: &mut Context<Self>) {
-        let read = self
-            .worker
-            .lock()
-            .expect("the worker lock")
-            .values(doc, ".uno:CharFontName")
-            .and_then(|json| ely_lok::commands::fonts(&json));
-        match read {
-            Ok(fonts) => self.fonts = fonts.into_iter().map(Into::into).collect(),
-            Err(error) => cx.emit(LokError(format!("the font list is unreadable: {error}"))),
-        }
+        ely_lok::read_off(
+            &self.worker,
+            doc,
+            |worker, doc| ely_lok::commands::fonts(&worker.values(doc, ".uno:CharFontName")?),
+            |props: &mut Props, read, cx| match read {
+                Ok(fonts) => {
+                    props.fonts = fonts.into_iter().map(Into::into).collect();
+                    cx.notify();
+                }
+                Err(error) => cx.emit(LokError(format!("the font list is unreadable: {error}"))),
+            },
+            cx,
+        );
     }
 
+    /// The shown document's style lists, read off the window thread.
     fn read_styles(&mut self, cx: &mut Context<Self>) {
-        let Some(shown) = self.shown.as_mut() else {
+        let Some(shown) = self.shown.as_ref() else {
             return;
         };
-        let read = self
-            .worker
-            .lock()
-            .expect("the worker lock")
-            .values(&shown.doc, ".uno:StyleApply")
-            .and_then(|json| {
+        let view = shown.view.entity_id();
+        ely_lok::read_off(
+            &self.worker,
+            &shown.doc,
+            |worker, doc| {
+                let json = worker.values(doc, ".uno:StyleApply")?;
                 let list = |family| -> std::io::Result<Vec<SharedString>> {
                     let names = ely_lok::commands::styles(&json, family)?;
                     Ok(names.into_iter().map(Into::into).collect())
                 };
                 Ok((list("2")?, list("1")?, list("8")?))
-            });
-        match read {
-            Ok((paragraph, character, pages)) => {
-                shown.paragraph = paragraph;
-                shown.character = character;
-                shown.pages = pages;
-            }
-            Err(error) => cx.emit(LokError(format!("the style list is unreadable: {error}"))),
-        }
+            },
+            move |props: &mut Props, read, cx| {
+                // Another tab shown since: its own read follows.
+                let Some(shown) = props.shown.as_mut().filter(|shown| shown.view.entity_id() == view) else {
+                    return;
+                };
+                match read {
+                    Ok((paragraph, character, pages)) => {
+                        (shown.paragraph, shown.character, shown.pages) = (paragraph, character, pages);
+                        cx.notify();
+                    }
+                    Err(error) => cx.emit(LokError(format!("the style list is unreadable: {error}"))),
+                }
+            },
+            cx,
+        );
     }
 
     /// Re-reads the style lists once queued input lands.

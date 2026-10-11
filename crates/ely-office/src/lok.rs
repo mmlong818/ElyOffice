@@ -77,9 +77,14 @@ impl Engine for Lok {
     }
 
     fn restart(app: AppId, worker: &mut Worker) -> io::Result<()> {
-        *worker = spawn(app)?;
-        worker.ready()?;
-        worker.set_author(&ely_platform::user::name()?)
+        let author = worker.author().map(str::to_string);
+        let author = author.ok_or_else(|| io::Error::other("the ended worker had no author"))?;
+        // The ended worker stays until the new one is ready.
+        let mut fresh = spawn(app)?;
+        fresh.ready()?;
+        fresh.set_author(&author)?;
+        *worker = fresh;
+        Ok(())
     }
 
     fn settled(view: &LokView) -> bool {
@@ -129,10 +134,13 @@ pub fn start(app: AppId, cx: &mut App) -> io::Result<(Arc<Mutex<Worker>>, PathBu
     let worker = Arc::new(Mutex::new(spawn(app)?));
     // The window opens now; the kernel finishes starting behind it.
     let starting = Arc::clone(&worker);
+    // Settings as read at launch; defaults if unreadable.
+    let wanted = Arc::new(Mutex::new(ely_ui::settings::current(cx).author.clone()));
+    let first = Arc::clone(&wanted);
     let started = cx.background_executor().spawn(async move {
         let mut worker = starting.lock().expect("the worker lock");
         worker.ready()?;
-        worker.set_author(&ely_platform::user::name()?)
+        sign(&mut worker, &first)
     });
     cx.spawn(async move |_| {
         if let Err(error) = started.await {
@@ -140,8 +148,14 @@ pub fn start(app: AppId, cx: &mut App) -> io::Result<(Arc<Mutex<Worker>>, PathBu
         }
     })
     .detach();
-    follow_author(&worker, cx);
+    follow_author(&worker, wanted, cx);
     Ok((worker, work))
+}
+
+/// Sends the newest wanted name, read under the worker lock.
+fn sign(worker: &mut Worker, wanted: &Mutex<String>) -> io::Result<()> {
+    let author = wanted.lock().expect("the author lock").clone();
+    worker.set_author(&ely_platform::user::named(&author)?)
 }
 
 /// A worker process on the app's profile, not yet checked.
@@ -154,19 +168,19 @@ fn spawn(app: AppId) -> io::Result<Worker> {
 }
 
 /// A new author name signs from the next comment on.
-fn follow_author(worker: &Arc<Mutex<Worker>>, cx: &mut App) {
+fn follow_author(worker: &Arc<Mutex<Worker>>, wanted: Arc<Mutex<String>>, cx: &mut App) {
     let worker = Arc::clone(worker);
-    let mut signed = ely_ui::settings::current(cx).author.clone();
     cx.observe_global::<ely_ui::settings::Current>(move |cx| {
         let author = ely_ui::settings::current(cx).author.clone();
-        if author == signed {
+        if *wanted.lock().expect("the author lock") == author {
             return;
         }
-        signed = author;
-        let worker = Arc::clone(&worker);
+        *wanted.lock().expect("the author lock") = author;
+        let (worker, wanted) = (Arc::clone(&worker), Arc::clone(&wanted));
         cx.background_executor()
             .spawn(async move {
-                let set = ely_platform::user::name().and_then(|name| worker.lock().expect("the worker lock").set_author(&name));
+                // Any order of these tasks ends on the newest name.
+                let set = sign(&mut worker.lock().expect("the worker lock"), &wanted);
                 if let Err(error) = set {
                     log::error!("lok: the new author name is not set: {error}");
                 }

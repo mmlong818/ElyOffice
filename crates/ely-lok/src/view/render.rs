@@ -40,7 +40,7 @@ impl Render for LokView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let dpi = window.scale_factor();
         if dpi != self.geom.dpi {
-            self.geom.dpi = dpi;
+            self.keep_scroll(|view| view.geom.dpi = dpi);
             self.retire_tiles();
         }
         self.follow_theme(cx.theme().is_dark());
@@ -210,7 +210,7 @@ impl LokView {
         let down = self.viewport.1 * TWIPS_PER_PIXEL / h as f32;
         let zoom = (across.min(down) * MARGIN).min(4.0);
         if (zoom - self.geom.zoom).abs() > 0.001 {
-            self.geom.zoom = zoom;
+            self.keep_scroll(|view| view.geom.zoom = zoom);
             self.retire_tiles();
             self.failed.clear();
         }
@@ -249,6 +249,19 @@ impl LokView {
         }
     }
 
+    /// Room beside a narrow document, which sits centred.
+    pub(super) fn slack(&self) -> (f32, f32) {
+        // A sheet's grid grows with the view; it starts left.
+        if self.doc.is_sheet() {
+            return (0.0, 0.0);
+        }
+        let extent = self.extent();
+        let slack = |view: f32, doc: i32| (view - self.geom.px_of(doc)).max(0.0) / 2.0;
+        // A fitted page sits centred both ways.
+        let down = if self.fit { slack(self.viewport.1, extent.1) } else { 0.0 };
+        (slack(self.viewport.0, extent.0), down)
+    }
+
     /// The page mask and visible tiles; requests the missing ones.
     pub(super) fn prepare(&mut self, bounds: Bounds<Pixels>) -> Painted {
         self.viewport = (bounds.size.width.into(), bounds.size.height.into());
@@ -259,20 +272,10 @@ impl LokView {
         self.clamp_scroll();
         let geom = self.geom;
         let (sx, sy) = self.scroll;
-        // A narrow document sits centered.
         let extent = self.extent();
-        let slack = |view: f32, doc: i32| (view - geom.px_of(doc)).max(0.0) / 2.0;
-        // A fitted page sits centred both ways.
-        self.spare = (
-            slack(self.viewport.0, extent.0),
-            if self.fit {
-                slack(self.viewport.1, extent.1)
-            } else {
-                0.0
-            },
-        );
+        self.spare = self.slack();
         let pages = if self.pages.is_empty() {
-            vec![self.screen_rect((0, 0, extent.0, extent.1))]
+            vec![self.tile_screen_rect((0, 0, extent.0, extent.1))]
         } else {
             self.pages
                 .iter()
@@ -283,10 +286,11 @@ impl LokView {
             geom.twips_of(bounds.size.width.into()),
             geom.twips_of(bounds.size.height.into()),
         );
-        if self.shown != Some((sx, sy, vw, vh)) {
-            self.shown = Some((sx, sy, vw, vh));
+        let scale = (geom.tile_pixels(), TILE_TWIPS);
+        if self.shown != Some(((sx, sy, vw, vh), scale)) {
+            self.shown = Some(((sx, sy, vw, vh), scale));
             self.failed.clear();
-            self.send(input::Input::Visible((sx, sy, vw, vh)));
+            self.send(input::Input::Visible((sx, sy, vw, vh), scale));
         }
         let (ax, ay) = self.axes();
         let side = px(geom.px_of(TILE_TWIPS));

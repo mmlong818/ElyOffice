@@ -315,3 +315,48 @@ fn a_default_name_avoids_a_field_with_no_widget() {
     send(cx, &viewer, Change::Design(typed, Vec::new()));
     assert_eq!(notes(cx, &view).fields.len(), 1, "the field lands");
 }
+
+#[test]
+fn quick_strokes_queue_behind_each_other() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let mut cx = TestAppContext::single();
+    let path = dir.path().join("one.pdf");
+    let page: (f32, f32, &[&str]) = (612.0, 792.0, &["Hello"]);
+    std::fs::write(&path, pdf_with(&[page], &[], &Extras::default())).expect("writes");
+    let (viewer, cx) = windowed(&mut cx, dir.path(), &[path], true);
+    let view = shown(cx, &viewer);
+    let note = |y: f32| ely_pdf_engine::NewAnnot { page: 0, shape: ely_pdf_engine::Shape::Note((100.0, y)), rgb: None, contents: "n".into(), author: String::new() };
+    // The second lands while the first still runs.
+    cx.update(|_, app| view.update(app, |view, cx| {
+        view.annotate("a first note", vec![note(500.0)], cx);
+        view.annotate("a second note", vec![note(400.0)], cx);
+    }));
+    settle(cx, |app| view.read(app).settled());
+    cx.update(|_, app| viewer.update(app, |viewer, cx| viewer.side.update(cx, |side, cx| {
+        side.pane = crate::side::Pane::Notes;
+        cx.notify();
+    })));
+    let count = |cx: &mut gpui::VisualTestContext| {
+        settle(cx, |app| view.read(app).settled() && view.read(app).notes.contains_key(&0));
+        cx.update(|_, app| view.read(app).notes[&0].annots.len())
+    };
+    assert_eq!(count(cx), 2, "both notes landed");
+    let rotate = |view: &mut PdfView, cx: &mut gpui::Context<PdfView>| {
+        view.edit_pages("rotating", |worker, doc| worker.rotate_pages(doc, &[0], 90), cx)
+    };
+    // A running rotation would move the point: refused.
+    cx.update(|_, app| view.update(app, |view, cx| {
+        rotate(view, cx);
+        view.annotate("a note while turning", vec![note(300.0)], cx);
+    }));
+    assert_eq!(count(cx), 2, "refused while pages move");
+    // A rotation waiting behind another edit: refused too.
+    cx.update(|_, app| view.update(app, |view, cx| {
+        view.annotate("a third note", vec![note(250.0)], cx);
+        rotate(view, cx);
+        view.annotate("a note behind a turn", vec![note(200.0)], cx);
+    }));
+    assert_eq!(count(cx), 3, "only the note before the turn");
+    cx.update(|_, app| view.update(app, |view, cx| view.annotate("a settled note", vec![note(150.0)], cx)));
+    assert_eq!(count(cx), 4, "taken once pages are still");
+}

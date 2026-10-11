@@ -81,7 +81,7 @@ impl Book {
                 }
                 (Asked::Refresh, Ok(_)) => book.warn_key("table.pivot.none", cx),
                 (_, Ok(Found::Pivot(Some(pivot)))) => {
-                    book.dialog = Some(Dialog::Pivot {
+                    book.open_dialog(Dialog::Pivot {
                         tab: id,
                         source: pivot.source,
                         fields: pivot.fields,
@@ -120,7 +120,7 @@ impl Book {
         if picked.top.iter().any(String::is_empty) {
             return self.warn_key("table.pivot.headers", cx);
         }
-        self.dialog = Some(Dialog::Pivot {
+        self.open_dialog(Dialog::Pivot {
             tab: id,
             source: picked.data,
             fields: picked.top,
@@ -146,7 +146,7 @@ impl Book {
             range: ely_office::chart::field(range, "table.chart.range", window, cx),
             look: ely_office::chart::LookFields::new(&look, window, cx),
         };
-        self.dialog = Some(Dialog::Chart {
+        self.open_dialog(Dialog::Chart {
             tab: id,
             chart: chart.map(Box::new),
             look: Box::new(look),

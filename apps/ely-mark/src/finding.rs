@@ -115,8 +115,12 @@ impl Desk {
 
     fn close_find(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.finder = None;
-        if let Some(view) = self.active_view() {
+        // Every tab's page holds its own highlights.
+        let views: Vec<_> = self.core.tabs.iter().map(|tab| tab.view.clone()).collect();
+        for view in views {
             view.update(cx, |view, cx| view.unfind(cx));
+        }
+        if let Some(view) = self.active_view() {
             let focus = view.read(cx).focus.clone();
             window.focus(&focus, cx);
         }

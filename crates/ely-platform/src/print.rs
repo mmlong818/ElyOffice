@@ -2,6 +2,9 @@
 
 use std::path::Path;
 
+/// This build has a system print panel.
+pub const BUILT: bool = cfg!(target_os = "macos");
+
 /// Shows the print panel for `pdf`; false when cancelled.
 #[cfg(target_os = "macos")]
 pub fn print_pdf(pdf: &Path) -> anyhow::Result<bool> {
@@ -71,6 +74,7 @@ pub fn print_pdf(pdf: &Path) -> anyhow::Result<bool> {
 }
 
 /// One paper holding every page, turned as needed.
+#[cfg(any(target_os = "macos", test))]
 fn paper_for(sizes: &[(f64, f64)]) -> Option<(f64, f64)> {
     let long = sizes
         .iter()
@@ -97,8 +101,8 @@ fn paper_for(sizes: &[(f64, f64)]) -> Option<(f64, f64)> {
 
 /// Printing needs a system panel this platform build lacks.
 #[cfg(not(target_os = "macos"))]
-pub fn print_pdf(pdf: &Path) -> anyhow::Result<bool> {
-    anyhow::bail!("printing {} is not built on this platform", pdf.display())
+pub fn print_pdf(_: &Path) -> anyhow::Result<bool> {
+    anyhow::bail!("printing is not built on this platform")
 }
 
 #[cfg(test)]

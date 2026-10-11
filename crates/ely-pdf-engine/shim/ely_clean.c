@@ -86,6 +86,7 @@ static pdf_obj *spliced(fz_context *ctx, pdf_document *pdf, pdf_obj *action, int
 		if (pdf_mark_obj(ctx, action))
 			return NULL;
 		(*n)++;
+		fz_var(out);
 		fz_try(ctx)
 			out = spliced(ctx, pdf, pdf_dict_get(ctx, action, PDF_NAME(Next)), n);
 		fz_always(ctx)
@@ -212,6 +213,8 @@ restart:
 		if (unseen(ctx, pdf_annot_obj(ctx, widget)))
 		{
 			pdf_obj *field = pdf_keep_obj(ctx, pdf_annot_obj(ctx, widget));
+			fz_var(widget);
+			fz_var(n);
 			fz_try(ctx)
 			{
 				pdf_delete_annot(ctx, page, widget);

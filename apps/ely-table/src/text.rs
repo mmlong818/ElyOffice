@@ -154,22 +154,20 @@ fn decode(bytes: &[u8], encoding: Encoding) -> Option<String> {
         .map(|text| text.into_owned())
 }
 
-/// Rows as Calc's text import reads them (impex.cxx).
-fn split(text: &str, how: &Import) -> Vec<Vec<String>> {
+/// Calc's text-import rows (impex.cxx), one at a time.
+fn split<'a>(text: &'a str, how: &'a Import) -> impl Iterator<Item = Vec<String>> + 'a {
     let mut chars = text.chars().peekable();
-    let mut rows = Vec::new();
-    while chars.peek().is_some() {
+    std::iter::from_fn(move || {
+        chars.peek()?;
         let mut row = Vec::new();
         loop {
             let (value, more) = field(&mut chars, how);
             row.push(value);
             if !more {
-                break;
+                return Some(row);
             }
         }
-        rows.push(row);
-    }
-    rows
+    })
 }
 
 /// One field, and whether the record goes on.
@@ -233,15 +231,19 @@ impl Book {
 
     pub(crate) fn ask_import(&mut self, path: PathBuf, cx: &mut Context<Self>) {
         let reading = path.clone();
-        let chinese = ely_ui::i18n::resolve(&ely_platform::locale::system()) == "zh-CN";
+        // The language the app shows, not the system's.
+        let chinese = cx.global::<ely_gpui_component::i18n::I18n>().locale().tag == "zh-CN";
         cx.spawn(async move |this, cx| {
-            let bytes = cx
-                .background_spawn(async move { std::fs::read(&reading) })
+            // Guessing checks the whole file: off the window thread.
+            let pending = cx
+                .background_spawn(async move {
+                    std::fs::read(&reading).map(|bytes| Pending::new(reading, bytes, chinese))
+                })
                 .await;
-            in_window(&this, cx, |book, _, cx| match bytes {
-                Ok(bytes) => {
-                    log::info!("table: import asks for {} bytes", bytes.len());
-                    book.imports.push_back(Pending::new(path, bytes, chinese));
+            in_window(&this, cx, |book, _, cx| match pending {
+                Ok(pending) => {
+                    log::info!("table: import asks for {} bytes", pending.bytes.len());
+                    book.imports.push_back(pending);
                     book.next_import(cx);
                 }
                 Err(error) => book.failed_open(&path.display().to_string(), &error, cx),
@@ -250,14 +252,26 @@ impl Book {
         .detach_and_log_err(cx);
     }
 
+    /// Opens `dialog`; a displaced import waits its turn again.
+    pub(crate) fn open_dialog(&mut self, dialog: Dialog) {
+        if let Some(Dialog::Import(pending)) = self.dialog.replace(dialog) {
+            log::info!("table: import waits behind another dialog");
+            self.imports.push_front(*pending);
+        }
+    }
+
     /// The next waiting import asks, once no dialog is open.
     pub(crate) fn next_import(&mut self, cx: &mut Context<Self>) {
         if self.dialog.is_some() {
             return;
         }
         if let Some(pending) = self.imports.pop_front() {
+            // A finished scan keeps the reader's column choices.
+            let unread = pending.reading;
             self.dialog = Some(Dialog::Import(Box::new(pending)));
-            self.scan_import(cx);
+            if unread {
+                self.scan_import(cx);
+            }
         }
     }
 

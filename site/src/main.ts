@@ -7,12 +7,10 @@ import { night } from "./night.ts";
 import { rhythm } from "./rhythm.ts";
 import { playground } from "./play.ts";
 import { film } from "./film.ts";
-import { model } from "./model.ts";
 import { said, speak, type Lang } from "./text.ts";
+import { RELEASES, VERSION } from "./release.ts";
 
-const REPO = "https://github.com/ZacharyZhang-NY/ElyOffice";
-const RELEASE = `${REPO}/releases/download/v0.1.0`;
-const APPS = model.slice(1, -1).map((p) => p.name);
+const REPO = "https://git.zacharyzhang.com/ZacharyZhang-NY/ElyOffice";
 
 const app = document.querySelector<HTMLElement>("#app");
 if (!app) throw new Error("index.html has no #app");
@@ -20,10 +18,15 @@ if (!app) throw new Error("index.html has no #app");
 const hero = document.createElement("header");
 const title = document.createElement("h1");
 title.textContent = "Ely Office";
-const github = document.createElement("a");
-github.href = REPO;
-github.textContent = "GitHub";
-hero.append(title, said("p", "tagline"), said("p", "platforms"), github);
+const source = document.createElement("a");
+source.href = REPO;
+source.textContent = "Source";
+const download = said("a", "get");
+download.href = RELEASES;
+const links = document.createElement("div");
+links.className = "links";
+links.append(download, source);
+hero.append(title, said("p", "tagline"), said("p", "platforms"), links);
 const { section, host, svg } = tour(hero);
 rhythm(host, svg);
 
@@ -32,22 +35,10 @@ const shelf = props();
 const footer = document.createElement("footer");
 footer.id = "download";
 const version = document.createElement("h2");
-version.textContent = "Ely Office 0.1.0";
-const list = document.createElement("ul");
-for (const name of APPS) {
-  const a = document.createElement("a");
-  a.href = `${RELEASE}/${name}-0.1.0-arm64.dmg`;
-  a.textContent = name;
-  const li = document.createElement("li");
-  li.append(a);
-  list.append(li);
-}
-const source = said("a", "source");
-source.href = REPO;
-const li = document.createElement("li");
-li.append(source);
-list.append(li);
-footer.append(version, said("p", "platforms"), said("p", "needs"), said("p", "unsigned"), list);
+version.textContent = `Ely Office ${VERSION}`;
+const get = said("a", "get");
+get.href = RELEASES;
+footer.append(version, said("p", "platforms"), said("p", "needs"), said("p", "unsigned"), get);
 
 const toggle = said("button", "other");
 toggle.className = "lang";

@@ -87,7 +87,7 @@ pub trait Dialogs: Host {
                 // Cancel stops the whole close.
                 let cancelled = move |window: &mut Window, cx: &mut App| {
                     owner.update(cx, |host, cx| {
-                        host.close_cancelled(cx);
+                        host.close_stopped(cx);
                         host.dialog_done(window, cx)
                     })
                 };
@@ -119,7 +119,7 @@ pub trait Dialogs: Host {
                 let cancelled = move |window: &mut Window, cx: &mut App| {
                     owner.update(cx, |host, cx| {
                         if then.is_some() {
-                            host.close_cancelled(cx);
+                            host.close_stopped(cx);
                         }
                         host.dialog_done(window, cx)
                     })
@@ -135,7 +135,7 @@ pub trait Dialogs: Host {
                         move |host, _, cx| {
                             // Reloading ends the close that waited.
                             if then.is_some() {
-                                host.close_cancelled(cx);
+                                host.close_stopped(cx);
                             }
                             host.reload(tab, cx)
                         },

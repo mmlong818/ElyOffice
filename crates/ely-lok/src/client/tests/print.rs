@@ -154,12 +154,13 @@ fn text_exports_write_the_shown_sheet_as_values() {
     let out = dir.path().join("out.csv");
     doc.export_text(&mut worker, &crate::file_url(&out), ';')
         .expect("exports S1");
-    let first = std::fs::read_to_string(&out).expect("reads");
+    // Windows writes CSV lines with CRLF, as RFC 4180 does.
+    let first = std::fs::read_to_string(&out).expect("reads").replace("\r\n", "\n");
     assert_eq!(first, "Name;Total\nSum;3\n", "values, not formulas");
     doc.show_sheet(&mut worker, 1).expect("S2");
     doc.export_text(&mut worker, &crate::file_url(&out), ';')
         .expect("exports S2");
-    let second = std::fs::read_to_string(&out).expect("reads");
+    let second = std::fs::read_to_string(&out).expect("reads").replace("\r\n", "\n");
     assert_eq!(second, "Item;Note\nPen;\"a;b\"\nInk;2\n", "only S2");
 }
 
@@ -284,11 +285,16 @@ fn excel_caches_recompute_and_unknown_functions_show_errors() {
     let end = xml[at..].find("</row>").expect("row one") + at + "</row>".len();
     std::fs::write(&sheet, format!("{}{row}{}", &xml[..at], &xml[end..])).expect("writes");
     let excel = dir.path().join("excel.xlsx");
-    let zip = std::process::Command::new("zip")
+    // Python's zipfile, as ooxml.py uses: no zip on Windows.
+    let pack = "import os, sys, zipfile
+with zipfile.ZipFile(sys.argv[1], 'w', zipfile.ZIP_DEFLATED) as z:
+    for d, _, fs in os.walk('.'):
+        for f in fs:
+            z.write(os.path.join(d, f))";
+    let zip = std::process::Command::new("python3")
         .current_dir(&unpacked)
-        .args(["-q", "-r"])
+        .args(["-c", pack])
         .arg(&excel)
-        .arg(".")
         .status()
         .expect("zip runs");
     assert!(zip.success());

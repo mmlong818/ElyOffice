@@ -41,6 +41,11 @@ fn each_app_shows_its_own_sections(cx: &mut TestAppContext) {
         (AppId::Tree, &["general", "git", "storage", "diagnostics"]),
         (AppId::Mark, &["general", "storage", "diagnostics"]),
     ] {
+        // As each app does before its first window.
+        cx.update(|cx| {
+            let menus = crate::commands::menus(app, &crate::commands::OPENING, false, Vec::new(), cx);
+            cx.set_menus(menus);
+        });
         let window = cx.add_window(|window, cx| SettingsView::new(app, window, cx));
         let shown = window
             .update(cx, |view, _, cx| view.sections(cx).into_iter().map(|(key, ..)| key).collect::<Vec<_>>())

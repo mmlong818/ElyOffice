@@ -71,7 +71,8 @@ impl Viewer {
         let (asked, viewer) = (writing.clone(), cx.weak_entity());
         view.update(cx, |view, cx| {
             let doc = view.doc;
-            view.read(
+            // A stale answer still reaches `previewed`, which says so.
+            view.off(
                 move |worker| worker.put_text(doc, page, &asked, PREVIEW),
                 move |_, answer, cx| {
                     // The viewer edits this view; wait until it is free.
@@ -95,7 +96,19 @@ impl Viewer {
         replacing: bool,
         cx: &mut Context<Self>,
     ) {
+        let same = self.tab(tab).is_some_and(|open| open.view.read(cx).version == version);
+        if !same {
+            let text = Self::text(cx, "pdf.object.changed", &[]);
+            return self.toast(text, Severity::Warning, cx);
+        }
         match answer {
+            Ok(Wrote::Unwritable) => {
+                let note = Self::text(cx, "pdf.text.unwritable", &[]);
+                self.edit_panel.update(cx, |panel, cx| {
+                    panel.note = Some(note);
+                    cx.notify();
+                });
+            }
             Ok(Wrote::Missing(c)) => {
                 let note = Self::text(cx, "pdf.text.missing", &[("char", &c.to_string())]);
                 self.edit_panel.update(cx, |panel, cx| {
@@ -128,6 +141,7 @@ impl Viewer {
                 move |worker, doc| match worker.put_text(doc, page, &writing, 0.0)? {
                     Wrote::Done(mark) => Ok(mark),
                     Wrote::Missing(c) => Err(io::Error::other(format!("the font has no {c}"))),
+                    Wrote::Unwritable => Err(io::Error::other("the document's font cannot write")),
                     Wrote::Preview(..) => Err(io::Error::other("a write came back as a preview")),
                 },
                 cx,
@@ -168,25 +182,27 @@ impl Viewer {
         self.pick(false, cx, move |viewer, path: PathBuf, cx| {
             viewer.on_same(&view, version, cx, |view, cx| {
                 view.edit("replacing an image", move |worker, doc| worker.replace_image(doc, page, index, &path), cx)
-            })
+            });
         });
     }
 
-    /// Runs `step` on `view` if no edit came since `version`.
+    /// Whether `step` ran: no edit came since `version`.
     pub(crate) fn on_same(
         &self,
         view: &gpui::Entity<crate::view::PdfView>,
         version: u64,
         cx: &mut Context<Self>,
         step: impl FnOnce(&mut crate::view::PdfView, &mut Context<crate::view::PdfView>),
-    ) {
+    ) -> bool {
         // Landed or queued, an edit since may move the target.
         let open = self.core.tabs.iter().any(|tab| tab.view == *view);
         if !open || view.read(cx).version != version || !view.read(cx).settled() {
             let text = Self::text(cx, "pdf.object.changed", &[]);
-            return self.toast(text, Severity::Warning, cx);
+            self.toast(text, Severity::Warning, cx);
+            return false;
         }
         view.update(cx, step);
+        true
     }
 
     /// Asks for a picture; it lands mid-page.

@@ -88,6 +88,10 @@ Setext
   <b>html</b>
 </div>
 
+|a|b|
+|-|-|
+|1|2|
+
 See [[Wiki Link]], ~sub~ and [a ref][r].  
 next line
 
@@ -120,6 +124,16 @@ check wiki.md $'Alpha with [[Wiki Link]].\n' 'keystroke "x"' $'xAlpha with [[Wik
 quote=$'> First.\n>\n> Setext\n> ======\n>\n> Last with [[Wiki]].\n'
 check quote.md "$quote" 'keystroke "x"' "x$quote"
 check defs.md $'[r]: https://example.com\n' 'keystroke "x"' $'x[r]: https://example.com\n'
+# A compact table stays a table; edits keep its style.
+check table.md $'|a|b|\n|-|-|\n|1|2|\n' 'keystroke "x"' $'|xa|b|\n|-|-|\n|1|2|\n'
+check dashes.md $'| a | b |\n|---|---|\n| 1 | 2 |\n' 'keystroke "x"' $'| xa | b |\n| - | - |\n| 1 | 2 |\n'
+check quoted.md $'> |alpha|beta|\n> |---|---|\n> |1|2|\n' 'keystroke "x"' $'> |xalpha|beta|\n> |-|-|\n> |1|2|\n'
+check listed.md $'- item\n\n  |alpha|beta|\n  |---|---|\n  |1|2|\n' 'keystroke "x"' $'- xitem\n\n  |alpha|beta|\n  |-|-|\n  |1|2|\n'
+# Items open with a paragraph; a leading table stays raw.
+check leading.md $'- |alpha|beta|\n  |---|---|\n' 'keystroke "x"' $'x- |alpha|beta|\n  |---|---|\n'
+check short.md $'|a|b|c|\n|-|-|-|\n|1|2|\n' 'keystroke "x"' $'|xa|b|c|\n|-|-|-|\n|1|2||\n'
+# Cells Milkdown would rewrite keep the table raw.
+check wikicell.md $'|a|[[Wiki Link]]|\n|-|-|\n|1|2|\n' 'keystroke "x"' $'x|a|[[Wiki Link]]|\n|-|-|\n|1|2|\n'
 # Deleting forward at a hidden definition moves nothing.
 gap=$'Alpha.\n\n[r]: /path " T "   \n\nBeta.\n\nTail.\n'
 check gap.md "$gap" 'key code 119' "$gap"

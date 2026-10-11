@@ -4,7 +4,7 @@ use std::path::Path;
 
 use ely_pdf_engine::{
     Doc, Worker, Writing, Wrote,
-    sample::{Extras, pdf_with},
+    sample::{Extras, one_page, pdf_with},
 };
 
 fn worker() -> Worker {
@@ -274,4 +274,162 @@ fn runs_on_one_baseline_still_wrap_onto_new_lines() {
     let mut tops: Vec<i32> = worker.text(doc, 0).expect("reads").iter().map(|c| c.rect[1].round() as i32).collect();
     tops.dedup();
     assert!(tops.len() >= 3, "each wrapped line has its own baseline: {tops:?}");
+}
+
+#[test]
+fn a_subset_font_writes_with_its_own_glyphs_and_reads_back() {
+    // LibreOffice's export: a subset font whose own tables are placeholders.
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/office/t.pdf");
+    let mut worker = worker();
+    let mut doc = worker.open(&path).expect("opens").doc;
+    let at = worker.text_blocks(doc, 0).expect("blocks").iter().position(|b| b.text.contains("BUNDLE")).expect("the block");
+    let mut writing = rewrite(&mut worker, doc, at, "TEXT BUNDLE", "original");
+    // Room for one line; the space stays a space.
+    writing.bx[2] *= 2.0;
+    assert!(matches!(worker.put_text(doc, 0, &writing, 0.0).expect("answers"), Wrote::Done(_)), "the page's glyphs suffice");
+    doc = worker.now(doc).expect("the state");
+    let now = page_text(&mut worker, doc);
+    assert!(now.contains("TEXT BUNDLE"), "the new words read back: {now:?}");
+}
+
+/// A PDF of `objects`, numbered from 1.
+fn assembled(objects: &[Vec<u8>]) -> Vec<u8> {
+    let mut pdf = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    for (at, body) in objects.iter().enumerate() {
+        offsets.push(pdf.len());
+        pdf.extend([format!("{} 0 obj\n", at + 1).as_bytes(), body, b"\nendobj\n"].concat());
+    }
+    let xref = pdf.len();
+    pdf.extend(format!("xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1).as_bytes());
+    offsets.iter().for_each(|at| pdf.extend(format!("{at:010} 00000 n \n").as_bytes()));
+    pdf.extend(format!("trailer\n<</Size {}/Root 1 0 R>>\nstartxref\n{xref}\n%%EOF\n", objects.len() + 1).as_bytes());
+    pdf
+}
+
+/// "AB" in WinAnsi Helvetica whose ToUnicode maps only "A".
+fn partial_unicode_pdf() -> Vec<u8> {
+    let stream = |data: &[u8]| [format!("<</Length {}>>stream\n", data.len()).as_bytes(), data, b"\nendstream"].concat();
+    let unicode = b"/CIDInit /ProcSet findresource begin 12 dict begin begincmap /CMapName /U def\n1 begincodespacerange <00> <FF> endcodespacerange\n1 beginbfchar <41> <0041> endbfchar\nendcmap CMapName currentdict /CMap defineresource pop end end";
+    assembled(&[
+        b"<</Type/Catalog/Pages 2 0 R>>".to_vec(),
+        b"<</Type/Pages/Kids[3 0 R]/Count 1>>".to_vec(),
+        b"<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]/Resources<</Font<</F1 4 0 R>>>>/Contents 5 0 R>>".to_vec(),
+        b"<</Type/Font/Subtype/Type1/BaseFont/Helvetica/Encoding/WinAnsiEncoding/ToUnicode 6 0 R>>".to_vec(),
+        stream(b"BT /F1 24 Tf 72 700 Td (AB) Tj ET"),
+        stream(unicode),
+    ])
+}
+
+/// "AyB", where "x" and "y" share one glyph.
+fn shared_glyph_pdf() -> Vec<u8> {
+    let font = std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("fonts/GreatVibes-Regular.ttf")).expect("the font");
+    let stream = |dict: &str, data: &[u8]| [format!("<<{dict}/Length {}>>stream\n", data.len()).as_bytes(), data, b"\nendstream"].concat();
+    let unicode = b"/CIDInit /ProcSet findresource begin 12 dict begin begincmap /CMapName /U def\n1 begincodespacerange <0000> <FFFF> endcodespacerange\n4 beginbfchar <0001> <0041> <0002> <0078> <0003> <0079> <0004> <0042> endbfchar\nendcmap CMapName currentdict /CMap defineresource pop end end";
+    let gids: Vec<u8> = [0u16, 36, 16, 16, 37].iter().flat_map(|g| g.to_be_bytes()).collect();
+    let objects = [
+        b"<</Type/Catalog/Pages 2 0 R>>".to_vec(),
+        b"<</Type/Pages/Kids[3 0 R]/Count 1>>".to_vec(),
+        b"<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]/Resources<</Font<</F1 4 0 R>>>>/Contents 5 0 R>>".to_vec(),
+        b"<</Type/Font/Subtype/Type0/BaseFont/GreatVibes/Encoding/Identity-H/DescendantFonts[6 0 R]/ToUnicode 7 0 R>>".to_vec(),
+        stream("", b"BT /F1 24 Tf 72 700 Td <000100030004> Tj ET"),
+        b"<</Type/Font/Subtype/CIDFontType2/BaseFont/GreatVibes/CIDSystemInfo<</Registry(Adobe)/Ordering(Identity)/Supplement 0>>/FontDescriptor 8 0 R/CIDToGIDMap 9 0 R/DW 600>>".to_vec(),
+        stream("", unicode),
+        b"<</Type/FontDescriptor/FontName/GreatVibes/Flags 4/FontBBox[-200 -300 1200 1000]/ItalicAngle 0/Ascent 900/Descent -300/CapHeight 700/StemV 80/FontFile2 10 0 R>>".to_vec(),
+        stream("", &gids),
+        stream(&format!("/Length1 {}", font.len()), &font),
+    ];
+    assembled(&objects)
+}
+
+#[test]
+fn a_letter_that_shares_its_glyph_keeps_its_own_code() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let path = dir.path().join("shared.pdf");
+    std::fs::write(&path, shared_glyph_pdf()).expect("writes");
+    let mut worker = worker();
+    let mut doc = worker.open(&path).expect("opens").doc;
+    assert_eq!(page_text(&mut worker, doc), "AyB", "the sample reads as written");
+    let writing = rewrite(&mut worker, doc, 0, "ByA", "original");
+    assert!(matches!(worker.put_text(doc, 0, &writing, 0.0).expect("answers"), Wrote::Done(_)));
+    doc = worker.now(doc).expect("the state");
+    assert_eq!(page_text(&mut worker, doc), "ByA", "y stays y, not the glyph's other letter");
+}
+
+#[test]
+fn a_partial_to_unicode_falls_back_as_reading_does() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let path = dir.path().join("partial.pdf");
+    std::fs::write(&path, partial_unicode_pdf()).expect("writes");
+    let mut worker = worker();
+    let mut doc = worker.open(&path).expect("opens").doc;
+    assert_eq!(page_text(&mut worker, doc), "AB", "the sample reads as written");
+    let writing = rewrite(&mut worker, doc, 0, "BA", "original");
+    assert!(matches!(worker.put_text(doc, 0, &writing, 0.0).expect("answers"), Wrote::Done(_)), "B is in the font");
+    doc = worker.now(doc).expect("the state");
+    let out = dir.path().join("saved.pdf");
+    worker.save(doc, &out).expect("saves");
+    let doc = worker.open(&out).expect("reopens").doc;
+    assert_eq!(page_text(&mut worker, doc), "BA", "saved and read again");
+}
+
+#[test]
+fn a_dense_page_lists_its_blocks_in_one_pass() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let mut content = String::new();
+    for col in 0..10 {
+        for row in 0..100 {
+            content.push_str(&format!("BT /F1 2 Tf {} {} Td (Cell {col} {row}) Tj ET\n", 20 + col * 58, 780 - row * 7));
+        }
+    }
+    let font = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_string();
+    let path = dir.path().join("dense.pdf");
+    std::fs::write(&path, one_page("", " /Resources << /Font << /F1 5 0 R >> >>", &content, &[font])).expect("writes");
+    let mut worker = worker();
+    let doc = worker.open(&path).expect("opens").doc;
+    let started = std::time::Instant::now();
+    let blocks = worker.text_blocks(doc, 0).expect("blocks");
+    let took = started.elapsed();
+    assert_eq!((blocks.len(), blocks.iter().filter(|b| b.editable).count()), (1000, 1000));
+    // Per block took 1.5 s here; one pass 0.1 s.
+    assert!(took < std::time::Duration::from_millis(750), "{took:?}");
+}
+
+/// One page: `content`, font F1, and form Fm1 drawing `form`.
+fn layered(dir: &Path, content: &str, form: &str) -> (Worker, Doc) {
+    let objects = [
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_string(),
+        format!("<< /Type /XObject /Subtype /Form /BBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Length {} >>\nstream\n{form}\nendstream", form.len()),
+    ];
+    let page = " /Resources << /Font << /F1 5 0 R >> /XObject << /Fm1 6 0 R >> >>";
+    let path = dir.join("layered.pdf");
+    std::fs::write(&path, one_page("", page, content, &objects)).expect("writes");
+    let mut worker = worker();
+    let doc = worker.open(&path).expect("opens").doc;
+    (worker, doc)
+}
+
+fn editable(worker: &mut Worker, doc: Doc) -> Vec<(String, bool)> {
+    let blocks = worker.text_blocks(doc, 0).expect("blocks");
+    blocks.into_iter().map(|b| (b.text, b.editable)).collect()
+}
+
+#[test]
+fn turned_text_first_leaves_the_later_blocks_their_own_answer() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let content = "BT /F1 18 Tf 0 1 -1 0 50 500 Tm (ROTATED) Tj ET q 1 0 0 1 300 400 cm /Fm1 Do Q BT /F1 18 Tf 72 200 Td (OWN) Tj ET";
+    let (mut worker, doc) = layered(dir.path(), content, "BT /F1 12 Tf 0 10 Td (STAMP) Tj ET");
+    let mut got = editable(&mut worker, doc);
+    got.sort();
+    assert_eq!(got, [("OWN".into(), true), ("ROTATED".into(), false), ("STAMP".into(), false)]);
+}
+
+#[test]
+fn blocks_that_share_a_glyph_origin_each_count_it() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let content = "q /Fm1 Do Q BT /F1 18 Tf 72 300 Td (BREAK) Tj ET BT /F1 18 Tf 72 700 Td (AB) Tj ET";
+    let (mut worker, doc) = layered(dir.path(), content, "BT /F1 36 Tf 72 700 Td (AX) Tj ET");
+    let got = editable(&mut worker, doc);
+    assert!(got.contains(&("AB".into(), true)), "{got:?}");
+    assert!(got.contains(&("AX".into(), false)), "{got:?}");
 }

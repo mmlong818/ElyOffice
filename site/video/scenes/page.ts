@@ -5,7 +5,7 @@ import { ACCENT, model } from "../../src/model.ts";
 import { type Box, DESK, PAPER, SCREEN, SHEET, lamp, props, screens, tiles } from "./parts.ts";
 import { BAR, BEAT, glide, toward } from "./time.ts";
 import { DESK_END, type Moment, SEED, TURN, moment } from "./timeline.ts";
-import { montage, turnedBlock, turnedOrder } from "./turn.ts";
+import { film, montage, recording, turnedBlock, turnedOrder } from "./turn.ts";
 import { view } from "../opening/plan.ts";
 
 export const WIDTH = 1920;
@@ -166,14 +166,22 @@ const svg = document.querySelector<SVGSVGElement>("#frame");
 const world = document.querySelector<SVGGElement>("#world");
 if (!svg || !world) throw new Error("index.html lacks #frame or #world");
 
-function draw(m: Moment, cam: Camera) {
+/** Draws the moment; leaving slabs carry their recordings. */
+function draw(m: Moment, cam: Camera, f: number): Promise<void>[] {
   const page = mix(PAGE[0], PAGE[1], m.dark);
   document.body.style.background = page;
   svg!.style.background = page;
   world!.setAttribute("transform", `matrix(${cam.s} 0 0 ${cam.s} ${cam.x} ${cam.y})`);
+  const loads: Promise<void>[] = [];
   const groups = m.pieces.map(({ box, land, dark }) => {
     const toned = { ...box, tone: tone(box.tone, dark) };
     const g = m.angle ? turnedBlock(toned, m.angle) : block(toned);
+    const href = recording(box, land, f);
+    if (href) {
+      const { el, ready } = film(box, m.angle, href);
+      g.append(el);
+      loads.push(ready);
+    }
     if (tiles.includes(box)) g.classList.add("tile");
     if (land < 1) {
       g.setAttribute("transform", `translate(0 ${(-UNIT * (1 - land)).toFixed(3)})`);
@@ -189,6 +197,7 @@ function draw(m: Moment, cam: Camera) {
     const [day, dark] = el.dataset.soft === undefined ? INK : SOFT;
     el.style.color = mix(day, dark, m.dark);
   }
+  return loads;
 }
 
 /** Texts another layer draws instead. */
@@ -202,7 +211,7 @@ export interface Face {
 }
 
 /** Draws global frame `f` of `scene`; plates return the face. */
-function render(name: string, f: number): Face | null {
+async function render(name: string, f: number): Promise<Face | null> {
   const scene = scenes.find((s) => s.name === name);
   if (!scene) throw new Error(`no scene ${name}`);
   const [first, end] = frames(scene);
@@ -212,7 +221,8 @@ function render(name: string, f: number): Face | null {
   const beat = scene.from * 4;
   const m = moment(t, app ? { app, beat: beat + 1 } : undefined);
   const { cam, flat } = app ? push(app, t, beat) : { cam: camera(t), flat: 0 };
-  draw(m, cam);
+  await Promise.all(draw(m, cam, f));
+  await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
   if (!app) return null;
   const piece = m.pieces.find((p) => p.box === screens[app]);
   if (!piece) return { opacity: 0, flat, corners: [] };

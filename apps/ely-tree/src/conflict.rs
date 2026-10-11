@@ -215,10 +215,12 @@ impl Tree {
         };
         let result = self.merge_editor.read(cx).text().to_string();
         let open = merging.takes.iter().filter(|taken| taken.is_none()).count();
+        if merging.takes.get(at).copied().flatten().is_some() {
+            let words = text(cx, "tree.conflict.taken", &[]);
+            return self.toast(words, Severity::Warning, cx);
+        }
         // Hand edits that moved the markers end block choices.
-        if merging.takes.get(at).copied().flatten().is_some()
-            || conflicts(&result, merging.size()).len() != open
-        {
+        if conflicts(&result, merging.size()).len() != open {
             let words = text(cx, "tree.conflict.hand", &[]);
             return self.toast(words, Severity::Warning, cx);
         }

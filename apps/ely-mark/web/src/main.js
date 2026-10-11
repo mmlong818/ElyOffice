@@ -17,6 +17,8 @@ let pending = null
 let current = null
 // A mode asked for while an editor builds.
 let asked = null
+// The text no editor could show; a mode retries it.
+let broken = null
 // A place to show once the editor is built.
 let revealing = null
 // The search in force, kept across modes.
@@ -43,6 +45,9 @@ function flush() {
   pending = null
 }
 
+/** A link the user opens; the app decides. */
+const linked = (href) => tell({ kind: 'link', generation, href })
+
 /** The shown editor's headings, for the app's outline. */
 function outline() {
   if (current) tell({ kind: 'outline', generation, items: current.outline() })
@@ -64,11 +69,21 @@ function changed(text) {
   revised(text)
 }
 
-/** An editor for `mode`; visual falls back to source. */
+/** An editor for `mode`; a failed one leaves no holder. */
 async function build(text, mode) {
   const holder = document.createElement('div')
   holder.hidden = true
   document.getElementById('document').append(holder)
+  try {
+    return await fill(holder, text, mode)
+  } catch (error) {
+    holder.remove()
+    throw error
+  }
+}
+
+/** Builds in `holder`; visual falls back to source. */
+async function fill(holder, text, mode) {
   const entry = { mode, holder, fallback: false }
   if (mode !== 'source') {
     const [front, body] = split(text)
@@ -81,7 +96,13 @@ async function build(text, mode) {
     const place = document.createElement('div')
     holder.append(place)
     const edited = (write) => changed(() => front + write())
-    const made = await visual(place, body, mode === 'visual', texts, edited, edge)
+    let made
+    try {
+      made = await visual(place, body, mode === 'visual', texts, edited, edge, linked)
+    } catch (error) {
+      // A broken editor falls back to source and says so.
+      entry.broke = error.name
+    }
     if (made) {
       // Lines count from the file's top, front matter included.
       const above = front ? front.split('\n').length - 1 : 0
@@ -117,15 +138,27 @@ function drop(entry) {
 async function show(text, want) {
   const turn = ++latest
   asked = null
+  broken = null
   if (current) drop(current)
   current = null
-  const entry = await build(text, want)
+  let entry
+  try {
+    entry = await build(text, want)
+  } catch (error) {
+    if (turn !== latest) return
+    // Source failed too: tell the app, keep the text.
+    broken = text
+    tell({ kind: 'failed', generation, what: error.name })
+    const next = asked
+    asked = null
+    return next && mode(next)
+  }
   if (turn !== latest) return drop(entry)
   current = entry
   entry.holder.hidden = false
   document.getElementById('document').dataset.mode = entry.mode
   entry.focus()
-  await ask({ kind: 'shown', mode: entry.mode, fallback: entry.fallback })
+  await ask({ kind: 'shown', mode: entry.mode, fallback: entry.fallback, broke: entry.broke ?? null })
   // A newer request owns what is queued now.
   if (turn !== latest) return
   outline()
@@ -176,10 +209,12 @@ async function open(text, want, words, load, folder, place) {
 }
 
 /** Changed on disk: the caret and scroll stay near. */
-async function refresh(text) {
+async function refresh(text, load) {
   const place = current && { ...current.where(), scroll: document.scrollingElement.scrollTop }
   clearTimeout(timer)
   pending = null
+  generation = load
+  version = 0
   times = [text]
   at = 0
   await show(text, current?.mode ?? 'visual')
@@ -215,6 +250,7 @@ window.addEventListener('scroll', placed, { passive: true })
 /** Another mode for the same text; edits are sent first. */
 function mode(next) {
   if (!current) {
+    if (broken !== null) return show(broken, next)
     asked = next
     return
   }
@@ -243,7 +279,8 @@ function reveal(place) {
   }
   const shown =
     'heading' in place ? current.heading(place.heading) : current.line(place.line, place.query)
-  if (shown === false) console.warn(`ely: nothing at ${JSON.stringify(place)}`)
+  // The app logs a line number, never the query.
+  if (shown === false) tell({ kind: 'missed', generation, line: place.line ?? null })
 }
 
 /** The app's find box hears where the search stands. */

@@ -35,6 +35,10 @@ pub(crate) fn window<'a>(
     cx.update(|cx| {
         ely_ui::settings::install_defaults(cx);
         ely_ui::i18n::install(cx);
+        // As tool_root does: menus before the window.
+        let menus = crate::menu::menus(cx);
+        let menus = ely_ui::commands::menus(ely_platform::AppId::Tree, &ely_ui::commands::OPENING, false, menus, cx);
+        cx.set_menus(menus);
     });
     let recent = data.join("recent.json");
     cx.add_window_view(move |window, cx| Tree::new(recent, window, cx))
@@ -97,7 +101,7 @@ fn one_tab_per_repository_and_reopening_selects_it() {
     let recent = cx.update(|_, app| tree.read(app).recent.clone());
     assert_eq!(
         recent[0],
-        std::fs::canonicalize(&first).expect("real"),
+        dunce::canonicalize(&first).expect("real"),
         "newest first"
     );
     cx.update(|_, app| tree.update(app, |tree, cx| tree.close_active(cx)));
@@ -319,4 +323,154 @@ fn a_commit_from_the_box_shows_in_history_with_its_files() {
         )
     };
     settle(cx, file);
+}
+
+#[test]
+fn any_new_pick_leaves_a_file_history() {
+    use crate::tree::Side;
+    use ely_gpui_component::git::ChangeSection;
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let root = committed(dir.path());
+    let mut cx = TestAppContext::single();
+    let (tree, cx) = window(&mut cx, dir.path());
+    cx.update(|_, app| tree.update(app, |tree, cx| tree.open_path(root.clone(), cx)));
+    settle(cx, |app| branch(tree.read(app)).is_some());
+    let head = sh(&root, &["rev-parse", "HEAD"]).trim().to_string();
+    let looking = |cx: &mut VisualTestContext| cx.update(|_, app| tree.read(app).look.is_some());
+    type Pick = Box<dyn Fn(&mut Tree, &mut gpui::Context<Tree>)>;
+    let picks: [(&str, Pick); 5] = [
+        (
+            "a tab",
+            Box::new(|tree, cx| tree.set_side(Side::Branches, cx)),
+        ),
+        (
+            "a commit",
+            Box::new(move |tree, cx| tree.pick_commit(&head, cx)),
+        ),
+        (
+            "a file",
+            Box::new(|tree, cx| tree.show("a.txt", ChangeSection::Unstaged, cx)),
+        ),
+        (
+            "a branch",
+            Box::new(|tree, cx| tree.pick_ref(crate::branches::Kind::Local, "main".into(), cx)),
+        ),
+        (
+            "a remote",
+            Box::new(|tree, cx| tree.pick_place(crate::places::Place::Remote("origin".into()), cx)),
+        ),
+    ];
+    for (what, pick) in picks {
+        cx.update(|_, app| tree.update(app, |tree, cx| tree.file_log("a.txt", cx)));
+        assert!(looking(cx), "the history opens");
+        cx.update(|_, app| tree.update(app, |tree, cx| pick(tree, cx)));
+        assert!(!looking(cx), "{what} leaves the history");
+    }
+}
+
+#[test]
+fn a_result_that_did_not_save_says_so() {
+    use crate::work::Write;
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let root = committed(dir.path());
+    let mut cx = TestAppContext::single();
+    let (tree, cx) = window(&mut cx, dir.path());
+    // The window's toasts live on its root.
+    let shell = cx.update(|window, app| {
+        let shell = ely_ui::tool_root(
+            ely_platform::AppId::Tree,
+            tree.clone().into(),
+            Vec::new(),
+            window,
+            app,
+        );
+        tree.update(app, |tree, _| tree.root = shell.downgrade());
+        shell
+    });
+    cx.update(|_, app| tree.update(app, |tree, cx| tree.open_path(root.clone(), cx)));
+    settle(cx, |app| branch(tree.read(app)).is_some());
+    let id = cx.update(|_, app| tree.read(app).active().expect("open").id);
+    let save = Write::Save {
+        path: "a.txt".into(),
+        text: "merged".into(),
+    };
+    cx.update(|_, app| {
+        tree.update(app, |tree, cx| {
+            tree.written(
+                id,
+                &save,
+                Err(std::io::Error::other("disk full")),
+                false,
+                cx,
+            )
+        })
+    });
+    let want =
+        cx.update(|_, app| ely_ui::i18n::text(app, "tree.error.save", &[("error", "disk full")]));
+    let toasts = cx.update(|_, app| shell.read(app).toasts(app));
+    assert!(toasts.iter().any(|(text, _)| *text == want), "{toasts:?}");
+}
+
+#[test]
+fn unstaging_right_after_a_first_commit_deletes_nothing() {
+    use crate::work::Write;
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let root = dir.path().join("new");
+    crate::repo::init(&super::git(), &root).expect("init");
+    std::fs::write(root.join("a.txt"), "one\n").expect("writes");
+    sh(&root, &["add", "a.txt"]);
+    let mut cx = TestAppContext::single();
+    let (tree, cx) = window(&mut cx, dir.path());
+    cx.update(|_, app| tree.update(app, |tree, cx| tree.open_path(root.clone(), cx)));
+    settle(cx, |app| {
+        tree.read(app)
+            .active()
+            .is_some_and(|opened| matches!(opened.status, Some(Ok(_))))
+    });
+    let id = cx.update(|_, app| tree.read(app).active().expect("open").id);
+    // Committed outside; the status has not read it yet.
+    sh(&root, &["commit", "-qm", "first"]);
+    cx.update(|_, app| tree.update(app, |tree, cx| tree.write(id, Write::UnstageAll, cx)));
+    settle(cx, |app| {
+        tree.read(app)
+            .active()
+            .is_some_and(|opened| !opened.writing && opened.writes.is_empty())
+    });
+    assert_eq!(
+        sh(&root, &["status", "--porcelain"]),
+        "",
+        "nothing staged for deletion"
+    );
+}
+
+#[test]
+fn the_repository_menu_offers_only_what_this_platform_builds() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let mut cx = TestAppContext::single();
+    let (_tree, cx) = window(&mut cx, dir.path());
+    let names = cx.update(|_, app| {
+        crate::menu::menus(app)[0]
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                gpui::MenuItem::Action { name, .. } => Some(name.to_string()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    });
+    let mut said = |key: &str| cx.update(|_, app| ely_ui::i18n::text(app, key, &[]).to_string());
+    let (terminal, reveal, clone) = (
+        said("tree.tool.terminal"),
+        said(crate::tools::REVEAL),
+        said("tree.clone"),
+    );
+    assert_eq!(
+        names.contains(&terminal),
+        crate::tools::TERMINAL,
+        "{names:?}"
+    );
+    assert!(
+        names.contains(&reveal) && names.contains(&clone),
+        "{names:?}"
+    );
 }

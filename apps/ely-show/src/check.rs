@@ -108,6 +108,21 @@ pub fn findings(check: &Check, slides: &[ShowSlide], missing_fonts: &[String]) -
 }
 
 impl Deck {
+    /// Shows a finding's slide; master view numbers masters instead.
+    pub(crate) fn go_to_finding(&mut self, part: usize, cx: &mut Context<Self>) {
+        let Some(tab) = self.active_tab() else {
+            return;
+        };
+        if tab.extra.masters {
+            let text = Deck::text(cx, "show.masters.busy", &[]);
+            return self.toast(text, Severity::Warning, cx);
+        }
+        let view = tab.view.clone();
+        view.update(cx, |view, _| view.show_part(part));
+        self.dialog = None;
+        cx.notify();
+    }
+
     /// Reads every slide and master, then lists what to fix.
     pub fn check_show(&mut self, cx: &mut Context<Self>) {
         let Some(tab) = self.active_tab() else {
@@ -128,8 +143,8 @@ impl Deck {
                 Ok((check, slides)) if deck.dialog_due(asked, id) => {
                     let found = findings(&check, &slides, &missing);
                     log::info!("show: the check found {} things", found.len());
-                    deck.dialog = Some(Dialog::Check(found));
-                    cx.notify();
+                    // Refused while another dialog is open; it says so.
+                    let _ = deck.open_dialog(Dialog::Check(found), cx);
                 }
                 Ok(_) => log::info!("show: the check is no longer due"),
                 Err(error) => deck.engine_failed(&format!("the check: {error}"), cx),
@@ -183,14 +198,9 @@ impl Deck {
         let firsts: Vec<Option<usize>> = found.iter().map(|f| f.slides.first().copied()).collect();
         let list = list.on_change(move |keys, _, cx| {
             let first = keys.first().and_then(|key| key.parse::<usize>().ok()).and_then(|at| firsts[at]);
-            this.update(cx, |deck, cx| {
-                if let (Some(part), Some(tab)) = (first, deck.active_tab()) {
-                    let view = tab.view.clone();
-                    view.update(cx, |view, _| view.show_part(part));
-                    deck.dialog = None;
-                }
-                cx.notify();
-            })
+            if let Some(part) = first {
+                this.update(cx, |deck, cx| deck.go_to_finding(part, cx));
+            }
         });
         card.child(list).into_any_element()
     }

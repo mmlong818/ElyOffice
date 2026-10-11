@@ -30,14 +30,25 @@ fn identity(path: &Path) -> io::Result<PathBuf> {
 pub trait Saving: Host {
     /// The tab whose source file is `target`.
     fn holder(&self, target: &Path) -> io::Result<Option<u64>> {
+        // Target errors stand; a tab's gone volume does not.
+        let target = identity(target)?;
         for tab in &self.core().tabs {
-            if let Some(open) = tab.session.path()
-                && ely_files::same_file(open, target)?
-            {
-                return Ok(Some(tab.id));
+            let Some(open) = tab.session.path() else { continue };
+            match ely_files::same_file(open, &target) {
+                Ok(true) => return Ok(Some(tab.id)),
+                Ok(false) => {}
+                Err(error) => log::warn!("office: tab {} has no file to compare: {error}", tab.id),
             }
         }
         Ok(None)
+    }
+
+    /// A save as refused unwritten; a waiting close stops.
+    fn refuse_save(&mut self, then: &Option<After>, words: gpui::SharedString, cx: &mut Context<Self>) {
+        self.toast(words, Severity::Danger, cx);
+        if then.is_some() {
+            self.close_stopped(cx);
+        }
     }
 
     /// Saves in place in its own format.
@@ -190,7 +201,7 @@ pub trait Saving: Host {
                 }
                 // No save: a close that waited on it stops.
                 if then.is_some() {
-                    host.close_cancelled(cx);
+                    host.close_stopped(cx);
                 }
             })
         })
@@ -216,25 +227,29 @@ pub trait Saving: Host {
                 host.write_as(id, path, then, window, cx)
             });
         }
+        let name = self.tab(id).map(|tab| tab.name.clone()).unwrap_or_default();
+        let unsaved = |error: io::Error, cx: &mut Context<Self>| {
+            text(cx, "office.error.save", &[("name", &name), ("error", &error.to_string())])
+        };
         let target = match identity(&path) {
             Ok(target) => target,
-            Err(error) => return self.report(id, Err(SaveError::Io(error)), cx),
+            Err(error) => return self.refuse_save(&then, unsaved(error, cx), cx),
         };
         let Some(format) = files::save_as_format(&Self::KIND, &target) else {
             let formats = Self::KIND.save_as.join(", .");
             let text = text(cx, "office.error.format", &[("formats", &formats)]);
-            return self.toast(text, Severity::Danger, cx);
+            return self.refuse_save(&then, text, cx);
         };
         let Some(tab) = self.tab(id) else {
             return log::info!("office: tab {id} closed before its save");
         };
         let holder = match self.holder(&target) {
             Ok(holder) => holder,
-            Err(error) => return self.report(id, Err(SaveError::Io(error)), cx),
+            Err(error) => return self.refuse_save(&then, unsaved(error, cx), cx),
         };
         if holder.is_some_and(|other| other != id) {
             let text = text(cx, "office.error.taken", &[("name", &file_name(&target))]);
-            return self.toast(text, Severity::Danger, cx);
+            return self.refuse_save(&then, text, cx);
         }
         let own_format = tab
             .session
@@ -242,7 +257,7 @@ pub trait Saving: Host {
             .and_then(|open| files::kept_format(&Self::KIND, open).ok());
         if holder == Some(id) && (tab.risk.is_some() || own_format != Some(format)) {
             let text = text(cx, "office.error.convert", &[]);
-            return self.toast(text, Severity::Danger, cx);
+            return self.refuse_save(&then, text, cx);
         }
         // The written file differs from the open one; reopen it.
         let reopen =
@@ -419,7 +434,7 @@ pub trait Saving: Host {
             failed => {
                 self.report(id, failed, cx);
                 if then.is_some() {
-                    self.close_cancelled(cx);
+                    self.close_stopped(cx);
                 }
             }
         }

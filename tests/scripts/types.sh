@@ -10,7 +10,7 @@ fail() {
 }
 count=0
 for slug in $(cut -f1 "$types" | sort -u); do
-  desktop=$("$root/packaging/linux/appimage.sh" --desktop "$slug")
+  desktop=$("$root/packaging/linux/package.sh" --desktop "$slug")
   windows=$("$root/packaging/windows/types.sh" "$slug")
   rows=$(awk -F'\t' -v slug="$slug" '$1 == slug' "$types")
   while IFS=$'\t' read -r _ ext mime; do

@@ -37,6 +37,8 @@ struct Waiting {
     kept: Kept,
     real: Option<PathBuf>,
     text: Option<(String, SystemTime)>,
+    /// The untitled tab made for it, once made.
+    tab: Option<u64>,
 }
 
 /// The session's files and what still waits to restore.
@@ -97,6 +99,7 @@ impl Keeping {
                         },
                         real: Some(real),
                         text: None,
+                        tab: None,
                     }),
                     Err(error) => {
                         log::warn!("mark: a kept file does not open: {error}");
@@ -111,6 +114,7 @@ impl Keeping {
                     kept,
                     real: None,
                     text,
+                    tab: None,
                 });
             }
         }
@@ -132,13 +136,33 @@ impl Keeping {
         Ok((keeping, paths, missing))
     }
 
-    /// The untitled tabs to make, with their names.
-    pub fn untitled(&self) -> Vec<String> {
-        let untitled = self
-            .waiting
-            .iter()
-            .filter(|waiting| waiting.kept.path.is_none());
-        untitled.map(|waiting| waiting.kept.name.clone()).collect()
+    /// The untitled tabs to make: their place here and name.
+    pub fn untitled(&self) -> Vec<(usize, String)> {
+        let waiting = self.waiting.iter().enumerate();
+        let untitled = waiting.filter(|(_, waiting)| waiting.kept.path.is_none() && waiting.tab.is_none());
+        untitled.map(|(at, waiting)| (at, waiting.kept.name.clone())).collect()
+    }
+
+    /// Entry `at` belongs to untitled tab `tab`.
+    pub fn made(&mut self, at: usize, tab: u64) {
+        self.waiting[at].tab = Some(tab);
+    }
+
+    /// What tab `id` takes: its file or its copy.
+    fn take(&mut self, real: Option<&PathBuf>, id: u64) -> Option<Waiting> {
+        let at = self.waiting.iter().position(|waiting| match (&waiting.real, real) {
+            (Some(kept), Some(open)) => kept == open,
+            (None, None) => waiting.tab == Some(id),
+            _ => false,
+        })?;
+        Some(self.waiting.remove(at))
+    }
+
+    /// An end that never asked: the lock and points stay.
+    pub fn hold(&mut self) {
+        if self.crash.take().is_some() {
+            log::warn!("mark: the session ends unasked; its points stay");
+        }
     }
 
     /// A clean end: no crash next time, no stale points.
@@ -190,21 +214,12 @@ impl Desk {
             .session
             .path()
             .and_then(|path| std::fs::canonicalize(path).ok());
-        let untitled = tab.session.path().is_none();
-        let waiting = &mut self.keeping.waiting;
-        let Some(at) = waiting
-            .iter()
-            .position(|waiting| match (&waiting.real, &real) {
-                (Some(kept), Some(open)) => kept == open,
-                (None, None) => untitled,
-                _ => false,
-            })
+        let Some(Waiting {
+            kept, text: back, ..
+        }) = self.keeping.take(real.as_ref(), id)
         else {
             return;
         };
-        let Waiting {
-            kept, text: back, ..
-        } = waiting.remove(at);
         let mode = Mode::parse(&kept.mode).unwrap_or(Mode::Visual);
         log::info!("mark: restores tab {id} as {}", mode.name());
         let tab = self.tab_mut(id).expect("open");
@@ -391,5 +406,57 @@ mod tests {
         .expect("an older place reads");
         let place = kept.place.expect("a place");
         assert_eq!((place.line, place.column), (3, 0));
+    }
+
+    #[test]
+    fn each_untitled_copy_goes_to_the_tab_made_for_it() {
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let kept = |name: &str, mode: &str, slot: &str| super::Kept {
+            path: None,
+            name: name.into(),
+            mode: mode.into(),
+            place: Some(super::Place { line: slot.len() as u64, column: 1, scroll: 0.0 }),
+            slot: slot.into(),
+        };
+        let tabs = vec![kept("Untitled1", "visual", "a"), kept("Untitled2", "source", "bb")];
+        for (slot, text) in [("a", "first"), ("bb", "second")] {
+            let mut points = super::Recovery::new(super::recovery(dir.path(), slot));
+            points.write_once(text.as_bytes(), None, std::time::SystemTime::now()).expect("a point");
+        }
+        let saved = serde_json::to_vec(&super::Saved { tabs: tabs.clone() }).expect("a list");
+        std::fs::write(dir.path().join("session.json"), saved).expect("the list");
+        // A pid no process has: the last run crashed.
+        std::fs::write(dir.path().join("session.lock"), "open 4294967295").expect("a lock");
+        let (mut keeping, ..) = super::Keeping::start(dir.path()).expect("a session");
+        let made: Vec<_> = keeping.untitled();
+        assert_eq!(made, [(0, "Untitled1".to_string()), (1, "Untitled2".to_string())]);
+        for (at, _) in made {
+            keeping.made(at, 10 + at as u64);
+        }
+        assert!(keeping.take(None, 12).is_none(), "a new tab takes nothing");
+        // The second tab shows first: each still takes its own.
+        for (id, want, text) in [(11, &tabs[1], "second"), (10, &tabs[0], "first")] {
+            let got = keeping.take(None, id).expect("its copy");
+            assert_eq!((&got.kept, got.text.map(|(text, _)| text)), (want, Some(text.to_string())));
+        }
+    }
+
+    #[test]
+    fn an_unasked_end_keeps_the_lock_and_points_past_release() {
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let point = dir.path().join("recovery/s/point");
+        let (lock, slot) = (dir.path().join("session.lock"), point.parent().expect("a slot"));
+        let (mut held, ..) = super::Keeping::start(dir.path()).expect("a session");
+        std::fs::create_dir_all(slot).expect("a slot");
+        std::fs::write(&point, "unsaved").expect("a point");
+        held.hold();
+        held.close();
+        assert!(lock.exists() && point.exists(), "release after quit wiped them");
+        drop(held);
+        let (mut clean, ..) = super::Keeping::start(dir.path()).expect("a session");
+        std::fs::create_dir_all(slot).expect("a slot");
+        std::fs::write(&point, "unsaved").expect("a point");
+        clean.close();
+        assert!(!lock.exists() && !point.exists(), "a clean end clears");
     }
 }

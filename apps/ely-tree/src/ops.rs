@@ -10,6 +10,8 @@ pub enum Op {
     Rebase,
     CherryPick,
     Revert,
+    /// `git am`, applying mailed patches.
+    Am,
 }
 
 impl Op {
@@ -20,6 +22,7 @@ impl Op {
             Op::Rebase => "rebase",
             Op::CherryPick => "cherry-pick",
             Op::Revert => "revert",
+            Op::Am => "am",
         }
     }
 
@@ -78,7 +81,18 @@ pub fn doing(git: &Git, root: &Path, git_dir: &Path) -> io::Result<Option<Doing>
     let read = |name: &str| {
         std::fs::read_to_string(git_dir.join(name)).map(|text| text.trim().to_string())
     };
-    let doing = if has("rebase-merge") || has("rebase-apply") {
+    // `git am` keeps rebase-apply too, without an onto.
+    let doing = if has("rebase-apply/applying") {
+        Doing {
+            op: Op::Am,
+            ours: head(git, root)?,
+            theirs: format!(
+                "{}/{}",
+                read("rebase-apply/next")?,
+                read("rebase-apply/last")?
+            ),
+        }
+    } else if has("rebase-merge") || has("rebase-apply") {
         let dir = if has("rebase-merge") {
             "rebase-merge"
         } else {

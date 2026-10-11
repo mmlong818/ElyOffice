@@ -53,7 +53,9 @@ pub struct Desk {
     pub keeping: crate::restore::Keeping,
     /// The export dialog's choice, while it is open.
     pub output: Option<crate::export::Output>,
-    pub printing: Option<crate::export::Printing>,
+    /// Pages printing to PDF, by job; several may run.
+    pub printing: HashMap<u64, crate::export::Printing>,
+    pub print_jobs: u64,
     pub look: crate::look::Look,
     pub look_file: PathBuf,
     /// Git's word on the shown file, and which tab asked.
@@ -79,6 +81,11 @@ impl Host for Desk {
 
     fn core_mut(&mut self) -> &mut Core<Self> {
         &mut self.core
+    }
+
+    /// A quit records the open tabs first.
+    fn quitting(&mut self, cx: &mut Context<Self>) {
+        self.leave(cx);
     }
 
     /// A quit or close stopped: the kept list follows again.
@@ -108,7 +115,7 @@ impl Host for Desk {
         self.watch_folders(cx);
         let look = serde_json::to_value(&self.look).expect("a look serializes");
         view.update(cx, |view, cx| view.set_look(look, cx));
-        let changed = view.read(cx).changed;
+        let changed = view.read(cx).changed();
         self.autosave(id, changed, cx);
         let recheck = self.tab_mut(id).is_some_and(|tab| {
             if !tab.dirty(cx) {
@@ -195,7 +202,8 @@ pub fn open(app: AppId, window: &mut Window, cx: &mut App) -> Entity<Root> {
             comparing: None,
             keeping,
             output: None,
-            printing: None,
+            printing: Default::default(),
+            print_jobs: 0,
             look: look.clone(),
             look_file,
             tracked: None,
@@ -215,7 +223,7 @@ pub fn open(app: AppId, window: &mut Window, cx: &mut App) -> Entity<Root> {
     let asked = ely_ui::launch_files(cx);
     desk.update(cx, |desk, cx| {
         desk.core.root = root.downgrade();
-        desk.core.window = Some(window.window_handle());
+        desk.own_window(window, cx);
         window.focus(&desk.core.focus, cx);
         // Launch files stand alone; unsaved text still returns.
         if asked.is_empty() {
@@ -223,8 +231,13 @@ pub fn open(app: AppId, window: &mut Window, cx: &mut App) -> Entity<Root> {
                 desk.open_path(path, cx);
             }
         }
-        for name in desk.keeping.untitled() {
+        for (at, name) in desk.keeping.untitled() {
+            // Tab numbers come from `next` as the load starts.
+            let id = desk.core.next;
             desk.new_from_text(&name, "", cx);
+            if desk.core.next > id {
+                desk.keeping.made(at, id);
+            }
         }
         for path in asked {
             desk.open_path(path, cx);
@@ -241,8 +254,13 @@ pub fn open(app: AppId, window: &mut Window, cx: &mut App) -> Entity<Root> {
             }
         })
         .detach();
-        cx.on_app_quit(|desk, _| {
-            desk.keeping.close();
+        cx.on_app_quit(|desk, cx| {
+            // A system end skips asking: unsaved tabs keep points.
+            if desk.core.tabs.iter().any(|tab| tab.dirty(cx)) {
+                desk.keeping.hold();
+            } else {
+                desk.keeping.close();
+            }
             async {}
         })
         .detach();
@@ -403,10 +421,6 @@ impl Render for Desk {
             .on_action(cx.listener(Self::on_export))
             .on_action(cx.listener(Self::on_print))
             .on_action(cx.listener(Self::on_close_tab))
-            .on_action(cx.listener(|desk, quit, window, cx| {
-                desk.leave(cx);
-                desk.on_quit(quit, window, cx)
-            }))
             .on_action(cx.listener(|desk, _: &InsertTable, _, cx| desk.table("insert", cx)))
             .on_action(cx.listener(|desk, _: &RowAbove, _, cx| desk.table("row-above", cx)))
             .on_action(cx.listener(|desk, _: &RowBelow, _, cx| desk.table("row-below", cx)))

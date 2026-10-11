@@ -25,6 +25,10 @@ fn beside(exe: &Path, app: AppId) -> Vec<PathBuf> {
     if let Some(suite) = dir.parent() {
         places.push(suite.join(app.name()).join(&file));
     }
+    // Linux packages: /opt/ely-office/<slug>/bin.
+    if let Some(opt) = dir.parent().and_then(Path::parent) {
+        places.push(opt.join(app.slug()).join("bin").join(&file));
+    }
     places
 }
 
@@ -126,7 +130,7 @@ pub fn open_default(path: &Path) -> io::Result<()> {
     } else {
         Command::new("xdg-open")
     };
-    let out = command.arg(path).output()?;
+    let out = ely_ipc::windowless(&mut command).arg(path).output()?;
     if !out.status.success() {
         let said = String::from_utf8_lossy(&out.stderr).trim().to_owned();
         return Err(io::Error::other(said));
@@ -167,6 +171,10 @@ mod tests {
         let places = super::beside(Path::new("/Ely Office/ElyTree/ely-tree.exe"), AppId::Mark);
         assert!(places.contains(&PathBuf::from(format!(
             "/Ely Office/ElyMark/ely-mark{suffix}"
+        ))));
+        let places = super::beside(Path::new("/opt/ely-office/ely-tree/bin/ely-tree"), AppId::Mark);
+        assert!(places.contains(&PathBuf::from(format!(
+            "/opt/ely-office/ely-mark/bin/ely-mark{suffix}"
         ))));
     }
 }

@@ -5,22 +5,24 @@ members = ["apps/*", "crates/*"]
 exclude = ["engines", "reference"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.3"
 edition = "2024"
 rust-version = "1.95"
 license = "AGPL-3.0-or-later"
 publish = false
 
 [workspace.dependencies]
+embed-resource = "=3.0.11"
 csv = "1"
 encoding_rs = "0.8"
 jiff = "0.2"
 anyhow = "1"
 directories = "6"
-ely-gpui-component = { git = "https://github.com/ZacharyZhang-NY/Ely-GPUI-Components", rev = "69265b4fd4da888e2d8e1268021af4d358e67afb" }
+dunce = "1"
+ely-gpui-component = { git = "https://git.zacharyzhang.com/ZacharyZhang-NY/Ely-GPUI-Components", rev = "bd014707fd47cd9d0651a9af8c1db6033718a6ea" }
 env_logger = "0.11"
 gpui = { package = "gpui-pre", version = "=0.3.8", default-features = false, features = ["stacker"] }
-gpui_platform = { package = "gpui-pre-platform", version = "=0.3.8", features = ["font-kit"] }
+gpui_platform = { package = "gpui-pre-platform", version = "=0.3.8", features = ["font-kit", "wayland", "x11"] }
 futures = "0.3"
 libc = "0.2"
 log = "0.4"
@@ -40,7 +42,7 @@ serde_json = "1"
 sha2 = "0.10"
 tempfile = "3"
 ureq = "3"
-windows-sys = { version = "0.60", features = ["Win32_UI_WindowsAndMessaging", "Win32_Globalization", "Win32_Storage_FileSystem", "Win32_Security", "Win32_System_Threading", "Win32_System_IO", "Win32_System_JobObjects", "Win32_System_LibraryLoader", "Win32_System_Com", "Win32_UI_Shell", "Win32_Security_Authentication_Identity"] }
+windows-sys = { version = "0.60", features = ["Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi", "Win32_Globalization", "Win32_Storage_FileSystem", "Win32_Security", "Win32_System_Threading", "Win32_System_IO", "Win32_System_JobObjects", "Win32_System_LibraryLoader", "Win32_System_Com", "Win32_UI_Shell", "Win32_Security_Authentication_Identity"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["NSLocale", "NSPathUtilities", "NSString", "NSURL", "NSDictionary", "NSValue", "NSError", "NSRunLoop", "NSDate", "NSUserDefaults"] }
 objc2-av-foundation = { version = "0.3", default-features = false, features = ["std", "AVPlayer", "AVPlayerItem", "AVPlayerItemOutput", "AVAsset", "objc2-core-media", "objc2-core-video", "objc2-core-foundation"] }
 objc2-core-media = { version = "0.3", default-features = false, features = ["std", "CMTime"] }
@@ -64,3 +66,7 @@ ely-ui = { path = "crates/ely-ui" }
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
+
+[patch.crates-io]
+gpui-pre = { path = "vendor/gpui-pre" }
+gpui-pre-windows = { path = "vendor/gpui-pre-windows" }

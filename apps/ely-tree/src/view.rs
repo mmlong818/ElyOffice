@@ -97,21 +97,6 @@ impl Tree {
                 StatusBarItem::new("tree-path").label(opened.repo.root.display().to_string()),
             );
         }
-        if let Ok(git) = &self.git {
-            let key = if git.bundled {
-                "tree.git.bundled"
-            } else {
-                "tree.git.system"
-            };
-            bar = bar.right(StatusBarItem::new("tree-git").label(text(
-                cx,
-                key,
-                &[
-                    ("version", &git.version),
-                    ("path", &git.path.display().to_string()),
-                ],
-            )));
-        }
         bar
     }
 
@@ -168,16 +153,18 @@ impl Tree {
         }
         if let Some(cloning) = &self.cloning {
             let this = cx.weak_entity();
+            let title = text(cx, "tree.cloning", &[("name", &name(&cloning.into))]);
+            let state = EmptyState::new("tree-cloning", IconName::Download, title)
+                .body(cloning.said.clone());
+            if !crate::running::STOPS {
+                return state.into_any_element();
+            }
             let stop = Button::new("tree-clone-stop", text(cx, "tree.clone.stop", &[]))
                 .disabled(cloning.stopping)
                 .on_click(move |_, _, cx| {
                     this.update(cx, |tree, cx| tree.stop_clone(cx)).ok();
                 });
-            let title = text(cx, "tree.cloning", &[("name", &name(&cloning.into))]);
-            return EmptyState::new("tree-cloning", IconName::Download, title)
-                .body(cloning.said.clone())
-                .action(stop)
-                .into_any_element();
+            return state.action(stop).into_any_element();
         }
         let Some(opened) = self.active() else {
             return self.start_page(cx);
@@ -209,13 +196,7 @@ impl Tree {
                     .iter()
                     .filter(|entry| entry.state != State::Ignored)
                     .count();
-                let (icon, title) = match changed {
-                    0 => (IconName::CircleCheck, text(cx, "tree.clean", &[])),
-                    n => (
-                        IconName::GitBranch,
-                        text(cx, "tree.changed", &[("n", &n.to_string())]),
-                    ),
-                };
+                let (icon, title) = summary(changed, cx);
                 EmptyState::new(("tree-summary", opened.id), icon, title).into_any_element()
             }
         }
@@ -261,5 +242,27 @@ impl Render for Tree {
             )
             .child(shell)
             .children(self.dialog(cx))
+    }
+}
+
+/// The work tree's line: clean, or how many files changed.
+pub(crate) fn summary(changed: usize, cx: &App) -> (IconName, SharedString) {
+    match changed {
+        0 => (IconName::CircleCheck, text(cx, "tree.clean", &[])),
+        n => (IconName::GitBranch, ely_ui::i18n::counted(cx, "tree.changed", n as u64, &[("n", &n.to_string())])),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[gpui::test]
+    fn the_summary_counts_files_in_both_languages(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            ely_ui::i18n::install_as("en-US", cx);
+            let said = |n: usize, cx: &gpui::App| super::summary(n, cx).1.to_string();
+            assert_eq!([said(0, cx), said(1, cx), said(2, cx)], ["Nothing to commit", "1 file changed", "2 files changed"]);
+            ely_ui::i18n::install_as("zh-CN", cx);
+            assert_eq!([said(1, cx), said(2, cx)], ["1 个文件有改动", "2 个文件有改动"]);
+        });
     }
 }

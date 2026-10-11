@@ -4,6 +4,18 @@ mod relay;
 pub use relay::{Relay, relay};
 
 use std::io::{self, Read, Write};
+use std::process::Command;
+
+/// A child that opens no console window on Windows.
+pub fn windowless(command: &mut Command) -> &mut Command {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt as _;
+        // CREATE_NO_WINDOW
+        command.creation_flags(0x0800_0000);
+    }
+    command
+}
 
 /// A frame: u32 length, u8 tag, u64 request id, payload.
 pub const MAX_FRAME: usize = 64 * 1024 * 1024;

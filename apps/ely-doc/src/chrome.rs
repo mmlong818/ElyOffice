@@ -24,17 +24,18 @@ impl Docs {
         let Some(counts) = self.active_tab().and_then(|tab| tab.extra.counts) else {
             return status.when_some(zoom, |status, zoom| status.right(zoom));
         };
-        let (words, characters) = (counts.words.to_string(), counts.characters.to_string());
+        let count = |key, n: u64| ely_ui::i18n::counted(cx, key, n, &[("n", &n.to_string())]);
         let label = match counts.selected_words {
-            0 => Self::text(
-                cx,
-                "doc.count.words",
-                &[("words", &words), ("characters", &characters)],
-            ),
-            selected => Self::text(
+            0 => {
+                let words = count("doc.count.word", counts.words);
+                let characters = count("doc.count.character", counts.characters);
+                Self::text(cx, "doc.count.words", &[("words", &words), ("characters", &characters)])
+            }
+            selected => ely_ui::i18n::counted(
                 cx,
                 "doc.count.selected",
-                &[("selected", &selected.to_string()), ("words", &words)],
+                counts.words,
+                &[("selected", &selected.to_string()), ("words", &counts.words.to_string())],
             ),
         };
         status.right(StatusBarItem::new("doc-count").label(label)).when_some(zoom, |status, zoom| status.right(zoom))
@@ -79,7 +80,8 @@ impl Docs {
         let shown = self
             .active_tab()
             .map(|tab| (tab.view.clone(), tab.doc.clone()));
-        let tab = shown.as_ref().map(|(view, doc)| (view, doc));
+        // Hidden, it follows nothing: no reads on every move.
+        let tab = shown.as_ref().filter(|_| self.navigating).map(|(view, doc)| (view, doc));
         self.navigator
             .update(cx, |navigator, cx| navigator.show(tab, cx));
         shown.filter(|_| self.navigating)?;

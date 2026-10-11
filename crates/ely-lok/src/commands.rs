@@ -61,7 +61,7 @@ pub struct Command {
 
 /// Arguments that count things as a read saw them.
 const NUMBERED: &[&str] = &[
-    "Index", "nTabNumber", "TabNo", "Part", "Row", "Col", "Column", "StartColumn", "StartRow", "EndColumn", "EndRow",
+    "Index", "nTabNumber", "TabNo", "Part", "StartColumn", "StartRow", "EndColumn", "EndRow",
 ];
 
 impl Command {
@@ -306,7 +306,9 @@ mod tests {
         assert!(find("sheet.delete").expect("the row").addressed(&["1"]));
         assert!(!find("cell.enter").expect("the row").addressed(&["1"]));
         assert!(find("notes.set").expect("the row").addressed(&["text", "1"]), "a slide by number");
-        assert!(find("select.row").expect("the row").addressed(&["3", "0"]), "a row by number");
+        // Clicks renumber no row or column: never stale.
+        assert!(!find("select.row").expect("the row").addressed(&["3", "0"]), "a header row");
+        assert!(!find("columns.width").expect("the row").addressed(&["500", "2"]), "a column's width");
         assert!(!find("rows.height_selected").expect("the row").addressed(&["500"]), "a size names nothing");
     }
 

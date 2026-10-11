@@ -5,17 +5,20 @@ use std::path::{Path, PathBuf};
 use anyhow::{Result, bail};
 use ely_web_content::WebView;
 use gpui::App;
-use serde_json::json;
+use serde_json::{Value, json};
 
-/// The app's Resources, else this build's `engines/content`.
+use crate::view::Heading;
+
+/// Beside the app, its Resources, else this build's.
 pub fn content() -> Result<PathBuf> {
-    let exe_dir = std::env::current_exe()?.parent().map(Path::to_path_buf);
-    #[cfg(target_os = "macos")]
-    let bundled = exe_dir.and_then(|dir| Some(dir.parent()?.join("Resources/content")));
-    #[cfg(target_os = "windows")]
-    let bundled = exe_dir.map(|dir| dir.join("Resources/content/ely-mark"));
+    let exe = std::env::current_exe()?;
+    let dir = exe.parent().unwrap_or(Path::new("."));
     let built = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../engines/content/ely-mark");
-    for dir in bundled.into_iter().chain([built]) {
+    let mut candidates = vec![dir.join("content"), dir.join("../Resources/content")];
+    #[cfg(target_os = "windows")]
+    candidates.insert(0, dir.join("Resources/content/ely-mark"));
+    candidates.push(built);
+    for dir in candidates {
         if dir.join("index.html").is_file() {
             log::info!("mark: page from {}", dir.display());
             return Ok(dir);
@@ -77,6 +80,11 @@ pub fn open(
     ));
 }
 
+/// The disk's text in place; reports start a new generation.
+pub fn refresh(view: &WebView, markdown: &str, load: u64) {
+    view.run_js(&format!("ely.refresh({}, {load})", json!(markdown)));
+}
+
 /// The same text in another mode; pending edits go first.
 pub fn switch(view: &WebView, mode: Mode) {
     view.run_js(&format!("ely.mode('{}')", mode.name()));
@@ -91,4 +99,19 @@ pub fn folder(view: &WebView, folder: &Path) {
 /// Calls `ely.<name>(argument)` in the page.
 pub fn call(view: &WebView, name: &str, argument: &serde_json::Value) {
     view.run_js(&format!("ely.{name}({argument})"));
+}
+
+/// Headings from the page; anything malformed is None.
+pub fn headings(items: &Value) -> Option<Vec<Heading>> {
+    let heading = |item: &Value| {
+        let level = item["level"]
+            .as_u64()
+            .filter(|level| (1..=6).contains(level))?;
+        let title = item["title"].as_str()?.to_owned();
+        Some(Heading {
+            level: level as usize,
+            title,
+        })
+    };
+    items.as_array()?.iter().map(heading).collect()
 }

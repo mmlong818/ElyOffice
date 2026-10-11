@@ -145,3 +145,56 @@ fn a_click_on_media_finds_it_and_elsewhere_does_not() {
     assert_eq!(cx.update(|app| show.read(app).media_at(centre)), Some(0));
     assert_eq!(cx.update(|app| show.read(app).media_at((0.01, 0.01))), None);
 }
+
+#[test]
+fn a_second_start_says_the_show_is_busy() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let mut cx = TestAppContext::single();
+    let Some(deck) = blank(&mut cx, dir.path()) else {
+        eprintln!("SKIP: no LOK build");
+        return;
+    };
+    // The window's toasts live on its root.
+    let root = super::slides::in_window(&mut cx, &deck, |deck, window, cx| {
+        let this = cx.entity();
+        let root = ely_ui::document_root(ely_platform::AppId::Show, this.into(), &ely_ui::commands::FILE, Vec::new(), window, cx);
+        deck.core.root = root.downgrade();
+        root
+    });
+    update(&mut cx, &deck, |deck, cx| {
+        deck.show_starting = true;
+        deck.start_show(false, cx);
+    });
+    cx.run_until_parked();
+    let (toasts, busy) = cx.update(|app| (root.read(app).toasts(app), Deck::text(app, "show.play.busy", &[])));
+    assert!(toasts.iter().any(|(text, _)| *text == busy), "{toasts:?}");
+}
+
+#[test]
+fn a_start_left_for_another_tab_says_so() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let mut cx = TestAppContext::single();
+    let Some(deck) = blank(&mut cx, dir.path()) else {
+        eprintln!("SKIP: no LOK build");
+        return;
+    };
+    let first = cx.update(|app| deck.read(app).core.active.expect("a tab"));
+    update(&mut cx, &deck, |deck, cx| deck.new_blank(cx));
+    settle(&cx, |app| deck.read(app).core.tabs.len() == 2 && deck.read(app).core.active != Some(first));
+    let second = cx.update(|app| deck.read(app).core.active.expect("a tab"));
+    let root = super::slides::in_window(&mut cx, &deck, |deck, window, cx| {
+        let this = cx.entity();
+        let root = ely_ui::document_root(ely_platform::AppId::Show, this.into(), &ely_ui::commands::FILE, Vec::new(), window, cx);
+        deck.core.root = root.downgrade();
+        root
+    });
+    update(&mut cx, &deck, |deck, cx| {
+        deck.core.active = Some(first);
+        deck.start_show(false, cx);
+        // Another tab comes forward while the copy is read.
+        deck.core.active = Some(second);
+    });
+    let gone = cx.update(|app| Deck::text(app, "show.play.gone", &[]));
+    settle(&cx, |app| root.read(app).toasts(app).iter().any(|(text, _)| *text == gone));
+    assert!(cx.update(|app| !deck.read(app).show_starting && deck.read(app).show.is_none()));
+}

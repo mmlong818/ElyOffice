@@ -20,11 +20,16 @@ use windows_sys::Win32::{
     Foundation::{CloseHandle, HANDLE},
     System::JobObjects::{
         AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-        JOBOBJECT_BASIC_ACCOUNTING_INFORMATION, JOBOBJECT_BASIC_PROCESS_ID_LIST,
-        JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectBasicAccountingInformation,
-        JobObjectBasicProcessIdList, JobObjectExtendedLimitInformation, QueryInformationJobObject,
-        SetInformationJobObject, TerminateJobObject,
+        JOBOBJECT_BASIC_ACCOUNTING_INFORMATION,
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
+        JobObjectBasicAccountingInformation, QueryInformationJobObject, SetInformationJobObject,
+        TerminateJobObject,
     },
+};
+
+#[cfg(all(test, feature = "supervisor-test"))]
+use windows_sys::Win32::System::JobObjects::{
+    JOBOBJECT_BASIC_PROCESS_ID_LIST, JobObjectBasicProcessIdList,
 };
 
 pub(super) const BOOTSTRAP_ARG: &str = "--bootstrap-gate";

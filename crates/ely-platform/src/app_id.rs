@@ -65,7 +65,7 @@ mod tests {
     fn bundle_ids_match_the_packaging() {
         assert_eq!(Doc.bundle_id(), "ely.zacharyzhang.office.doc");
         let script = include_str!("../../../packaging/macos/bundle.sh");
-        assert!(script.contains("prefix=ely.zacharyzhang.office\n"));
+        assert!(script.lines().any(|line| line == "prefix=ely.zacharyzhang.office"));
         assert!(script.contains("<string>$prefix.${slug#ely-}</string>"));
     }
 

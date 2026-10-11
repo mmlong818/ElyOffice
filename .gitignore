@@ -1,8 +1,8 @@
 # Build output and downloads
 /target/
 /dist/
-/engines/
-/reference/
+/engines
+/reference
 node_modules/
 .DS_Store
 .ruff_cache/
@@ -16,3 +16,5 @@ node_modules/
 /docs/acceptance.md
 /docs/test-map.md
 /assets/papirus_icons-master.zip
+/Gitea.md
+/.work/

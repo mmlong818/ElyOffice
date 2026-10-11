@@ -55,6 +55,14 @@ pub struct Extra {
     pub restored: bool,
 }
 
+impl Extra {
+    /// Autosave from scratch; a write in flight no longer counts.
+    pub fn restart_autosave(&mut self) {
+        self.policy = PolicyEngine::new(Policy::MarkAutoSave, true);
+        self.writing = None;
+    }
+}
+
 impl Default for Extra {
     fn default() -> Self {
         Extra {
@@ -217,11 +225,22 @@ impl Desk {
             Ok(read) => read,
             Err(error) => return self.set_outside(id, Outside::Unread(error.to_string()), cx),
         };
+        // Keys the page has not sent yet count first.
+        if !self.settled(id, cx) {
+            return self.when_settled(id, move |desk, _, cx| desk.disk_read(id, path, Ok((fingerprint, disk)), cx));
+        }
         let current = tab.doc.lock().expect("the text lock").current.clone();
+        let kept = disk.text == tab.extra.base;
         let dirty = tab.dirty(cx);
         log::info!("mark: {} changed outside; unsaved {dirty}", path.display());
         match (disk.text == current, dirty) {
-            (true, _) | (false, false) => self.take_disk(id, disk, fingerprint, cx),
+            // The same text: only the file underneath is new.
+            (true, _) => {
+                self.adopt_disk(id, &disk, fingerprint, cx);
+            }
+            // The text as last saved: the edits stay unsaved.
+            (false, true) if kept => self.keep_edits(id, disk, fingerprint, cx),
+            (false, false) => self.take_disk(id, disk, fingerprint, cx),
             (false, true) => {
                 let tab = self.tab_mut(id).expect("open");
                 tab.session.external_modified();
@@ -247,14 +266,50 @@ impl Desk {
         fingerprint: Fingerprint,
         cx: &mut Context<Self>,
     ) {
+        if let Some(view) = self.adopt_disk(id, &disk, fingerprint, cx) {
+            view.update(cx, |view, cx| view.refresh(disk, cx));
+        }
+    }
+
+    /// A new file with the saved text; edits stay.
+    fn keep_edits(&mut self, id: u64, disk: Source, fingerprint: Fingerprint, cx: &mut Context<Self>) {
         let Some(tab) = self.tab_mut(id) else {
             return;
         };
+        tab.session.rebase(fingerprint);
+        tab.doc.lock().expect("the text lock").source = disk;
+        // A conflict stopped autosave, maybe mid-write; it resumes.
+        tab.extra.restart_autosave();
+        let (registry, path) = (tab.registry, tab.session.path().map(Path::to_path_buf));
+        if let (Some(registry), Some(path)) = (registry, path)
+            && let Err(error) = self.core.sessions.track(registry, &path)
+        {
+            log::warn!("mark: the replaced file did not register: {error}");
+        }
+        self.set_outside(id, Outside::Clear, cx);
+        self.save_after_pause(id, cx);
+    }
+
+    /// The tab and its view take the file as saved.
+    pub(crate) fn adopt_disk(
+        &mut self,
+        id: u64,
+        disk: &Source,
+        fingerprint: Fingerprint,
+        cx: &mut Context<Self>,
+    ) -> Option<gpui::Entity<crate::view::MarkView>> {
+        let tab = self.tab_mut(id)?;
         if let Err(error) = tab.session.reload_at(fingerprint) {
-            return self.set_outside(id, Outside::Unread(error.to_string()), cx);
+            self.set_outside(id, Outside::Unread(error.to_string()), cx);
+            return None;
         }
         tab.extra.base = disk.text.clone();
-        tab.extra.policy = PolicyEngine::new(Policy::MarkAutoSave, true);
+        // The file holds the disk's text: it is saved.
+        let saved = crate::engine::mark(&disk.text);
+        tab.mark = saved.clone();
+        tab.extra.restart_autosave();
+        // Its bytes (BOM, line ends) are what saves keep now.
+        tab.doc.lock().expect("the text lock").source = disk.clone();
         let (view, registry) = (tab.view.clone(), tab.registry);
         let path = tab.session.path().map(Path::to_path_buf);
         // An atomic replace is a new file underneath.
@@ -263,8 +318,9 @@ impl Desk {
         {
             log::warn!("mark: the replaced file did not register: {error}");
         }
-        view.update(cx, |view, cx| view.refresh(disk, cx));
         self.set_outside(id, Outside::Clear, cx);
+        view.update(cx, |view, cx| view.saved(&saved, cx));
+        Some(view)
     }
 
     pub fn set_outside(&mut self, id: u64, outside: Outside, cx: &mut Context<Self>) {
@@ -320,6 +376,10 @@ impl Desk {
 fn watch(dirs: &[PathBuf], cx: &mut Context<Desk>) -> notify::Result<RecommendedWatcher> {
     let (sender, mut changes) = mpsc::unbounded();
     let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
+        // Reads, ours included, are no change.
+        if event.as_ref().is_ok_and(|event| ely_ui::watching::only_read(&event.kind)) {
+            return;
+        }
         let _ = sender.unbounded_send(event.map(|_| ()).map_err(|error| error.to_string()));
     })?;
     for dir in dirs {
@@ -344,4 +404,30 @@ fn watch(dirs: &[PathBuf], cx: &mut Context<Desk>) -> notify::Result<Recommended
     .detach();
     log::info!("mark: watching {} folders", dirs.len());
     Ok(watcher)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::{Duration, Instant};
+
+    use ely_files::Action;
+
+    use super::Extra;
+
+    #[test]
+    fn a_restarted_autosave_saves_the_next_edit() {
+        let mut extra = Extra::default();
+        extra.policy.set_has_path();
+        extra.policy.edit(Instant::now());
+        // A write was in flight when the disk changed.
+        extra.writing = Some(1);
+        extra.restart_autosave();
+        // As autosave settles a heard write, then edits.
+        if let Some(revision) = extra.writing.take() {
+            extra.policy.save_finished(revision, true);
+        }
+        let now = Instant::now();
+        extra.policy.edit(now);
+        assert!(matches!(extra.policy.tick(now + Duration::from_secs(5)), Action::SaveDue(_)));
+    }
 }

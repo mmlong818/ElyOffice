@@ -21,16 +21,19 @@ pub enum Dialog {
     Titled { window: u32, title: String },
 }
 
-/// Parses "x, y, w, h" plus optional fields.
-pub fn rect_of(text: &str) -> Option<Rect> {
-    let parts: Vec<i32> = text
-        .split(',')
-        .filter_map(|part| part.trim().parse().ok())
-        .collect();
-    match parts.as_slice() {
-        [x, y, w, h, ..] => Some((*x, *y, *w, *h)),
-        _ => None,
+/// A payload that is neither a rectangle nor empty.
+#[derive(Debug, PartialEq)]
+pub struct Unreadable;
+
+/// "x, y, w, h" and later fields; "EMPTY" is none.
+pub fn rect_of(text: &str) -> Result<Option<Rect>, Unreadable> {
+    let text = text.trim();
+    if text.is_empty() || text.starts_with("EMPTY") {
+        return Ok(None);
     }
+    let mut parts = text.split(',').map(|part| part.trim().parse::<i32>());
+    let mut next = || parts.next().and_then(Result::ok).ok_or(Unreadable);
+    Ok(Some((next()?, next()?, next()?, next()?)))
 }
 
 /// A search's matches, each by its first rectangle.
@@ -39,7 +42,7 @@ pub fn found_of(text: &str) -> Option<Vec<Rect>> {
     json["searchResultSelection"]
         .as_array()?
         .iter()
-        .map(|found| rect_of(found["rectangles"].as_str()?.split(';').next()?))
+        .map(|found| rect_of(found["rectangles"].as_str()?.split(';').next()?).ok()?)
         .collect()
 }
 
@@ -188,6 +191,15 @@ pub fn a11y_update(a11y: &mut A11y, kind: i32, text: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_rectangle_reads_strictly() {
+        assert_eq!(rect_of("1, 2, 3, 4, 0, 5"), Ok(Some((1, 2, 3, 4))));
+        assert_eq!(rect_of("EMPTY, 0, 0"), Ok(None));
+        assert_eq!(rect_of(""), Ok(None));
+        assert_eq!(rect_of(r#"{"x": 1}, 2, 3, 4, 5"#), Err(Unreadable));
+        assert_eq!(rect_of("1, 2, 3"), Err(Unreadable));
+    }
 
     #[test]
     fn dont_care_states_read_as_mixed() {

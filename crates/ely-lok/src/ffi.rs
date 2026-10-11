@@ -330,7 +330,6 @@ impl Lok {
         .unwrap_or(-1)
     }
 
-    #[cfg(target_os = "macos")]
     /// Answers the kernel's "input waiting?" without a run-loop peek.
     pub fn register_any_input(&self, waiting: extern "C" fn(*mut c_void, i32) -> bool) {
         static DATA: u8 = 0;
@@ -341,26 +340,14 @@ impl Lok {
         call!(class, 24, F, self.kit, waiting, data);
     }
 
-    #[cfg(target_os = "macos")]
-    /// Runs LOK's loop until kit exit (R-01).
-    pub fn run_loop(&self) {
-        type PollCb = Option<extern "C" fn(*mut c_void, i32) -> i32>;
-        type WakeCb = Option<extern "C" fn(*mut c_void)>;
-        extern "C" fn poll(_: *mut c_void, _: i32) -> i32 {
-            0
-        }
-        extern "C" fn wake(_: *mut c_void) {}
+    /// Runs LOK's loop until kit exit; unipoll calls `poll`.
+    pub fn run_loop(&self, poll: Option<Poll>, wake: Option<Wake>) {
+        // VCL calls neither hook while their data is null.
+        static DATA: u8 = 0;
+        let data = std::ptr::addr_of!(DATA).cast_mut().cast();
         let class = unsafe { (*self.kit).class };
-        type F = unsafe extern "C" fn(*mut Kit, PollCb, WakeCb, *mut c_void);
-        call!(
-            class,
-            12,
-            F,
-            self.kit,
-            Some(poll),
-            Some(wake),
-            std::ptr::null_mut()
-        );
+        type F = unsafe extern "C" fn(*mut Kit, Option<Poll>, Option<Wake>, *mut c_void);
+        call!(class, 12, F, self.kit, poll, wake, data);
     }
 }
 
@@ -378,6 +365,19 @@ fn kit_error_raw(kit: *mut Kit) -> String {
     call!(class, 4, Free, raw);
     text
 }
+
+/// The kernel library: every build here merges its libraries.
+#[cfg(target_os = "macos")]
+pub const KERNEL: &str = "libmergedlo.dylib";
+#[cfg(target_os = "linux")]
+pub const KERNEL: &str = "libmergedlo.so";
+#[cfg(windows)]
+pub const KERNEL: &str = "mergedlo.dll";
+
+/// Waits up to its microseconds; above zero, work was done.
+pub type Poll = extern "C" fn(*mut c_void, i32) -> i32;
+/// The kernel has work for its loop.
+pub type Wake = extern "C" fn(*mut c_void);
 
 impl Drop for Lok {
     fn drop(&mut self) {
@@ -424,37 +424,17 @@ struct Library {
 
 #[cfg(unix)]
 impl Library {
-    /// dlopens the LOK library, merged candidates in order.
+    /// dlopens the merged kernel from `install`.
     fn open(install: &Path) -> io::Result<Self> {
         use std::os::unix::ffi::OsStrExt;
-        let mut last = "no candidate".to_string();
-        for name in [
-            "libsofficeapp.dylib",
-            "libmergedlo.dylib",
-            "libsofficeapp.so",
-            "libmergedlo.so",
-        ] {
-            let path = install.join(name);
-            if !path.try_exists()? {
-                continue;
-            }
-            let c = CString::new(path.as_os_str().as_bytes())
-                .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "the path holds a NUL"))?;
-            let handle = unsafe { libc::dlopen(c.as_ptr(), libc::RTLD_LAZY | libc::RTLD_GLOBAL) };
-            if handle.is_null() {
-                last = dl_error();
-                log::warn!("lok: dlopen {} failed: {last}", path.display());
-                continue;
-            }
-            return Ok(Self { handle });
+        let path = install.join(KERNEL);
+        let c = CString::new(path.as_os_str().as_bytes())
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "the path holds a NUL"))?;
+        let handle = unsafe { libc::dlopen(c.as_ptr(), libc::RTLD_LAZY | libc::RTLD_GLOBAL) };
+        if handle.is_null() {
+            return Err(io::Error::other(format!("dlopen {}: {}", path.display(), dl_error())));
         }
-        Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            format!(
-                "no loadable LOK library under {}: {last}",
-                install.display()
-            ),
-        ))
+        Ok(Self { handle })
     }
 
     /// dlsyms `name` from the library.
@@ -493,17 +473,15 @@ unsafe impl Sync for Library {}
 
 #[cfg(windows)]
 impl Library {
-    /// Loads the merged library first, keeping `<install>/sofficeapp.dll` as
-    /// a compatibility fallback.
+    /// Loads the merged kernel first; the unmerged legacy library is a fallback only if absent.
     fn open(install: &Path) -> io::Result<Self> {
         use std::os::windows::ffi::OsStrExt;
         use windows_sys::Win32::System::LibraryLoader::{
             LOAD_LIBRARY_SEARCH_DEFAULT_DIRS, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR, LoadLibraryExW,
         };
-        let mut load_errors = Vec::new();
-        for name in ["mergedlo.dll", "sofficeapp.dll"] {
+        for name in [KERNEL, "sofficeapp.dll"] {
             let path = install.join(name);
-            if !path.try_exists()? {
+            if !path.is_file() {
                 continue;
             }
             let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
@@ -516,19 +494,14 @@ impl Library {
             };
             if handle.is_null() {
                 let error = io::Error::last_os_error();
-                load_errors.push(format!("{}: {error}", path.display()));
-                continue;
+                return Err(io::Error::other(format!(
+                    "LoadLibrary {}: {error}",
+                    path.display()
+                )));
             }
             return Ok(Self {
                 handle: handle as isize,
             });
-        }
-        if !load_errors.is_empty() {
-            return Err(io::Error::other(format!(
-                "could not load any LOK library under {}: {}",
-                install.display(),
-                load_errors.join("; ")
-            )));
         }
         Err(io::Error::new(
             io::ErrorKind::NotFound,

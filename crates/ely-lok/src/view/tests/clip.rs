@@ -39,7 +39,7 @@ fn saved(view: &Entity<LokView>, cx: &mut TestAppContext) -> String {
         let view = view.read(app);
         let mut worker = view.worker.lock().expect("the worker lock");
         view.doc
-            .save_as(&mut worker, &format!("file://{}", out.display()), "fods")
+            .save_as(&mut worker, &crate::file_url(&out), "fods")
             .expect("the save works");
     });
     std::fs::read_to_string(&out).expect("the save reads")

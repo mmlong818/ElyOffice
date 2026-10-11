@@ -101,6 +101,103 @@ before=$(count autosaves)
 key 'keystroke "K"'
 autosaved "$before"
 is "$doc" $'one\n\ntwo\n\nthreeZXK' "autosave after keep"
+# Unsent keys survive a touch that keeps the text.
+before=$(count autosaves)
+changed=$(count "changed outside")
+now QQ
+touch "$doc"
+more "changed outside" "$changed"
+autosaved "$before"
+is "$doc" $'one\n\ntwo\n\nthreeZXKQQ' "keys typed before a touch were lost"
+before=$(count autosaves)
+key 'key code 51'
+key 'key code 51'
+autosaved "$before"
+is "$doc" $'one\n\ntwo\n\nthreeZXK' "keys taken back"
+# Same text, new bytes: saves keep the new bytes.
+lf=$(od -An -tx1 "$doc" | tr -d ' \n')
+python3 -c 'import sys; d = open(sys.argv[1], "rb").read(); open(sys.argv[2], "wb").write(b"\xef\xbb\xbf" + d.replace(b"\n", b"\r\n"))' "$doc" "$work/crlf"
+# BOM, only CRLF line ends, and `$1` in it.
+kept() { python3 -c 'import sys; d = open(sys.argv[1], "rb").read(); sys.exit(not (d.startswith(b"\xef\xbb\xbf") and d.count(b"\n") == d.count(b"\r\n") and sys.argv[2].encode() in d))' "$doc" "$1"; }
+changed=$(count "changed outside")
+cp "$work/crlf" "$doc"
+more "changed outside" "$changed"
+before=$(count autosaves)
+now W
+autosaved "$before"
+kept W || fail "a save lost the new bytes: $(od -c "$doc" | head -3)"
+before=$(count autosaves)
+key 'key code 51'
+autosaved "$before"
+cmp -s "$doc" "$work/crlf" || fail "the save is not the new bytes: $(od -c "$doc" | head -3)"
+changed=$(count "changed outside")
+printf '%s' "$lf" | xxd -r -p >"$doc"
+more "changed outside" "$changed"
+# A conflict the disk takes back resumes autosave.
+cp "$doc" "$work/saved"
+conflicts=$(count "unsaved true")
+now X
+printf 'external\n' >"$doc"
+more "unsaved true" "$conflicts"
+cp "$work/saved" "$doc"
+waits "local edits stay"
+before=$(count autosaves)
+now Y
+autosaved "$before"
+is "$doc" $'one\n\ntwo\n\nthreeZXKXY' "autosave after the disk came back"
+before=$(count autosaves)
+key 'key code 51'
+key 'key code 51'
+autosaved "$before"
+is "$doc" $'one\n\ntwo\n\nthreeZXK' "keys taken back again"
+# Unsaved keys meet the saved text in new bytes.
+cp "$doc" "$work/saved"
+python3 -c 'import sys; d = open(sys.argv[1], "rb").read(); open(sys.argv[2], "wb").write(b"\xef\xbb\xbf" + d.replace(b"\n", b"\r\n"))' "$doc" "$work/crlf"
+stays=$(count "local edits stay")
+before=$(count autosaves)
+now V
+cp "$work/crlf" "$doc"
+more "local edits stay" "$stays"
+autosaved "$before"
+kept V || fail "edits kept lost the new bytes: $(od -c "$doc" | head -3)"
+before=$(count autosaves)
+key 'key code 51'
+autosaved "$before"
+cmp -s "$doc" "$work/crlf" || fail "not the new bytes: $(od -c "$doc" | head -3)"
+changed=$(count "changed outside")
+cp "$work/saved" "$doc"
+more "changed outside" "$changed"
+# Unsaved text written outside as is: the tab is clean.
+python3 -c 'import sys; d = open(sys.argv[1], "rb").read(); open(sys.argv[2], "wb").write(d[:-1] + b"S\n" if d.endswith(b"\n") else d + b"S")' "$doc" "$work/typed"
+cp "$doc" "$work/saved"
+changed=$(count "changed outside")
+now S
+cp "$work/typed" "$doc"
+more "changed outside" "$changed"
+sleep 2
+clean=$(count "unsaved false")
+printf 'gamma\n' >>"$doc"
+more "unsaved false" "$clean"
+sleep 1
+grep -q gamma "$doc" || fail "the outside change was not taken"
+changed=$(count "changed outside")
+cp "$work/saved" "$doc"
+more "changed outside" "$changed"
+# A save that meets the same text keeps saving after.
+python3 -c 'import sys; d = open(sys.argv[1], "rb").read(); open(sys.argv[2], "wb").write(d[:-1] + b"T\n" if d.endswith(b"\n") else d + b"T")' "$doc" "$work/same"
+before=$(count autosaves)
+now T
+for _ in $(seq 200); do [ "$(count autosaves)" -gt "$before" ] && break; sleep 0.01; done
+cp "$work/same" "$doc"
+sleep 2
+before=$(count autosaves)
+now U
+autosaved "$before"
+grep -q TU "$doc" || fail "the next edit after a same-text save was not saved: $(tr '\n' '/' <"$doc")"
+before=$(count autosaves)
+key 'key code 51'
+key 'key code 51'
+autosaved "$before"
 # Edits apart merge; a disk change mid-way compares again.
 key 'key code 126 using command down'
 conflicts=$(count "unsaved true")
@@ -208,8 +305,8 @@ app=
 launch
 waits "ended Crashed"
 waits "did not open"
-for _ in $(seq 40); do [ "$(count "toast .*unsaved text from")" -ge 2 ] && break; sleep 0.25; done
-[ "$(count "toast .*unsaved text from")" = 2 ] || fail "recovered copies: $(grep "unsaved text from" "$work/err")"
+for _ in $(seq 40); do [ "$(count ": unsaved text from .* is back")" -ge 2 ] && break; sleep 0.25; done
+[ "$(count ": unsaved text from .* is back")" = 2 ] || fail "recovered copies: $(grep "unsaved text from" "$work/err")"
 sleep 3
 is "$doc" "disk" "recovered text went into the file"
 [ ! -e "$gone" ] || fail "a deleted file came back"
@@ -246,7 +343,7 @@ app=
 launch
 waits "ended Crashed"
 sleep 4
-[ "$(count "toast .*unsaved text from")" = 2 ] || fail "after a discard: $(grep "toast .*unsaved text from" "$work/err")"
+[ "$(count ": unsaved text from .* is back")" = 2 ] || fail "after a discard: $(grep ": unsaved text from .* is back" "$work/err")"
 key 'keystroke "q" using command down'
 for _ in $(seq 4); do
   for _ in $(seq 20); do seen "Don't Save" && break; sleep 0.25; done
@@ -338,6 +435,22 @@ rm -f "$work/Library/Application Support/ElyOffice/ely-mark/session.lock"
 launch
 waits "restores tab"
 waits 'mark: shown as "source"'
+kill "$app"
+wait "$app" 2>/dev/null || true
+app=
+# A clean tab with the disk's text closes without asking.
+clean=$work/notes/c.md
+printf 'clean\n' >"$clean"
+launch "$clean"
+waits 'mark: shown as "visual"'
+changes=$(count "unsaved false")
+printf 'outside\n' >"$clean.tmp"
+mv "$clean.tmp" "$clean"
+more "unsaved false" "$changes"
+sleep 1
+[ "$("$work/ax-press" "$app" Close AXButton)" = pressed ] || fail "no tab Close"
+sleep 2
+! seen "Don't Save" || fail "a clean tab that took the disk's text asked to save"
 kill "$app"
 wait "$app" 2>/dev/null || true
 app=

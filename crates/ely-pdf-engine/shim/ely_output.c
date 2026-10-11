@@ -121,6 +121,7 @@ int ely_optimize(fz_context *ctx, fz_document *doc, const char *raw, const char 
 int ely_repaired(fz_context *ctx, fz_document *doc)
 {
 	int repaired = 0;
+	fz_var(repaired);
 	fz_try(ctx)
 		repaired = pdf_was_repaired(ctx, ely_pdf_of(ctx, doc));
 	fz_catch(ctx)

@@ -5,6 +5,9 @@ use std::path::Path;
 #[cfg(target_os = "macos")]
 mod macos;
 
+/// Only macOS plays yet; elsewhere nothing offers it.
+pub const BUILT: bool = cfg!(target_os = "macos");
+
 /// What the player knows of its file.
 #[derive(Clone, Debug, PartialEq)]
 pub enum State {

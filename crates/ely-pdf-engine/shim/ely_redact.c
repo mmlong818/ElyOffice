@@ -59,6 +59,8 @@ restart:
 			if (touches(pdf_bound_annot(ctx, annot), area))
 			{
 				pdf_obj *field = pdf_keep_obj(ctx, pdf_annot_obj(ctx, annot));
+				fz_var(annot);
+				fz_var(widgets);
 				fz_try(ctx)
 				{
 					pdf_delete_annot(ctx, page, annot);
@@ -129,6 +131,7 @@ static int chars_in(fz_context *ctx, fz_document *doc, int number, fz_rect area)
 	fz_stext_page *text = NULL;
 	int n = 0;
 	fz_var(text);
+	fz_var(n);
 	fz_try(ctx)
 	{
 		fz_stext_block *block;
@@ -154,6 +157,7 @@ static int light_in(fz_context *ctx, fz_document *doc, int number, fz_rect area)
 	fz_pixmap *pix = NULL;
 	int n = 0;
 	fz_var(pix);
+	fz_var(n);
 	fz_try(ctx)
 	{
 		fz_page *page = fz_load_page(ctx, doc, number);
@@ -283,6 +287,7 @@ static int image_light(fz_context *ctx, fz_image *image, fz_matrix ctm, fz_rect 
 		return 0;
 	fz_var(pix);
 	fz_var(draw);
+	fz_var(box);
 	fz_try(ctx)
 	{
 		unsigned char *s;

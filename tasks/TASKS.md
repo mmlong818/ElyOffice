@@ -175,3 +175,37 @@
 
 - [ ] C24.1 交付物清单、构建说明、已知限制、测试报告 — 已做：根目录 `README.md`（构建、测试、文档索引）、`docs/help.md`（打开保存、恢复、离线边界、仓库操作）；已知限制与测试报告见 `docs/compatibility.md`、`docs/qa.md`、`docs/perf/` — 未送审：用户 2026-10-09 定性能已够、先发首版
 - [ ] C24.2 验收逐条核对表 — 已做：`docs/acceptance.md`；结论：macOS 首版六个应用可交付，PRD 的首个正式版（八个应用、三端）未达到 — 未送审：用户 2026-10-09 定性能已够、先发首版
+
+## R2 发布之后：修复本次查出的问题（用户 2026-10-09 定：逐条修，逐条送审）
+
+- [x] R2.1 官网下载：源码入口指向 v0.1.0 的两个源码包；未公证应用的打开步骤补 macOS 15 起的“系统设置 › 隐私与安全性 › 仍要打开”（中英）；链接文字对比度在浅色与深色下都有回归断言 — R1 不合成透明度、无打开步骤断言；R2 漏祖先 opacity；R3 PASS
+- [x] R2.2 官网名称标签：视口或模型尺寸变化后按当前几何重新放置，窄屏聚焦时不产生横向滚动；端到端测试捕获控制台与资源加载错误 — R1 量到过渡中的位置、未随模型尺寸、测试只查横向；R2 竖向比例取宽度比；R3 PASS
+- [ ] R2.3 视频：应用名的体素字在屏幕展平前散尽，不压在录屏上；群像结束时六块屏幕带着录屏离场，不在强拍上变黑
+- [x] R2.4 ElyShow：点幻灯片缩略图后画布即刻换到该页（现在要缩放一次才重画） — R1 测试不驱动重绘、不核像素；R2 PASS
+- [ ] R2.5 ElyShow：放映窗口真正全屏，菜单栏与程序坞不压在幻灯片上
+- [ ] R2.6 ElyPDF：批注或签名落地后页面不闪白（旧图块留到新图块到达） — R3 FAIL（测试只计绘制次数）后改为核对绘制面积覆盖所见页面，三轮上限，未再审
+- [x] R2.7 ElyDoc：页面水平位置每次一致；缩放以视口中的页面为锚，左页边不滚出视口 — R1 锚点漏居中偏移；R2 同帧连续缩放用旧偏移；R3 PASS
+- [ ] R2.8 ElyTable：状态栏统计按单元格格式显示数值（内核按光标格的数字格式写出，Ely 不改写；常规格式即内核的常规写法） — R3 FAIL（格式字面量里的分号被当作分隔）后改为按字段名切分，三轮上限，未再审
+- [x] R2.9 ElyTable：对选中区域开自动筛选不扩到区域外紧邻的合计行 — R1 只标记于内存，应用、撤销、重开仍扩；R2 光标在别的数据块也沿用原区；R3 PASS
+- [ ] R2.10 ElyTable：新插入的图表放在数据区旁的空白处，不压住数据 — R1 只避开源区、被挤回可见区；R2 抛出异常使 worker 退出、合并格；R3 FAIL（跨表按源表查、四周无处时照旧压住数据）后改为按所在表查、全表找空处、无处即失败，三轮上限，未再审
+- [x] R2.11 ElyTree：改动数的单复数（“1 file changed”） — R1 测试只核键名；R2 PASS
+- [ ] R2.12 ElyTree：差异按文件类型着色，Markdown 不按代码高亮 — R3 FAIL（Rust 与 Ruby 词表、Haskell 与 Erlang 注释、TOML 与 CMake 紧接注释）后按语言分表（组件库 b0dbfd4），三轮上限，未再审
+- [ ] R2.13 ElyMark：紧凑写法的 GFM 表格（无对齐空格）在可视模式显示为表格
+- [ ] R2.14 ElyMark：任务列表的勾选框与正文同大、对齐首行 — R1 只测首项；R2 未生成的框也算；R3 FAIL（隐藏的框也算）后改为核对文字缩进与可见性，三轮上限，未再审
+- [x] R2.15 “打开方式”里不得出现 LibreOffice（用户 2026-10-09 加急，先于 R2.2 收尾）：构建出的 LibreOffice.app 去掉文档类型与快速查看插件并注销；任何测试不挂载官方镜像（官方内核解到无包的文件夹）；`tests/scripts/lo-unregistered.sh` 核对 — R1 注销不幂等、吞查询与 plist 错误、负例不认原因；R2 inert 步骤吞坏 plist；R3 PASS
+- [x] R2.16 ElyTable（用户 2026-10-09 报）：单击单元格跳到别处（如 A5876），无法拖选多格 — R1 缩放与 DPI 变化漂移、拖选与远处测试缺；R2 测试跑在文字文档上；R3 PASS
+- [x] R2.17 ElyPDF（用户报）：编辑文字时报“这种字体画不出‘V’”，而所改文字里没有 V；改字对应的文字块须与面板所示一致 — R1 CMap 漏条目数、共用字形的字被改写、文件超 500 行；R2 部分 ToUnicode 不退回 cid_to_ucs；R3 PASS
+- [x] R2.18 官网（用户定）：下载一律指向 GitHub 的 v0.1.x 发布页，不直接链 DMG — R1 截图文案死代码（连同 screen() 与截图一并删去）；R2 PASS；已上线
+- [x] R2.19 发布 0.1.1：版本号、打包、GitHub Release、官网指向新发布页 — v0.1.1 已发布（六个 arm64 dmg 与两个源码包，releases/latest），官网显示 0.1.1；release-macos.sh 通过
+- [x] R2.20 ElyShow：放映图层一次回复超过 64 MB 帧上限（大屏上 4 张以上图层的幻灯片报 “layers pass 67107840 bytes”，放映起不来） — R1 单层仍超帧上限、暂存不随文档释放；R2 测试只核长度；R3 PASS
+
+## L1 Linux 发布（用户 2026-10-11 报：Omarchy 上六个 AppImage 都打不开；要 deb、rpm、Arch、AppImage；在 ubuntu:26.04 容器里本机构建，替换 v0.1.3 的 Linux 包）
+
+- [x] L1.1 Linux 显示后端：`gpui_platform` 开 `wayland` 与 `x11`（原样无头，“window open”而合成器里没有窗口）；Omarchy（Hyprland）上 ElyTree 在 Wayland 与 X11 上画出窗口（其余五个要引擎，随 L1.6 实测）；`tests/scripts/linux-backends.sh` — R1 锁文件、目标目录、未证明交帧；R2 产物路径、字形未核；R3 语言、OCR 错误被吞；R4 PASS
+- [x] L1.2 Linux 上的文件监视把读取当作改动（inotify 报打开，FSEvents 不报）：Omarchy 主题、通用设置在第一次改动后、ElyTree 打开仓库起，每次重读自己又触发下一次，空闲时每 250 毫秒读一遍；四处监视（主题、设置、ElyTree、ElyMark）经 `ely_ui::watching::only_read` 略去读取，写后关闭照算改动；`theme.name` 读不出不再吞掉；`tests/scripts/linux-idle.sh`（ElyMark 要 CEF，随 L1.6 实测） — R1 写后关闭也被略去、注释超长；R2 PASS
+- [x] L1.3 设置的单测在 Linux 上失败（“a menu bar needs menus”）：Linux 未设菜单时给空表而非 None，测试未像应用那样先设菜单；真窗口里 Ctrl+, 打开设置不崩（已实测） — R1 PASS
+- [x] L1.4 Linux 构建环境：`ubuntu:26.04` 容器里构建全部引擎与六个应用（glibc 不高于 2.43）；`packaging/linux/container.sh`、`tests/scripts/linux-glibc.sh` — R1 读不出当作静态、缺件照过、注释超长；R2 链接文件、读错；R3 链接目录；R4 PASS
+- [x] L1.5 Linux 包：deb、rpm、Arch（pkg.tar.zst）、AppImage 出自同一份分装，装到 `/opt/ely-office/<应用>`，带桌面项、图标与文件类型；依赖按 `packaging/linux/depends.tsv`；LibreOffice 的 cairo RUNPATH 改为 `$ORIGIN`；`tests/scripts/linux-packages.sh` — R1 列举与读错被吞、坏入口照过、无执行位；R2 坏 git-lfs 照过；R3 PASS
+- [x] L1.6 本机出六个应用的四种包；Omarchy 上装 Arch 包与 AppImage 出窗口；deb、rpm 在各自发行版的容器里装上并冒烟；`linux-installed.sh`、`linux-distros.sh`、`linux-mark-idle.sh` — R1 deb/rpm 未运行、外部改动未核对显示；R2 内核未出图也过、OCR 大小写、清理竞态；R3 公式栏冒充网格、OCR 与 pgrep 错误被吞；R4 取色、存活、截图错误被吞；R5 hyprctl 查询失败被当作未出窗口（第五轮后修正并以注入失败核对）
+- [x] L1.7 v0.1.3：删去旧 AppImage，上传新包；`ci.sh` 的 Linux 产出四种包；agents.md 与官网随之（官网只链到发布页，无需改）；`package.sh` 拒绝指向包外的 RUNPATH；Linux CI 进容器；`packaging/source.sh` 随发布上传本提交的源码 — R1 前缀检查可越出、读错被吞、CI 未进容器、无对应源码；R2 空项、拆分错误、未跟踪文件；R3 换行、git 配置；R4 `]` 加换行；R5 末尾换行（第五轮后修正并以编译的 ELF 核对）
+- [x] L1.8 macOS 发布：CI 从零编 LibreOffice 超过 act_runner 的 3 小时被杀（v0.1.3 无 dmg）；Mac 任务以 `ELY_SHARE` 借用 Mac mini 开发克隆 `ElyOfficeSuite` 的引擎，CI 克隆里自建的残留引擎即报错而非混用；`tests/scripts/ci-share.sh` — R1 链接目标末尾换行；R2 测试只看文字；R3 目标仍截换行、reference 未测；R4 未按 macOS 跑；R5 PASS

@@ -5,22 +5,6 @@
 
 #include "ely_shim.h"
 
-typedef enum
-{
-	PEN_CID,
-	PEN_SIMPLE,
-	PEN_CJK
-} pen_kind;
-
-/* A font to write with and its resource. */
-typedef struct
-{
-	pen_kind kind;
-	fz_font *font;
-	int ordering;
-	pdf_obj *ref;
-} pen;
-
 /* What to write, where, in what. */
 typedef struct
 {
@@ -31,103 +15,6 @@ typedef struct
 	/* Page space: left, top, width. */
 	float box[3];
 } text_args;
-
-/* The script face for typed signatures, from the worker. */
-static const unsigned char *script_data;
-static size_t script_len;
-
-void ely_script_font(const unsigned char *data, size_t len)
-{
-	script_data = data;
-	script_len = len;
-}
-
-/* The pen named `choice`; "original" writes in `own`. */
-static void choose_pen(fz_context *ctx, const char *choice, fz_font *own, pen *p)
-{
-	static const struct { const char *choice, *name; } latin[] = {
-		{ "helvetica", "Helvetica" }, { "times", "Times-Roman" }, { "courier", "Courier" } };
-	static const struct { const char *choice; int ordering; } cjk[] = {
-		{ "cjk-sc", FZ_ADOBE_GB }, { "cjk-tc", FZ_ADOBE_CNS }, { "cjk-jp", FZ_ADOBE_JAPAN }, { "cjk-kr", FZ_ADOBE_KOREA } };
-	size_t i;
-	if (!strcmp(choice, "script"))
-	{
-		if (!script_data)
-			fz_throw(ctx, FZ_ERROR_ARGUMENT, "no script font was given");
-		p->kind = PEN_CID;
-		p->font = fz_new_font_from_memory(ctx, "GreatVibes", script_data, (int)script_len, 0, 0);
-		return;
-	}
-	if (!strcmp(choice, "original"))
-	{
-		if (!own || !pdf_font_writing_supported(ctx, own))
-			fz_throw(ctx, FZ_ERROR_ARGUMENT, "the document's font cannot write new text");
-		p->kind = PEN_CID;
-		p->font = fz_keep_font(ctx, own);
-		return;
-	}
-	for (i = 0; i < nelem(latin); i++)
-		if (!strcmp(choice, latin[i].choice))
-		{
-			p->kind = PEN_SIMPLE;
-			p->font = fz_new_base14_font(ctx, latin[i].name);
-			return;
-		}
-	for (i = 0; i < nelem(cjk); i++)
-		if (!strcmp(choice, cjk[i].choice))
-		{
-			p->kind = PEN_CJK;
-			p->ordering = cjk[i].ordering;
-			p->font = fz_new_cjk_font(ctx, cjk[i].ordering);
-			return;
-		}
-	fz_throw(ctx, FZ_ERROR_ARGUMENT, "no font %s", choice);
-}
-
-/* The pen's font as a resource of `pdf`. */
-static void add_pen(fz_context *ctx, pdf_document *pdf, pen *p)
-{
-	switch (p->kind)
-	{
-	case PEN_CID:
-		p->ref = pdf_add_cid_font(ctx, pdf, p->font);
-		break;
-	case PEN_SIMPLE:
-		p->ref = pdf_add_simple_font(ctx, pdf, p->font, PDF_SIMPLE_ENCODING_LATIN);
-		break;
-	case PEN_CJK:
-		p->ref = pdf_add_cjk_font(ctx, pdf, p->font, p->ordering, 0, 0);
-		break;
-	}
-}
-
-/* The pen's glyph for `u`; 0 when it has none. */
-static int glyph(fz_context *ctx, pen *p, int u)
-{
-	if (p->kind == PEN_SIMPLE && fz_windows_1252_from_unicode(u) < 0)
-		return 0;
-	return fz_encode_character(ctx, p->font, u);
-}
-
-/* `u` as the pen's code, in hex. */
-static void code(fz_context *ctx, fz_buffer *buf, pen *p, int u, int gid)
-{
-	switch (p->kind)
-	{
-	case PEN_CID:
-		fz_append_printf(ctx, buf, "%04x", gid);
-		break;
-	case PEN_SIMPLE:
-		fz_append_printf(ctx, buf, "%02x", fz_windows_1252_from_unicode(u));
-		break;
-	case PEN_CJK:
-		if (u > 0xffff)
-			fz_append_printf(ctx, buf, "%04x%04x", 0xd800 + ((u - 0x10000) >> 10), 0xdc00 + ((u - 0x10000) & 0x3ff));
-		else
-			fz_append_printf(ctx, buf, "%04x", u);
-		break;
-	}
-}
 
 /* `text` as code points; the count is returned. */
 static int runes(fz_context *ctx, const char *text, int **out)
@@ -142,13 +29,8 @@ static int runes(fz_context *ctx, const char *text, int **out)
 	return n;
 }
 
-static float advance(fz_context *ctx, pen *p, int u, float size)
-{
-	return fz_advance_glyph(ctx, p->font, glyph(ctx, p, u), 0) * size;
-}
-
 /* Lines no wider than `width`: [from, to) each. */
-static int lay_out(fz_context *ctx, pen *p, const int *u, int n, float size, float width, int *from, int *to,
+static int lay_out(fz_context *ctx, ely_pen *p, const int *u, int n, float size, float width, int *from, int *to,
 	float *widest)
 {
 	int i = 0, lines = 0;
@@ -159,8 +41,9 @@ static int lay_out(fz_context *ctx, pen *p, const int *u, int n, float size, flo
 		float run = 0, before = 0;
 		for (j = i; j < n && u[j] != '\n'; j++)
 		{
-			float w = advance(ctx, p, u[j], size);
-			if (run + w > width && j > i)
+			float w = ely_pen_advance(ctx, p, u[j], size);
+			/* A box measured from these widths fits them. */
+			if (run + w > width + 0.01f && j > i)
 				break;
 			if (u[j] == ' ')
 				space = j, before = run;
@@ -185,7 +68,7 @@ static int lay_out(fz_context *ctx, pen *p, const int *u, int n, float size, flo
 }
 
 /* A resource name in `type` that is free, given `ref`. */
-const char *ely_add_resource(fz_context *ctx, pdf_document *pdf, pdf_obj *page, pdf_obj *type, const char *stem,
+const char *ely_add_resource(fz_context *ctx, pdf_obj *page, pdf_obj *type, const char *stem,
 	pdf_obj *ref, char *name, size_t room)
 {
 	pdf_obj *res = pdf_dict_get_inheritable(ctx, page, PDF_NAME(Resources));
@@ -257,7 +140,7 @@ pdf_obj *ely_append_content(fz_context *ctx, pdf_document *pdf, pdf_obj *page, f
 /* Text laid out: the pen, code points, lines, placement. */
 typedef struct
 {
-	pen p;
+	ely_pen p;
 	int *u, n;
 	int *from, *to, lines;
 	float widest;
@@ -267,21 +150,21 @@ typedef struct
 
 static void drop_laid(fz_context *ctx, laid *l)
 {
-	fz_drop_font(ctx, l->p.font);
-	pdf_drop_obj(ctx, l->p.ref);
+	ely_drop_pen(ctx, &l->p);
 	fz_free(ctx, l->u);
 	fz_free(ctx, l->from);
 	fz_free(ctx, l->to);
 }
 
-/* Lays `a` out from `first`, or names a missing glyph. */
-static int lay_text(fz_context *ctx, text_args *a, fz_font *own, fz_point first, float gap, laid *l)
+/* Lays `a` out; a missing glyph, or -1: unwritable font. */
+static int lay_text(fz_context *ctx, text_args *a, fz_font *own, pdf_page *page, fz_point first, float gap, laid *l)
 {
 	int i;
-	choose_pen(ctx, a->font, own, &l->p);
+	if (ely_choose_pen(ctx, a->font, own, page, &l->p) < 0)
+		return -1;
 	l->n = runes(ctx, a->text, &l->u);
 	for (i = 0; i < l->n; i++)
-		if (l->u[i] != '\n' && !glyph(ctx, &l->p, l->u[i]))
+		if (l->u[i] != '\n' && !ely_pen_has(ctx, &l->p, l->u[i]))
 			return l->u[i];
 	l->from = fz_malloc_array(ctx, l->n + 2, int);
 	l->to = fz_malloc_array(ctx, l->n + 2, int);
@@ -307,10 +190,7 @@ static void draw_laid(fz_context *ctx, pdf_document *pdf, pdf_page *page, laid *
 		fz_matrix to_user = ely_to_user(ctx, page);
 		char name[32];
 		int i, line;
-		pdf_drop_obj(ctx, l->p.ref);
-		l->p.ref = NULL;
-		add_pen(ctx, pdf, &l->p);
-		ely_add_resource(ctx, pdf, page->obj, PDF_NAME(Font), "ElyF", l->p.ref, name, sizeof name);
+		ely_pen_resource(ctx, pdf, page, &l->p, name, sizeof name);
 		buf = fz_new_buffer(ctx, 256);
 		fz_append_string(ctx, buf, "q\n");
 		for (line = 0; line < l->lines; line++)
@@ -320,7 +200,7 @@ static void draw_laid(fz_context *ctx, pdf_document *pdf, pdf_page *page, laid *
 				((a->rgb >> 16) & 255) / 255.0f, ((a->rgb >> 8) & 255) / 255.0f, (a->rgb & 255) / 255.0f,
 				tm.a, tm.b, tm.c, tm.d, tm.e, tm.f);
 			for (i = l->from[line]; i < l->to[line]; i++)
-				code(ctx, buf, &l->p, l->u[i], glyph(ctx, &l->p, l->u[i]));
+				ely_pen_code(ctx, buf, &l->p, l->u[i]);
 			fz_append_string(ctx, buf, "> Tj ET\n");
 		}
 		fz_append_string(ctx, buf, "Q\n");
@@ -380,7 +260,7 @@ static void preview(fz_context *ctx, pdf_document *pdf, int number, int block, c
 		fz_rethrow(ctx);
 }
 
-/* Edits, adds or previews text: 0, 2 missing, -1 failed. */
+/* Writes or previews text: 0, 2 missing, 3 unwritable, -1. */
 int ely_put_text(fz_context *ctx, fz_document *doc, int number, int block, const char *expected, const char *text,
 	const char *font, float size, int rgb, const float box[3], const char *password, float scale, int *missing,
 	int *grew, unsigned char **pixels, int *w, int *h)
@@ -388,11 +268,12 @@ int ely_put_text(fz_context *ctx, fz_document *doc, int number, int block, const
 	pdf_document *pdf = NULL;
 	pdf_page *page = NULL;
 	ely_shape shape = { NULL };
-	laid l = { { PEN_SIMPLE, NULL, 0, NULL } };
+	laid l;
 	int begun = 0;
 	fz_var(pdf);
 	fz_var(page);
 	fz_var(begun);
+	memset(&l, 0, sizeof l);
 	*pixels = NULL;
 	*grew = 0;
 	fz_try(ctx)
@@ -409,7 +290,7 @@ int ely_put_text(fz_context *ctx, fz_document *doc, int number, int block, const
 			first = shape.first;
 			gap = shape.gap;
 		}
-		*missing = lay_text(ctx, &a, shape.font, first, gap, &l);
+		*missing = lay_text(ctx, &a, shape.font, page, first, gap, &l);
 		if (!*missing)
 		{
 			fz_rect drawn = laid_area(&l, size), region = drawn;
@@ -445,5 +326,5 @@ int ely_put_text(fz_context *ctx, fz_document *doc, int number, int block, const
 		*pixels = NULL;
 		return ely_edit_failed(ctx, pdf, begun);
 	}
-	return *missing ? 2 : 0;
+	return *missing < 0 ? 3 : *missing ? 2 : 0;
 }

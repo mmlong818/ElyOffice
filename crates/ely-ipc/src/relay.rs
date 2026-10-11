@@ -28,12 +28,18 @@ pub fn relay(stderr: impl Read + Send + 'static, who: &'static str) -> Relay {
     let kept = Arc::clone(&last);
     let thread = std::thread::spawn(move || {
         let mut withheld = 0u64;
-        for line in BufReader::new(stderr).lines() {
-            let line = match line {
-                Ok(line) => line,
+        let (mut reader, mut bytes) = (BufReader::new(stderr), Vec::new());
+        loop {
+            bytes.clear();
+            match reader.read_until(b'\n', &mut bytes) {
+                Ok(0) => break,
+                Ok(_) => {}
                 Err(error) => return log::warn!(target: who, "stderr unreadable: {error}"),
-            };
-            match parse(&line) {
+            }
+            // Engines may print other encodings; keep reading past them.
+            let line = String::from_utf8_lossy(&bytes);
+            let line = line.trim_end_matches(['\n', '\r']);
+            match parse(line) {
                 Some((level, target, message)) => {
                     if level == log::Level::Error {
                         *kept.lock().expect("the relay lock") = Some(message.to_string());
@@ -41,7 +47,7 @@ pub fn relay(stderr: impl Read + Send + 'static, who: &'static str) -> Relay {
                     log::log!(target: target, level, "{message}")
                 }
                 // A crash stack names code, never documents.
-                None if frame(&line) => log::error!(target: who, "{line}"),
+                None if frame(line) => log::error!(target: who, "{line}"),
                 None => {
                     withheld += 1;
                     log::debug!(target: who, "native output withheld ({withheld} lines)");
@@ -77,6 +83,13 @@ mod tests {
         let line = "[2026-10-08T12:00:00Z WARN  ely_lok::worker] request failed";
         assert_eq!(parse(line), Some((log::Level::Warn, "ely_lok::worker", "request failed")));
         assert_eq!(parse("warning: syntax error: unknown keyword: 'Zq'"), None);
+    }
+
+    #[test]
+    fn a_line_in_another_encoding_stops_nothing() {
+        let stderr: &[u8] = b"caf\xe9 opened\n[2026-10-08T12:00:00Z ERROR ely_pdf::worker] it broke\n";
+        let mut relay = super::relay(stderr, "test");
+        assert_eq!(relay.last_error().as_deref(), Some("it broke"));
     }
 
     #[test]

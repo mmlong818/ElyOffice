@@ -7,9 +7,6 @@ use std::{
 
 use crate::ipc::{self, Pack, Unpack, tag};
 
-#[cfg(windows)]
-use std::os::windows::process::CommandExt;
-
 pub use crate::events::{A11y, Cell, Events, Function, MIXED, Mark, Rect, Request};
 
 /// The pinned LibreOffice build the worker must report (LOK-01).
@@ -19,6 +16,7 @@ mod doc;
 mod feed;
 mod frames;
 mod install;
+mod load;
 pub use install::{install_dir, templates};
 use install::worker_bin;
 #[cfg(windows)]
@@ -48,6 +46,8 @@ pub struct Worker {
     request_timeout: std::time::Duration,
     #[cfg(windows)]
     shutdown_timeout: std::time::Duration,
+    /// The name new comments sign with, once set.
+    author: Option<String>,
 }
 
 /// The start-up check: to run, passed, or why it failed.
@@ -84,9 +84,16 @@ pub struct Doc {
     id: u64,
     /// The document's revision when this handle was taken.
     pub(crate) rev: u64,
+    /// LOK_DOCTYPE: 0 text, 1 spreadsheet, 2 presentation.
+    kind: u64,
 }
 
 impl Doc {
+    /// Whether this is a spreadsheet.
+    pub fn is_sheet(&self) -> bool {
+        self.kind == 1
+    }
+
     /// Whether this handle saw a later state than `other`.
     pub fn newer_than(&self, other: &Doc) -> bool {
         self.rev > other.rev
@@ -152,24 +159,24 @@ impl Worker {
         let worker_bin = worker_bin()?;
         log::info!("lok: worker from {}", worker_bin.display());
         let mut command = Command::new(worker_bin);
-        command
+        ely_ipc::windowless(&mut command)
             .arg(install)
             .arg(profile_dir.as_os_str())
             .env("SAL_FORCE_HIDPI_SCALING", "1")
-            .env("SAL_SKIA", "raster");
-        // Calc reports in document twips, as its geometry does.
-        let options = match cfg!(target_os = "macos") {
-            true => "unipoll:sc_print_twips_msgs",
-            false => "sc_print_twips_msgs",
+            // A killed worker's profile lock would hang the next.
+            .env("SAL_NOLOCK_PROFILE", "1");
+        // Linux tiles via cairo are BGRA; Skia there is RGBA.
+        match cfg!(target_os = "linux") {
+            true => command.env("SAL_DISABLESKIA", "1"),
+            false => command.env("SAL_SKIA", "raster"),
         };
-        command.env("SAL_LOK_OPTIONS", options);
+        // Calc reports in document twips; unipoll lends LOK's loop.
+        command.env("SAL_LOK_OPTIONS", "unipoll:sc_print_twips_msgs");
         if dev {
             command.arg("--dev");
         }
         #[cfg(windows)]
         command.arg(supervise::BOOTSTRAP_ARG);
-        #[cfg(windows)]
-        command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW; stdio remains piped.
         #[cfg(windows)]
         let mut supervisor = supervise::Supervisor::create(profile_dir.clone())?;
         if let Ok(sal_log) = std::env::var("ELY_LOK_SAL_LOG") {
@@ -219,6 +226,7 @@ impl Worker {
             request_timeout: supervise::REQUEST_TIMEOUT,
             #[cfg(windows)]
             shutdown_timeout: supervise::SHUTDOWN_TIMEOUT,
+            author: None,
         };
         Ok(worker)
     }
@@ -232,47 +240,15 @@ impl Worker {
     /// The name new comments and tracked changes carry.
     pub fn set_author(&mut self, name: &str) -> io::Result<()> {
         log::info!("lok: the author is set");
+        // Wanted even if this worker fails; a restart sends it.
+        self.author = Some(name.to_string());
         self.request(tag::SET_AUTHOR, &Pack::new().str(name).bytes())?;
         Ok(())
     }
 
-    /// Loads `url`; macros never run (LOK-11).
-    pub fn load(&mut self, url: &str) -> io::Result<Doc> {
-        self.unlock(url, "")
-    }
-
-    /// Loads text `url` as a sheet, read as `how` says.
-    pub fn import(&mut self, url: &str, how: &crate::sheet::csv::Import) -> io::Result<Doc> {
-        use crate::sheet::csv::{COLUMNS, ENCODINGS};
-        let at = |found: Option<usize>| found.expect("a listed choice") as u64;
-        let pack = Pack::new()
-            .str(url)
-            .u64(u64::from(how.separator))
-            .u64(how.quote.map_or(0, u64::from))
-            .u64(at(ENCODINGS.iter().position(|e| *e == how.encoding)))
-            .u64(how.columns.len() as u64);
-        let pack = how.columns.iter().fold(pack, |pack, column| {
-            pack.u64(at(COLUMNS.iter().position(|c| c == column)))
-        });
-        let payload = self.request(tag::IMPORT, &pack.bytes())?;
-        let id = Unpack::new(&payload).u64()?;
-        self.feed.opened(id);
-        Ok(Doc { worker: self.session, id, rev: 0 })
-    }
-
-    /// Loads `url` with its password; a locked one is PermissionDenied.
-    pub fn unlock(&mut self, url: &str, password: &str) -> io::Result<Doc> {
-        let request = Pack::new().str(url).str(password).bytes();
-        let payload = self.request(tag::LOAD, &request).map_err(|error| {
-            if error.to_string() == crate::ipc::LOCKED {
-                io::Error::new(io::ErrorKind::PermissionDenied, error.to_string())
-            } else {
-                error
-            }
-        })?;
-        let id = Unpack::new(&payload).u64()?;
-        self.feed.opened(id);
-        Ok(Doc { worker: self.session, id, rev: 0 })
+    /// The name last asked for; a restart signs with it.
+    pub fn author(&self) -> Option<&str> {
+        self.author.as_deref()
     }
 
     /// Runs a macro by its URL (LOK-11 probe).
@@ -444,10 +420,7 @@ impl Worker {
             if self.supervisor.check().is_err() {
                 return Err(self.supervisor.timed_out());
             }
-            #[cfg(windows)]
             return Err(self.broken(request, error));
-            #[cfg(not(windows))]
-            return Err(error);
         }
         #[cfg(windows)]
         let answer = self.replies.recv_timeout(self.request_timeout);

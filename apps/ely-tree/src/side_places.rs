@@ -89,7 +89,7 @@ pub fn places(tree: &Entity<Tree>, cx: &mut Context<Changes>) -> AnyElement {
     let Some(read) = &opened.places.read else {
         return div().into_any_element();
     };
-    let picked = read_tree.picked_place.clone();
+    let picked = opened.picked_place.clone();
     let label = |key: &str| text(cx, key, &[]);
     let pick = |place: Place| {
         let this = tree.downgrade();
@@ -124,26 +124,33 @@ pub fn places(tree: &Entity<Tree>, cx: &mut Context<Changes>) -> AnyElement {
             Box::new(|t, _, cx| t.ask_force(cx)),
         ),
     ]);
-    let local = div().flex().flex_wrap().gap_1().children([
+    let terminal = crate::tools::TERMINAL.then(|| {
         button(
             tree,
             "tree-terminal",
             label("tree.tool.terminal"),
             Box::new(|t, _, cx| t.open_terminal(cx)),
-        ),
-        button(
-            tree,
-            "tree-reveal",
-            label("tree.tool.reveal"),
-            Box::new(|t, _, cx| t.reveal(cx)),
-        ),
-        button(
-            tree,
-            "tree-clean",
-            label("tree.clean.open"),
-            Box::new(|t, _, cx| t.ask_clean(cx)),
-        ),
-    ]);
+        )
+    });
+    let local = div()
+        .flex()
+        .flex_wrap()
+        .gap_1()
+        .children(terminal)
+        .children([
+            button(
+                tree,
+                "tree-reveal",
+                label(crate::tools::REVEAL),
+                Box::new(|t, _, cx| t.reveal(cx)),
+            ),
+            button(
+                tree,
+                "tree-clean",
+                label("tree.clean.open"),
+                Box::new(|t, _, cx| t.ask_clean(cx)),
+            ),
+        ]);
     let mut out: Vec<AnyElement> = vec![net.into_any_element(), local.into_any_element()];
     out.push(heading(
         label("tree.places.stashes"),

@@ -13,7 +13,7 @@ fn keys_never_wait_behind_the_event_watch() {
     let source = dir.path().join("in.fods");
     write(&source, FODS);
     let doc = worker
-        .load(&format!("file://{}", source.display()))
+        .load(&crate::file_url(&source))
         .unwrap();
     let feed = worker.feed();
     let shared = std::sync::Arc::new(std::sync::Mutex::new(worker));

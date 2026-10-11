@@ -273,6 +273,18 @@ fn a_discard_drops_points_and_records_it() {
 }
 
 #[test]
+fn a_torn_lock_counts_as_a_crash() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    for torn in ["", "op", "open x"] {
+        std::fs::write(dir.path().join("session.lock"), torn).expect("writes");
+        assert_eq!(Crash::check(dir.path(), |_| true).expect("reads"), Marker::Crashed, "{torn:?}");
+    }
+    // Opening again rewrites it whole.
+    Crash::open(dir.path(), 7).expect("opens");
+    assert_eq!(Crash::check(dir.path(), |pid| pid == 7).expect("reads"), Marker::Clean);
+}
+
+#[test]
 fn the_lock_tells_crash_from_discard() {
     let dir = tempfile::tempdir().expect("a temp dir");
     let lock = Crash::open(dir.path(), 4242).expect("the lock opens");
@@ -392,4 +404,16 @@ fn the_task_status_starts_from_the_recovery() {
     });
     assert_eq!(task.last_ok(), Some(at(100)));
     task.stop();
+}
+
+#[test]
+fn keeping_sealed_points_opens_none_of_them() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let mut old = Recovery::sensitive(dir.path().to_path_buf(), key()).with_limits(2, u64::MAX);
+    old.write_once(b"one", Some("1:1"), at(100)).expect("lands");
+    // Another run's key cannot open the older points.
+    let mut now = Recovery::sensitive(dir.path().to_path_buf(), [9u8; 32]).with_limits(2, u64::MAX);
+    now.write_once(b"two", Some("2:2"), at(200)).expect("pruning reads names only");
+    now.write_once(b"three", None, at(300)).expect("and drops the oldest unread");
+    assert_eq!(now.stamps().expect("names").len(), 2);
 }

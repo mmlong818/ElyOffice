@@ -8,7 +8,7 @@ use gpui::{AnyElement, App, Context, IntoElement, Pixels, Point, Styled as _, di
 
 use crate::layout::Placed;
 use crate::pages::rect_on;
-use crate::view::PdfView;
+use crate::view::{PdfView, Unread};
 
 /// What a press on a page does.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -76,6 +76,10 @@ pub struct Drag {
     pub from: (f32, f32),
     pub now: (f32, f32),
     pub scale: bool,
+    /// Where the press landed, in window pixels.
+    pub pressed: (f32, f32),
+    /// The pointer went past a click's slack.
+    pub moved: bool,
 }
 
 /// The corner handle's reach, in page points.
@@ -107,6 +111,11 @@ fn inside(rect: &[f32; 4], (x, y): (f32, f32)) -> bool {
     x >= rect[0] && x <= rect[2] && y >= rect[1] && y <= rect[3]
 }
 
+/// Whether `outer` holds all of `inner`.
+fn covers(outer: &[f32; 4], inner: &[f32; 4]) -> bool {
+    outer[0] <= inner[0] && outer[1] <= inner[1] && outer[2] >= inner[2] && outer[3] >= inner[3]
+}
+
 impl PdfView {
     /// A drag or drawing is under way.
     pub fn gesturing(&self) -> bool {
@@ -130,7 +139,9 @@ impl PdfView {
         if !self.tool.edits() || self.reading_layer {
             return;
         }
-        let Some(page) = pages.iter().copied().find(|page| !self.layers.contains_key(page)) else {
+        let Some(page) = (pages.iter().copied())
+            .find(|page| !self.layers.contains_key(page) && !self.unread.contains(&Unread::Layer(*page)))
+        else {
             return;
         };
         self.reading_layer = true;
@@ -147,7 +158,10 @@ impl PdfView {
                     Ok(layer) => {
                         view.layers.insert(page, layer);
                     }
-                    Err(error) => view.fail("reading what the page holds", &error, cx),
+                    Err(error) => {
+                        view.unread.insert(Unread::Layer(page));
+                        view.fail("reading what the page holds", &error, cx)
+                    }
                 }
                 cx.notify();
             },
@@ -174,16 +188,21 @@ impl PdfView {
             Some(Aim::Object { page: on, index }) if on == page => layer.drawn.get(index).filter(|d| corner(&d.rect)).map(|_| (index, true)),
             _ => None,
         };
-        let hit = held.or_else(|| layer.drawn.iter().rposition(|d| inside(&d.rect, point)).map(|index| (index, false)));
+        let text = layer.blocks.iter().position(|b| b.editable && inside(&b.rect, point));
+        // Text wins over an object drawn all around it.
+        let around = |rect: &[f32; 4]| text.is_some_and(|t| covers(rect, &layer.blocks[t].rect));
+        let hit = held.or_else(|| {
+            let object = layer.drawn.iter().rposition(|d| inside(&d.rect, point) && !around(&d.rect));
+            object.map(|index| (index, false))
+        });
         self.aim = match hit {
             Some((index, scale)) => {
                 let rect = layer.drawn[index].rect;
-                self.drag = Some(Drag { page, index, rect, from: point, now: point, scale });
+                let pressed = (f32::from(at.x), f32::from(at.y));
+                self.drag = Some(Drag { page, index, rect, from: point, now: point, scale, pressed, moved: false });
                 Some(Aim::Object { page, index })
             }
-            None => (layer.blocks.iter())
-                .position(|b| b.editable && inside(&b.rect, point))
-                .map(|index| Aim::Text { page, index }),
+            None => text.map(|index| Aim::Text { page, index }),
         };
         cx.notify();
     }
@@ -193,6 +212,8 @@ impl PdfView {
             return;
         };
         if let Some(drag) = self.drag.as_mut().filter(|drag| drag.page == page) {
+            let far = (f32::from(at.x) - drag.pressed.0).abs() + (f32::from(at.y) - drag.pressed.1).abs();
+            drag.moved |= far >= crate::annotate::CLICK;
             drag.now = point;
             cx.notify();
         }
@@ -203,7 +224,8 @@ impl PdfView {
         let Some(drag) = self.drag.take() else {
             return;
         };
-        if (drag.now.0 - drag.from.0).abs() < 1.0 && (drag.now.1 - drag.from.1).abs() < 1.0 {
+        // A hand that shakes a little still clicks.
+        if !drag.moved {
             return cx.notify();
         }
         // A queued edit may renumber what was dragged.
@@ -264,7 +286,7 @@ mod tests {
 
     #[test]
     fn a_drag_moves_or_scales_from_the_top_left() {
-        let mut drag = Drag { page: 0, index: 0, rect: [10.0, 20.0, 110.0, 70.0], from: (50.0, 40.0), now: (60.0, 45.0), scale: false };
+        let mut drag = Drag { page: 0, index: 0, rect: [10.0, 20.0, 110.0, 70.0], from: (50.0, 40.0), now: (60.0, 45.0), scale: false, pressed: (0.0, 0.0), moved: true };
         assert_eq!(drag.change(), [1.0, 0.0, 0.0, 1.0, 10.0, 5.0]);
         assert_eq!(drag.shown(), [20.0, 25.0, 120.0, 75.0]);
         drag = Drag { from: (110.0, 70.0), now: (210.0, 80.0), scale: true, ..drag };

@@ -181,17 +181,17 @@ mod tests {
         };
         feed.push(1, first);
         feed.push(1, second);
-        let batch = feed.wait(&Doc { worker: 0, id: 1, rev: 0 }, 0, 0).expect("a batch");
+        let batch = feed.wait(&Doc { worker: 0, id: 1, rev: 0, kind: 0 }, 0, 0).expect("a batch");
         assert_eq!((batch.seq, batch.all, batch.rects.len()), (2, true, 1));
         assert_eq!(
             batch.states,
             [("b".to_string(), "1".to_string()), ("a".into(), "2".into())]
         );
-        let idle = feed.wait(&Doc { worker: 0, id: 1, rev: 0 }, 2, 0).expect("the snapshot");
+        let idle = feed.wait(&Doc { worker: 0, id: 1, rev: 0, kind: 0 }, 2, 0).expect("the snapshot");
         assert!(idle.rects.is_empty() && idle.states.is_empty() && idle.seq == 2);
         feed.closed(1);
         assert!(
-            feed.wait(&Doc { worker: 0, id: 1, rev: 0 }, 2, 0).is_err(),
+            feed.wait(&Doc { worker: 0, id: 1, rev: 0, kind: 0 }, 2, 0).is_err(),
             "a closed document"
         );
     }

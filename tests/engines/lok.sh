@@ -4,27 +4,11 @@ set -euo pipefail
 
 root=$(cd "$(dirname "$0")/../.." && pwd)
 here=$root/tests/engines
-expect=${ELY_LOK_EXPECT_TILE:-untouched}
-frameworks=${ELY_LOK_DIR:-}
+expect=${ELY_LOK_EXPECT_TILE:-written}
+# Never mount a LibreOffice image: macOS would register it.
+frameworks=${ELY_LOK_DIR:-$root/engines/lo-src/instdir/LibreOffice.app/Contents/Frameworks}
 work=$(mktemp -d)
-mount=
-cleanup() {
-  if [ -n "$mount" ]; then
-    for _ in 1 2 3 4 5 6 7 8 9 10; do
-      if hdiutil detach "$mount" -quiet 2>/dev/null; then
-        mount=
-        break
-      fi
-      sleep 1
-    done
-    [ -z "$mount" ] || {
-      echo "FAIL: cannot detach $mount; left in place" >&2
-      exit 1
-    }
-  fi
-  rm -rf "$work"
-}
-trap cleanup EXIT
+trap 'rm -rf "$work"' EXIT
 fail() {
   echo "FAIL: $*" >&2
   exit 1
@@ -36,18 +20,10 @@ case $expect in written | untouched) ;; *) fail "ELY_LOK_EXPECT_TILE is written 
   echo "SKIP lok: macOS only"
   exit 0
 }
-if [ -z "$frameworks" ]; then
-  dmg=$(ls "$root"/engines/LibreOffice_*_MacOS_aarch64.dmg 2>/dev/null | head -n 1 || true)
-  [ -n "$dmg" ] || {
-    echo "SKIP lok: set ELY_LOK_DIR, or put the LibreOffice dmg in engines/"
-    exit 0
-  }
-  [ "$(stat -f %z "$dmg")" = 297798926 ] || fail "$dmg is not the pinned 26.2.6 aarch64 image"
-  mount=$work/mnt
-  mkdir "$mount"
-  hdiutil attach -nobrowse -readonly -mountpoint "$mount" "$dmg" >/dev/null
-  frameworks=$mount/LibreOffice.app/Contents/Frameworks
-fi
+[ -f "$frameworks/libmergedlo.dylib" ] || {
+  echo "SKIP lok: no kernel at $frameworks; run scripts/build-libreoffice.sh"
+  exit 0
+}
 
 exports=$(nm -gU "$frameworks/libmergedlo.dylib")
 for symbol in _libreofficekit_hook _libreofficekit_hook_2 _lok_preinit; do

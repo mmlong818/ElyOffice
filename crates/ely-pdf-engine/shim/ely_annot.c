@@ -9,18 +9,34 @@ static const char *stamps[] = { "Approved", "AsIs", "Confidential", "Departmenta
 	"Expired", "Final", "ForComment", "ForPublicRelease", "NotApproved", "NotForPublicRelease", "Sold",
 	"TopSecret", NULL };
 
+/* Valid UTF-8 always: a stray byte becomes U+FFFD. */
 void ely_json_string(fz_context *ctx, fz_output *out, const char *s)
 {
+	char utf8[FZ_UTFMAX];
+	int rune;
 	fz_write_byte(ctx, out, '"');
-	for (; *s; s++)
+	while (*s)
 	{
-		unsigned char c = (unsigned char)*s;
-		if (c == '"' || c == '\\')
-			fz_write_printf(ctx, out, "\\%c", c);
-		else if (c < 32)
-			fz_write_printf(ctx, out, "\\u%04x", c);
+		s += fz_chartorune(&rune, s);
+		/* A surrogate pair joins; a lone one is no character. */
+		if (rune >= 0xD800 && rune < 0xDC00)
+		{
+			int low;
+			int n = fz_chartorune(&low, s);
+			if (low >= 0xDC00 && low < 0xE000)
+			{
+				rune = 0x10000 + ((rune - 0xD800) << 10) + (low - 0xDC00);
+				s += n;
+			}
+		}
+		if ((rune >= 0xD800 && rune < 0xE000) || rune > 0x10FFFF)
+			rune = FZ_REPLACEMENT_CHARACTER;
+		if (rune == '"' || rune == '\\')
+			fz_write_printf(ctx, out, "\\%c", rune);
+		else if (rune < 32)
+			fz_write_printf(ctx, out, "\\u%04x", rune);
 		else
-			fz_write_byte(ctx, out, c);
+			fz_write_data(ctx, out, utf8, fz_runetochar(utf8, rune));
 	}
 	fz_write_byte(ctx, out, '"');
 }

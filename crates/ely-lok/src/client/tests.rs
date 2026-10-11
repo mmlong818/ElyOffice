@@ -6,6 +6,7 @@ mod analysis;
 mod charts;
 mod check;
 mod commands;
+mod filter;
 mod format;
 mod formula;
 mod handouts;
@@ -160,20 +161,20 @@ fn the_worker_round_trips_a_document() {
 
     let source = dir.path().join("note.fodt");
     write(&source, FODT);
-    let url = format!("file://{}", source.display());
+    let url = crate::file_url(&source);
     let doc = worker.load(&url).expect("the document loads");
     let (width, height) = doc.size(&mut worker).expect("the size");
     assert!(width > 0 || height > 0, "a nonzero document size");
 
     let odt = dir.path().join("note.odt");
-    doc.save_as(&mut worker, &format!("file://{}", odt.display()), "odt")
+    doc.save_as(&mut worker, &crate::file_url(&odt), "odt")
         .expect("the odt save");
     assert!(odt.try_exists().expect("the odt exists"));
     let doc2 = worker
-        .load(&format!("file://{}", odt.display()))
+        .load(&crate::file_url(&odt))
         .expect("the odt reloads");
     let pdf = dir.path().join("note.pdf");
-    doc2.save_as(&mut worker, &format!("file://{}", pdf.display()), "pdf")
+    doc2.save_as(&mut worker, &crate::file_url(&pdf), "pdf")
         .expect("the pdf save");
     let head = std::fs::read(&pdf).expect("the pdf reads");
     assert!(head.starts_with(b"%PDF"), "a real PDF comes out");
@@ -190,7 +191,7 @@ fn a_missing_file_is_an_error_never_a_success() {
     let dir = tempfile::tempdir().expect("a temp dir");
     let mut worker = Worker::spawn(&install, &dir.path().join("profile")).expect("the worker");
     let missing = dir.path().join("gone.odt");
-    let outcome = worker.load(&format!("file://{}", missing.display()));
+    let outcome = worker.load(&crate::file_url(&missing));
     assert!(outcome.is_err(), "LOK-09: the failure is an error");
 }
 
@@ -212,7 +213,12 @@ fn a_failed_check_refuses_every_later_request() {
 
 /// Initializes the profile fully, the CLI way (registers Basic).
 fn seed_basic(install: &Path, profile: &Path) {
+    #[cfg(target_os = "macos")]
     let soffice = install.parent().expect("the app dir").join("MacOS/soffice");
+    #[cfg(target_os = "linux")]
+    let soffice = install.join("soffice.bin");
+    #[cfg(windows)]
+    let soffice = install.join("soffice.exe");
     let url = ipc::file_url_of(profile);
     let status = std::process::Command::new(&soffice)
         .args(["--headless", "--norestore", "--terminate_after_init"])
@@ -252,8 +258,8 @@ fn a_macro_never_writes_its_marker() {
     let source = dir.path().join("macro.fodt");
     std::fs::write(&source, macro_fodt(&marker)).expect("the macro fodt writes");
     let doc = worker
-        .load(&format!("file://{}", source.display()))
-        .expect("the document loads");
+        .load(&crate::file_url(&source))
+        .expect("the macro document loads");
     std::thread::sleep(std::time::Duration::from_millis(800));
     assert!(
         !marker.try_exists().expect("the marker check"),
@@ -286,30 +292,22 @@ fn a_production_worker_refuses_run_macro() {
 #[cfg(target_os = "macos")]
 #[test]
 fn an_unpatched_build_is_rejected() {
-    let dmg = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../engines/LibreOffice_26.2.6_MacOS_aarch64.dmg");
-    if !dmg.try_exists().expect("the dmg check") {
-        eprintln!("SKIP: no official dmg");
+    // A plain folder: a mounted .app would be registered.
+    let frameworks = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../engines/lo-official/Contents/Frameworks");
+    if !frameworks.try_exists().expect("the folder check") {
+        eprintln!("SKIP: run scripts/extract-official-lo.sh");
         return;
     }
-    let mount = tempfile::tempdir().expect("a temp dir");
-    let attached = std::process::Command::new("hdiutil")
-        .args(["attach", "-nobrowse", "-readonly", "-mountpoint"])
-        .arg(mount.path())
-        .arg(&dmg)
-        .status()
-        .expect("hdiutil runs");
-    assert!(attached.success(), "the official dmg mounts");
-    let frameworks = mount.path().join("LibreOffice.app/Contents/Frameworks");
     let dir = tempfile::tempdir().expect("a temp dir");
-    let outcome = Worker::spawn(&frameworks, &dir.path().join("profile"));
-    assert!(outcome.is_err(), "the unpatched build must be rejected");
-    let detached = std::process::Command::new("hdiutil")
-        .args(["detach", "-quiet"])
-        .arg(mount.path())
-        .status()
-        .expect("hdiutil detaches");
-    assert!(detached.success());
+    let Err(error) = Worker::spawn(&frameworks, &dir.path().join("profile")) else {
+        panic!("the unpatched build must be rejected");
+    };
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidData, "{error}");
+    assert!(
+        error.to_string().contains("does not paint tiles (unpatched)"),
+        "rejected for the tile check, not {error}"
+    );
 }
 
 #[test]
@@ -323,11 +321,9 @@ fn shutdown_leaves_no_locks_or_temp() {
     let mut worker = Worker::spawn(&install, &profile).expect("the worker");
     let source = dir.path().join("note.fodt");
     write(&source, FODT);
-    #[cfg(windows)]
-    let url = crate::file_url(&source);
-    #[cfg(not(windows))]
-    let url = format!("file://{}", source.display());
-    let doc = worker.load(&url).expect("the document loads");
+    let doc = worker
+        .load(&crate::file_url(&source))
+        .expect("the document loads");
     let lock = dir.path().join(".~lock.note.fodt#");
     worker.close_doc(doc).expect("the document closes");
     worker.shutdown().expect("the worker shuts down");
@@ -360,7 +356,7 @@ fn each_load_is_its_own_session() {
     let mut worker = Worker::spawn(&install, &dir.path().join("profile")).expect("the worker spawns");
     let source = dir.path().join("note.fodt");
     write(&source, FODT);
-    let url = format!("file://{}", source.display());
+    let url = crate::file_url(&source);
     // Freed native documents reuse addresses; sessions never repeat.
     let mut old = Vec::new();
     for _ in 0..4 {
@@ -388,7 +384,7 @@ fn a_document_belongs_to_its_worker() {
     let dir = tempfile::tempdir().expect("a temp dir");
     let source = dir.path().join("note.fodt");
     write(&source, FODT);
-    let url = format!("file://{}", source.display());
+    let url = crate::file_url(&source);
     let mut first = Worker::spawn(&install, &dir.path().join("one")).expect("a worker");
     let mut second = Worker::spawn(&install, &dir.path().join("two")).expect("another worker");
     let theirs = first.load(&url).expect("loads");

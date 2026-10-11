@@ -94,12 +94,15 @@ impl Tree {
     }
 
     pub fn pick_place(&mut self, place: Place, cx: &mut Context<Self>) {
+        self.look = None;
         match &place {
             Place::Stash(oid) => self.pick_in(Whose::Stash, oid, cx),
             Place::Reflog(moved) => self.pick_in(Whose::Reflog, &moved.oid, cx),
             _ => {}
         }
-        self.picked_place = Some(place);
+        if let Some(opened) = self.active.and_then(|id| self.opened_mut(id)) {
+            opened.picked_place = Some(place);
+        }
         cx.notify();
     }
 

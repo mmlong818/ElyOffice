@@ -8,9 +8,6 @@ use std::{
 
 use ely_ipc::{Pack, Unpack, check_reply, read_frame, write_frame};
 
-#[cfg(windows)]
-use std::os::windows::process::CommandExt;
-
 use crate::proto::{self, Bookmark, Char, tag};
 
 
@@ -106,10 +103,7 @@ impl Worker {
 
     /// Spawns `bin`; one from other sources is refused.
     pub fn spawn_from(bin: &Path) -> io::Result<Self> {
-        let mut command = Command::new(bin);
-        #[cfg(windows)]
-        command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW; stdio remains piped.
-        let mut child = command
+        let mut child = ely_ipc::windowless(&mut Command::new(bin))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -299,10 +293,30 @@ impl Drop for Worker {
     }
 }
 
-/// A permission refusal is `PermissionDenied`, named by what it needs.
+/// A request the document's permissions refused, by what it needs.
+#[derive(Debug)]
+pub struct Refused(pub &'static str);
+
+impl std::fmt::Display for Refused {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}{}", crate::proto::may::REFUSED, self.0)
+    }
+}
+
+impl std::error::Error for Refused {}
+
+/// What a permission refusal needs; none for other errors.
+pub fn refused(error: &io::Error) -> Option<&'static str> {
+    error.get_ref()?.downcast_ref::<Refused>().map(|refused| refused.0)
+}
+
+/// A worker error; a refusal names a permission it knows.
 fn refusal(text: String) -> io::Error {
-    match text.strip_prefix(crate::proto::may::REFUSED) {
-        Some(needed) => io::Error::new(io::ErrorKind::PermissionDenied, needed.to_string()),
+    let named = text
+        .strip_prefix(crate::proto::may::REFUSED)
+        .and_then(|needed| crate::proto::may::NAMES.iter().find(|(_, name)| *name == needed));
+    match named {
+        Some((_, name)) => io::Error::other(Refused(name)),
         None => io::Error::other(text),
     }
 }

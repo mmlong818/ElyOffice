@@ -23,22 +23,17 @@ pub(super) fn open(body: &str) -> (tempfile::TempDir, Worker, Doc) {
     let mut worker = Worker::spawn(&install, &dir.path().join("profile")).expect("the worker");
     let source = dir.path().join("in.fodt");
     write(&source, body);
-    #[cfg(windows)]
-    let url = crate::file_url(&source);
-    #[cfg(not(windows))]
-    let url = format!("file://{}", source.display());
-    let doc = worker.load(&url).expect("the document loads");
+    let doc = worker
+        .load(&crate::file_url(&source))
+        .expect("the document loads");
     (dir, worker, doc)
 }
 
 /// The document saved as flat XML.
 pub(super) fn saved(dir: &tempfile::TempDir, worker: &mut Worker, doc: &Doc, name: &str) -> String {
     let out = dir.path().join(name);
-    #[cfg(windows)]
-    let url = crate::ipc::file_url_of(&out);
-    #[cfg(not(windows))]
-    let url = format!("file://{}", out.display());
-    doc.save_as(worker, &url, "fodt").expect("the save works");
+    doc.save_as(worker, &crate::file_url(&out), "fodt")
+        .expect("the save works");
     std::fs::read_to_string(&out).expect("the save reads")
 }
 
@@ -218,7 +213,7 @@ fn copy_gives_text_and_html_and_paste_takes_html() {
     let target = dir.path().join("b.fodt");
     write(&target, FODT);
     let other = worker
-        .load(&format!("file://{}", target.display()))
+        .load(&crate::file_url(&target))
         .expect("b loads");
     click(&mut worker, &other, 150, 150);
     worker
@@ -320,7 +315,7 @@ fn a_calc_cut_finishes_without_a_dialog() {
         let source = root.join("in.fods");
         write(&source, FODS);
         let doc = worker
-            .load(&format!("file://{}", source.display()))
+            .load(&crate::file_url(&source))
             .expect("the sheet loads");
         worker
             .post_key(&doc, 0, 1027 | 0x1000)
@@ -328,7 +323,7 @@ fn a_calc_cut_finishes_without_a_dialog() {
         let copied = worker.copy(&doc).expect("copy runs");
         worker.cut(&doc).expect("the cut runs");
         let out = root.join("out.fods");
-        doc.save_as(&mut worker, &format!("file://{}", out.display()), "fods")
+        doc.save_as(&mut worker, &crate::file_url(&out), "fods")
             .expect("the save works");
         let xml = std::fs::read_to_string(&out).expect("the save reads");
         done.send((copied.len(), xml.contains("Hello")))
@@ -375,7 +370,7 @@ fn a_table_survives_copy_and_paste() {
     let target = dir.path().join("b.fodt");
     write(&target, FODT);
     let other = worker
-        .load(&format!("file://{}", target.display()))
+        .load(&crate::file_url(&target))
         .expect("b loads");
     click(&mut worker, &other, 150, 150);
     worker

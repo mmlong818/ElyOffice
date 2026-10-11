@@ -111,6 +111,28 @@ fn an_unreadable_log_is_an_error_not_nothing() {
     assert!(log_part(log).is_err(), "a log that cannot be read shows");
 }
 
+#[cfg(windows)]
+#[test]
+fn an_unreadable_log_is_an_error_not_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let logs = dir.path().join("logs");
+    std::fs::create_dir(&logs).unwrap();
+    let log = logs.join("ely.log");
+    assert_eq!(log_part(log.clone()).unwrap(), None, "no log yet is nothing");
+    std::fs::write(&log, "a line\n").unwrap();
+    let icacls = |path: &std::path::Path, args: [&str; 2]| {
+        let done = std::process::Command::new("icacls").arg(path).args(args).output().unwrap();
+        assert!(done.status.success(), "icacls: {}", String::from_utf8_lossy(&done.stdout));
+    };
+    // Everyone loses its attributes and its folder's listing.
+    icacls(&log, ["/deny", "*S-1-1-0:(RA)"]);
+    icacls(&logs, ["/deny", "*S-1-1-0:(RD)"]);
+    let read = log_part(log.clone());
+    icacls(&logs, ["/remove:d", "*S-1-1-0"]);
+    icacls(&log, ["/remove:d", "*S-1-1-0"]);
+    assert!(read.is_err(), "a log that cannot be read shows: {read:?}");
+}
+
 #[test]
 fn a_cut_log_starts_at_a_whole_line() {
     let dir = tempfile::tempdir().unwrap();

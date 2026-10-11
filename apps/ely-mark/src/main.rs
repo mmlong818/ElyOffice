@@ -1,3 +1,4 @@
+// Release builds open no console on Windows.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod attach;
@@ -17,6 +18,7 @@ mod places;
 mod rename;
 mod restore;
 mod side;
+mod tally;
 mod text;
 mod vcs;
 mod view;

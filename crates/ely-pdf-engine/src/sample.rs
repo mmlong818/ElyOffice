@@ -26,6 +26,8 @@ pub struct Extras<'a> {
     pub stamp: Option<&'a str>,
     /// Page one: a 2x2 image, 100x50 at 72, 500.
     pub picture: bool,
+    /// With `picture`: page one draws it full-page first.
+    pub backdrop: bool,
     /// Fields hang under one parent of this name.
     pub parent: Option<&'a str>,
     /// A parent and child field with no widget.
@@ -95,7 +97,11 @@ pub fn pdf_with(pages: &[(f32, f32, &[&str])], marks: &[Mark], extras: &Extras) 
         _ => b"<< /Type /Outlines /Count 0 >>".to_vec(),
     });
     for (n, (w, h, lines)) in pages.iter().enumerate() {
-        let mut stream = String::from("BT /F1 18 Tf 72 0 Td\n");
+        let mut stream = match n == 0 && extras.backdrop {
+            true => format!("q {w} 0 0 {h} 0 0 cm /Im1 Do Q\n"),
+            false => String::new(),
+        };
+        stream.push_str("BT /F1 18 Tf 72 0 Td\n");
         for (at, line) in lines.iter().enumerate() {
             let y = h - 72.0 - at as f32 * 24.0;
             stream.push_str(&format!("1 0 0 1 72 {y} Tm ({line}) Tj\n"));

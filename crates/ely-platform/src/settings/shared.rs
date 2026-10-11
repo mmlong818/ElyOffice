@@ -38,6 +38,7 @@ pub const LANGUAGE: &str = "language";
 pub const MOTION: &str = "motion";
 pub const OMARCHY_SYNC: &str = "omarchy_sync";
 pub const AUTHOR: &str = "author";
+pub const CHECK_UPDATES: &str = "check_updates";
 
 /// The shared settings; absent fields take their defaults.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -48,6 +49,8 @@ pub struct Shared {
     pub omarchy_sync: bool,
     /// Signs comments and changes; empty means the account name.
     pub author: String,
+    /// Asks for a newer release at launch; off unless chosen.
+    pub check_updates: bool,
 }
 
 impl Default for Shared {
@@ -58,6 +61,7 @@ impl Default for Shared {
             motion: Motion::System,
             omarchy_sync: true,
             author: String::new(),
+            check_updates: false,
         }
     }
 }
@@ -107,6 +111,11 @@ impl Shared {
             appearance: pick(fields, APPEARANCE, &Appearance::ALL)?.unwrap_or(defaults.appearance),
             language: pick(fields, LANGUAGE, &Language::ALL)?.unwrap_or(defaults.language),
             motion: pick(fields, MOTION, &Motion::ALL)?.unwrap_or(defaults.motion),
+            check_updates: match fields.get(CHECK_UPDATES) {
+                None => defaults.check_updates,
+                Some(Value::Bool(on)) => *on,
+                Some(other) => return Err(wrong(CHECK_UPDATES, other)),
+            },
             omarchy_sync: match fields.get(OMARCHY_SYNC) {
                 None => defaults.omarchy_sync,
                 Some(Value::Bool(on)) => *on,

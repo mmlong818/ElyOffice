@@ -1,0 +1,65 @@
+LOK: Windows paints tiles and slide layers, then copies
+
+Win32 virtual devices have no SetSizeUsingBuffer: the base default
+returns false, so the device for a client buffer stayed 1x1 pixel.
+Calc tiles came back black with one painted pixel, and slide layers
+were empty. Take the macOS path there: paint into the device at full
+size, then copy the pixels into the client buffer.
+
+diff --git a/desktop/source/lib/init.cxx b/desktop/source/lib/init.cxx
+index 39b72fb..253fbc0 100644
+--- a/desktop/source/lib/init.cxx
++++ b/desktop/source/lib/init.cxx
+@@ -4325,8 +4325,8 @@ static void doc_paintTile(LibreOfficeKitDocument* pThis,
+     // Set background to transparent by default.
+     pDevice->SetBackground(Wallpaper(COL_TRANSPARENT));
+ 
+-#if defined(MACOSX)
+-    // Aqua devices cannot paint client buffers: paint, then copy.
++#if defined(MACOSX) || defined(_WIN32)
++    // No client buffers here: paint, then copy.
+     pDevice->SetOutputSizePixel(Size(nCanvasWidth, nCanvasHeight));
+ #else
+     pDevice->SetOutputSizePixelScaleOffsetAndLOKBuffer(
+diff --git a/sd/source/ui/tools/SlideshowLayerRenderer.cxx b/sd/source/ui/tools/SlideshowLayerRenderer.cxx
+index 7ecd4ad..3f3a478 100644
+--- a/sd/source/ui/tools/SlideshowLayerRenderer.cxx
++++ b/sd/source/ui/tools/SlideshowLayerRenderer.cxx
+@@ -88,7 +88,7 @@ private:
+ 
+     EEControlBits mnSavedControlBits;
+     Color maSavedBackgroundColor;
+-#if defined(MACOSX)
++#if defined(MACOSX) || defined(_WIN32)
+     unsigned char* mpBuffer;
+     Size maBufferSize;
+ #endif
+@@ -103,7 +103,7 @@ public:
+         , maVirtualDevice(
+               CoreGraphics::getiOSGraphicsData(pBuffer, rSlideSize.Width(), rSlideSize.Height()),
+               Size(1, 1), DeviceFormat::WITHOUT_ALPHA)
+-#elif defined(MACOSX)
++#elif defined(MACOSX) || defined(_WIN32)
+         , mpBuffer(pBuffer)
+         , maBufferSize(rSlideSize)
+         , maVirtualDevice(DeviceFormat::WITH_ALPHA)
+@@ -123,8 +123,8 @@ public:
+ 
+         maVirtualDevice->SetBackground(Wallpaper(COL_TRANSPARENT));
+ 
+-#if defined(MACOSX)
+-        // Aqua devices cannot paint client buffers: paint, then copy.
++#if defined(MACOSX) || defined(_WIN32)
++        // No client buffers here: paint, then copy.
+         (void)rScale;
+         maVirtualDevice->SetOutputSizePixel(rSlideSize);
+ #else
+@@ -155,7 +155,7 @@ public:
+ #ifdef IOS
+         CoreGraphics::CGContextRelease(maVirtualDevice->GetSystemGfxData().rCGContext);
+ #endif
+-#if defined(MACOSX)
++#if defined(MACOSX) || defined(_WIN32)
+         maVirtualDevice->EnableMapMode(false);
+         vcl::bitmap::fillWithData(mpBuffer,
+                                   maVirtualDevice->GetBitmap(Point(), maBufferSize));

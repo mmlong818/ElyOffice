@@ -124,6 +124,7 @@ impl RenderOnce for Shell {
             .flex()
             .flex_col()
             .child(TitleBar::new("titlebar").title(self.title))
+            .children(crate::updates::updater(cx))
             .children(menu_bar(cx))
             .children(self.tabs);
         // Panels give way so the content keeps its room.

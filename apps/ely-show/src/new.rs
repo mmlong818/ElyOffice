@@ -34,8 +34,8 @@ impl Deck {
         match ely_lok::templates("presnt") {
             Ok(templates) => {
                 log::info!("show: {} bundled templates", templates.len());
-                self.dialog = Some(Dialog::New(Choosing { templates }));
-                cx.notify();
+                // Refused while another dialog is open; it says so.
+                let _ = self.open_dialog(Dialog::New(Choosing { templates }), cx);
             }
             Err(error) => self.engine_failed(&error.to_string(), cx),
         }

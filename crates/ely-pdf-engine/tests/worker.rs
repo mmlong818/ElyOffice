@@ -186,6 +186,7 @@ fn a_reply_to_another_request_is_refused() {
 }
 
 /// A noisy RGB PNG, stored uncompressed: large on disk.
+#[cfg(unix)]
 fn big_png(path: &Path, side: u32) {
     let crc = |bytes: &[u8]| {
         let mut crc = 0xffff_ffffu32;
@@ -204,11 +205,12 @@ fn big_png(path: &Path, side: u32) {
     let mut raw = Vec::new();
     let mut seed = 7u32;
     for _ in 0..side {
-        raw.push(0);
-        for _ in 0..side * 3 {
+        // Each row: filter byte none, then its noise.
+        let noise = (0..side * 3).map(|_| {
             seed = seed.wrapping_mul(1_103_515_245).wrapping_add(12_345);
-            raw.push((seed >> 16) as u8);
-        }
+            (seed >> 16) as u8
+        });
+        raw.extend(std::iter::once(0).chain(noise));
     }
     // zlib with stored blocks; Adler-32 at the end.
     let mut zlib = vec![0x78, 0x01];
@@ -245,7 +247,7 @@ fn a_failed_open_keeps_no_memory() {
     };
     // MuPDF's 256 MB store fills first; then nothing grows.
     for _ in 0..70 {
-        let refused = worker.open(&png).err().expect("not a PDF");
+        let refused = worker.open(&png).expect_err("not a PDF");
         assert!(refused.to_string().contains("not a PDF"), "{refused}");
     }
     let before = rss(worker.pid());

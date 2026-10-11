@@ -238,13 +238,18 @@ pub trait Opening: Host {
 
     /// Engine errors become toasts; kernel edits mark the session.
     fn watch(&mut self, id: u64, view: &Entity<View<Self>>, cx: &mut Context<Self>) {
+        let seen = std::cell::Cell::new(Self::Engine::edited(view.read(cx)));
         let reported = move |host: &mut Self,
                              view: &Entity<View<Self>>,
                              modified: bool,
                              cx: &mut Context<Self>| {
+            let edited = Self::Engine::edited(view.read(cx));
+            let moved = seen.replace(edited) != edited;
             if let Some(tab) = host.tab_mut(id) {
                 match (modified, tab.modified) {
                     (true, false) => tab.session.edit(),
+                    // An edit landing mid-save outdates its ticket.
+                    (true, true) if moved => tab.session.edit(),
                     (false, true) => tab.session.reverted(),
                     _ => {}
                 }

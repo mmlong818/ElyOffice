@@ -29,6 +29,14 @@ impl Desk {
             return;
         }
         tab.extra.heard = changed;
+        self.save_after_pause(id, cx);
+    }
+
+    /// Counts unsaved text as an edit; saves after the pause.
+    pub fn save_after_pause(&mut self, id: u64, cx: &mut Context<Self>) {
+        let Some(tab) = self.tab_mut(id) else {
+            return;
+        };
         tab.extra.policy.edit(Instant::now());
         cx.spawn(async move |desk, cx| {
             let wait = DEBOUNCE + Duration::from_millis(50);

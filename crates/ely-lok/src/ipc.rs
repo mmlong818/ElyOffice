@@ -86,9 +86,14 @@ pub mod tag {
     /// Refuses unless the document is still at a revision.
     pub const EXPECT: u8 = 33;
     pub const REVISION: u8 = 34;
+    /// One layer's pixels from the last `SLIDE_LAYERS`.
+    pub const SLIDE_LAYER: u8 = 35;
     pub const OK: u8 = 100;
     pub const ERR: u8 = 101;
 }
+
+/// How a refusal for a changed document begins.
+pub const STALE: &str = "stale: ";
 
 #[cfg(test)]
 mod tests {
@@ -101,6 +106,3 @@ mod tests {
         assert!(super::path_of_file_url("file:///bad%zz").is_err());
     }
 }
-
-/// How a refusal for a changed document begins.
-pub const STALE: &str = "stale: ";

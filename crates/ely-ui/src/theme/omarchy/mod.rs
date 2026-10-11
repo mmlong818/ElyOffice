@@ -29,9 +29,12 @@ pub fn load(current: &Path) -> Result<Option<OmarchyTheme>> {
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error).with_context(|| format!("cannot read {}", file.display())),
     };
-    let name = fs::read_to_string(current.join("theme.name"))
-        .ok()
-        .map(|name| name.trim().to_string());
+    let name_file = current.join("theme.name");
+    let name = match fs::read_to_string(&name_file) {
+        Ok(name) => Some(name.trim().to_string()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error).with_context(|| format!("cannot read {}", name_file.display())),
+    };
     parse(&text, name, theme.join("light.mode").exists())
         .with_context(|| format!("{} is not a usable theme", file.display()))
         .map(Some)
@@ -53,6 +56,8 @@ pub fn changes(current: &Path) -> Result<(RecommendedWatcher, UnboundedReceiver<
     let (sender, receiver) = mpsc::unbounded();
     let mut watcher =
         notify::recommended_watcher(move |event: notify::Result<notify::Event>| match event {
+            // Reads, ours included, are no change.
+            Ok(event) if crate::watching::only_read(&event.kind) => {}
             Ok(_) => {
                 let _ = sender.unbounded_send(());
             }

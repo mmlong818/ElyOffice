@@ -61,29 +61,44 @@ test("the lamp turns the page dark in a wave", async ({ page }) => {
   await expect(page.locator("html")).toHaveCSS("background-color", "rgb(37, 37, 37)");
 });
 
-test("dark text keeps 4.5:1 against the page", async ({ page }) => {
-  await page.emulateMedia({ colorScheme: "dark" });
-  await open(page);
-  const worst = await page.evaluate(() => {
-    const parse = (c: string) => c.match(/[\d.]+/g)!.slice(0, 3).map(Number);
-    const lum = (c: string) => {
-      const [r, g, b] = parse(c).map((v) => {
-        const s = v / 255;
-        return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
-      });
-      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-    };
-    const page = lum(getComputedStyle(document.documentElement).backgroundColor);
-    const ratios = [...document.querySelectorAll<HTMLElement>("h1, h2, h3, p, a, li, button")]
-      .filter((el) => el.textContent?.trim() && getComputedStyle(el).color !== "rgba(0, 0, 0, 0)")
-      .map((el) => {
-        const text = lum(getComputedStyle(el).color);
-        return { ratio: (Math.max(text, page) + 0.05) / (Math.min(text, page) + 0.05), text: el.textContent };
-      });
-    return ratios.sort((a, b) => a.ratio - b.ratio)[0];
-  });
-  expect(worst.ratio, String(worst.text)).toBeGreaterThanOrEqual(4.5);
+for (const scheme of ["light", "dark"] as const) {
+  test(`${scheme} text and links keep 4.5:1 against the page`, async ({ page }) => {
+    await page.emulateMedia({ colorScheme: scheme });
+    await open(page);
+    const worst = await page.evaluate(() => {
+      const parse = (c: string) => {
+        const [r, g, b, a = 1] = c.match(/[\d.]+/g)!.map(Number);
+        return { rgb: [r, g, b], a };
+      };
+      const lum = (rgb: number[]) => {
+        const [r, g, b] = rgb.map((v) => {
+          const s = v / 255;
+          return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+        });
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      };
+      const ground = parse(getComputedStyle(document.documentElement).backgroundColor).rgb;
+      const page = lum(ground);
+      const alpha = (el: HTMLElement) => {
+        let a = parse(getComputedStyle(el).color).a;
+        for (let at: Element | null = el; at; at = at.parentElement) a *= Number(getComputedStyle(at).opacity);
+        return a;
+      };
+      const shown = (el: HTMLElement) => {
+        const a = alpha(el);
+        return parse(getComputedStyle(el).color).rgb.map((v, i) => v * a + ground[i] * (1 - a));
+      };
+      const ratios = [...document.querySelectorAll<HTMLElement>("h1, h2, h3, p, a, li, button")]
+        .filter((el) => el.textContent?.trim() && alpha(el) > 0)
+        .map((el) => {
+          const text = lum(shown(el));
+          return { ratio: (Math.max(text, page) + 0.05) / (Math.min(text, page) + 0.05), text: el.textContent };
+        });
+      return ratios.sort((a, b) => a.ratio - b.ratio)[0];
+    });
+    expect(worst.ratio, String(worst.text)).toBeGreaterThanOrEqual(4.5);
 });
+}
 
 test("the system scheme sets the first theme; the lamp's choice stays", async ({ page }) => {
   await page.emulateMedia({ colorScheme: "dark" });

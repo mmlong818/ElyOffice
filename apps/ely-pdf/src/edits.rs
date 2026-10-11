@@ -17,6 +17,10 @@ pub struct Queued {
     op: Op,
     pick: Option<BTreeSet<usize>>,
     doc: Doc,
+    /// The edit may add, drop, move or reshape pages.
+    pages: bool,
+    /// Aimed at a point: runs on the state it meets.
+    follow: bool,
 }
 
 /// The document as an edit left it.
@@ -36,20 +40,48 @@ impl PdfView {
         op: impl FnOnce(&mut Worker, Doc) -> io::Result<String> + Send + 'static,
         cx: &mut Context<Self>,
     ) {
-        self.edit_picking(what, None, op, cx);
+        self.queue_edit(what, None, false, op, cx);
+    }
+
+    /// Queues a point-aimed edit; only moving pages refuse it.
+    pub fn edit_at(
+        &mut self,
+        what: &'static str,
+        op: impl FnOnce(&mut Worker, Doc) -> io::Result<String> + Send + 'static,
+        cx: &mut Context<Self>,
+    ) {
+        if self.moving || self.queue.iter().any(|queued| queued.pages) {
+            let text = crate::viewer::Viewer::text(cx, "pdf.pages.changed", &[]);
+            cx.emit(crate::view::Failed(text.to_string()));
+            return cx.notify();
+        }
+        log::info!("pdf: queues {what}");
+        self.queue.push_back(Queued { what, op: Box::new(op), pick: None, doc: self.doc, pages: false, follow: true });
+        self.next_edit(cx);
+    }
+
+    /// Queues an edit to the pages themselves.
+    pub fn edit_pages(
+        &mut self,
+        what: &'static str,
+        op: impl FnOnce(&mut Worker, Doc) -> io::Result<String> + Send + 'static,
+        cx: &mut Context<Self>,
+    ) {
+        self.queue_edit(what, None, true, op, cx);
     }
 
     /// Queues `op`; once it lands, `pick` is picked.
-    pub fn edit_picking(
+    pub fn queue_edit(
         &mut self,
         what: &'static str,
         pick: Option<BTreeSet<usize>>,
+        pages: bool,
         op: impl FnOnce(&mut Worker, Doc) -> io::Result<String> + Send + 'static,
         cx: &mut Context<Self>,
     ) {
         log::info!("pdf: queues {what}");
         // Aimed at what is shown now; later states refuse it.
-        self.queue.push_back(Queued { what, op: Box::new(op), pick, doc: self.doc });
+        self.queue.push_back(Queued { what, op: Box::new(op), pick, doc: self.doc, pages, follow: false });
         self.next_edit(cx);
     }
 
@@ -57,10 +89,12 @@ impl PdfView {
         if self.editing {
             return;
         }
-        let Some(Queued { what, op, pick, doc }) = self.queue.pop_front() else {
+        let Some(Queued { what, op, pick, doc, pages, follow }) = self.queue.pop_front() else {
             return;
         };
-        self.editing = true;
+        // Earlier edits have landed; a point still means the same.
+        let doc = if follow { self.doc } else { doc };
+        (self.editing, self.moving) = (true, pages);
         self.off(
             move |worker| {
                 let mark = op(worker, doc)?;
@@ -70,10 +104,10 @@ impl PdfView {
                 Ok(Fresh { doc, mark, pages, first, marks: worker.outline(doc)? })
             },
             move |view, fresh, cx| {
-                view.editing = false;
+                (view.editing, view.moving) = (false, false);
                 match fresh {
                     Ok(fresh) => {
-                        view.refresh(fresh, cx);
+                        view.refresh(fresh, pages, cx);
                         if let Some(pick) = pick {
                             view.anchor = pick.first().copied();
                             view.picked = pick;
@@ -93,19 +127,31 @@ impl PdfView {
     }
 
     /// Everything read before the edit goes.
-    fn refresh(&mut self, fresh: Fresh, cx: &mut Context<Self>) {
+    fn refresh(&mut self, fresh: Fresh, pages: bool, cx: &mut Context<Self>) {
         self.version += 1;
         self.edited += 1;
         (self.doc, self.mark) = (fresh.doc, fresh.mark);
-        self.sizes = sizes(fresh.pages, &fresh.first);
+        let measured = sizes(fresh.pages, &fresh.first);
+        if pages || fresh.pages != self.sizes.len() {
+            // A page may now stand where another stood.
+            self.retire_tiles();
+            self.sizes = measured;
+            self.thumbs_stale.clear();
+            for (_, image) in self.thumbs.drain() {
+                self.retired.push(image);
+            }
+        } else {
+            // Same pages: old pictures stay until repainted.
+            self.keep_all();
+            self.thumbs_stale.extend(self.thumbs.keys().copied());
+            let read = fresh.first.len();
+            self.sizes[..read].copy_from_slice(&measured[..read]);
+        }
         self.marks = fresh.marks;
-        self.retire_tiles();
         self.failed.clear();
+        self.unread.clear();
         self.text.clear();
         self.asking_text.clear();
-        for (_, image) in self.thumbs.drain() {
-            self.retired.push(image);
-        }
         self.thumbs_failed.clear();
         // Indices shift with any edit; aims start over.
         (self.layers, self.aim, self.drag) = (Default::default(), None, None);
@@ -127,8 +173,10 @@ impl PdfView {
     /// The file now holds history `mark`.
     pub fn saved(&mut self, mark: &str, cx: &mut Context<Self>) {
         self.saved = mark.to_string();
+        self.saves += 1;
         // The file changed; read it again.
         self.signatures = None;
+        self.unread.retain(|unread| !matches!(unread, crate::view::Unread::Signatures(_)));
         cx.emit(Reported);
     }
 
@@ -144,6 +192,6 @@ impl PdfView {
 
     pub fn undo(&mut self, redo: bool, cx: &mut Context<Self>) {
         let what = if redo { "redo" } else { "undo" };
-        self.edit(what, move |worker, doc| worker.undo(doc, redo), cx);
+        self.edit_pages(what, move |worker, doc| worker.undo(doc, redo), cx);
     }
 }

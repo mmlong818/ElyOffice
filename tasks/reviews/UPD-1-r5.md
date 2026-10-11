@@ -1,0 +1,5 @@
+FAIL
+
+crates/ely-ui/src/updates.rs:203 — [P2] 启动自动检查会静默丢弃新增 Gitea 查询路径的错误。`manifest(app)` 在第 188 行先执行，查询失败便跳过负责记录结果的 `update::check`；`asked == false` 时错误进入第 204 行的空分支。实测将临时 HOME 的 `check_updates` 设为 true，启动本轮构建并打包的 ElyTree：Gitea 请求完成并返回 HTTP 200，当前发布缺少 `ely-tree.json`，直接调用生产 `release::asset_url` 得到 `release v0.1.1 has no ely-tree.json`，启动日志却完全没有检查失败记录。API 断网、HTTP 错误和无效响应同样进入此分支，违反出错暴露和关键路径日志规则。证据：`/tmp/upd1-r5-gitea-debug.log`、`/tmp/upd1-r5-gitea-error.log`、`/tmp/upd1-r5-repro.log`。修复方向：对整个 Gitea 查询与清单检查的失败结果记录错误，并覆盖启动查询失败的日志断言。
+
+tests/scripts/update.sh:115 — [P2] 新增顺序回归断言将记录修改时间与进程启动时间都截到整秒，同一秒内先重开、后写记录仍会通过。第 4 轮的生产代码顺序已修正，原版真实 ElyMark 更新脚本通过；随后在临时测试脚本的损坏发布阶段，通过 hdiutil 包装器执行真实 detach，再提前调用真实 `/usr/bin/open`，确认真实应用进程已出现后才让安装器继续写记录，保留全部原有断言。变异日志在 `1791577204130723000` 纳秒确认应用已重开且记录尚不存在，记录修改时间为 `1791577204133946137` 纳秒，完整脚本仍退出 0 并输出成功。独立真实进程探针连续三次也接受了启动后约 250 毫秒才写记录的顺序。证据：`/tmp/upd1-r5-mutation-order.log`、`/tmp/upd1-r5-mutation-test.log`、`/tmp/upd1-r5-time-assertion.log`；复现方法：`/tmp/upd1-r5-repro.log`。修复方向：通过重开入口的事件握手断言启动请求前记录已写好，并验证本次重开窗口显示失败提示，使提前重开的变异稳定失败。

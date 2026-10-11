@@ -8,11 +8,11 @@ use std::{
 use ely_gpui_component::{
     buttons::{Button, ButtonVariant, IconButton, SegmentedControl},
     collab::{Comment, CommentSidebar, Peer, Thread},
-    feedback::EmptyState,
+    feedback::{EmptyState, InlineMessage},
     forms::{Switch, TextInput},
     layout::ScrollArea,
     lists::{List, ListItem},
-    primitives::IconName,
+    primitives::{IconName, Severity},
     theme::ControlSize,
 };
 use ely_lok::{
@@ -20,7 +20,7 @@ use ely_lok::{
     review::{Change, Note},
 };
 use gpui::{
-    App, Context, Entity, EventEmitter, IntoElement, Menu, MenuItem, ParentElement as _, Render,
+    App, Context, Entity, EventEmitter, InteractiveElement as _, IntoElement, Menu, StatefulInteractiveElement as _, MenuItem, ParentElement as _, Render,
     SharedString, Styled as _, Subscription, Window, actions, div,
 };
 
@@ -86,6 +86,8 @@ pub struct Review {
     shown: Option<Shown>,
     notes: Vec<Note>,
     threads: Vec<Thread>,
+    /// Notes whose time does not read: time and why.
+    unread: Vec<Unread>,
     pub(crate) changes: Vec<Change>,
     active: Option<SharedString>,
     pane: Pane,
@@ -100,6 +102,7 @@ impl Review {
             shown: None,
             notes: Vec::new(),
             threads: Vec::new(),
+            unread: Vec::new(),
             changes: Vec::new(),
             active: None,
             pane: Pane::Comments,
@@ -117,6 +120,7 @@ impl Review {
         self.active = None;
         self.notes.clear();
         self.threads.clear();
+        self.unread.clear();
         self.changes.clear();
         cx.notify();
         let Some((view, doc)) = tab else {
@@ -161,21 +165,8 @@ impl Review {
                     return;
                 }
                 shown.reading = false;
-                let read = read.and_then(|(notes, changes)| {
-                    let threads = threads(&notes).map_err(std::io::Error::other)?;
-                    Ok((notes, threads, changes))
-                });
                 match read {
-                    Ok((notes, threads, changes)) => {
-                        log::info!(
-                            "doc: review lists {} notes, {} changes",
-                            notes.len(),
-                            changes.len()
-                        );
-                        review.notes = notes;
-                        review.threads = threads;
-                        review.changes = changes;
-                    }
+                    Ok((notes, changes)) => review.take_lists(notes, changes),
                     Err(error) => cx.emit(LokError(format!(
                         "the review lists are unreadable: {error}"
                     ))),
@@ -366,12 +357,61 @@ impl Render for Review {
             .p_2()
             .child(head)
             .child(pane)
+            // Many bad notes scroll; the lists stay in reach.
+            .children(self.unread_alert(cx).map(|alert| {
+                ScrollArea::new("doc-review-unread-scroll").vertical().w_full().max_h(gpui::rems(6.)).flex_none().child(alert)
+            }))
             .child(div().flex_1().min_h_0().child(body))
     }
 }
 
-/// The notes as threads under their first comment.
-fn threads(notes: &[Note]) -> Result<Vec<Thread>, String> {
+/// A note whose time does not read, and why.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Unread {
+    pub author: String,
+    pub at: String,
+    pub error: String,
+}
+
+impl Review {
+    /// The kernel's lists; one bad time spares the rest.
+    fn take_lists(&mut self, notes: Vec<Note>, changes: Vec<Change>) {
+        let (threads, unread) = threads(&notes);
+        for bad in &unread {
+            log::error!("doc: a bad comment time {:?}: {}", bad.at, bad.error);
+        }
+        log::info!("doc: review lists {} notes, {} changes", notes.len(), changes.len());
+        (self.notes, self.threads, self.unread, self.changes) = (notes, threads, unread, changes);
+    }
+
+    /// Each unreadable note, by its author and the reason.
+    fn unread_lines(&self, cx: &App) -> Vec<SharedString> {
+        let line = |bad: &Unread| {
+            Docs::text(cx, "doc.review.unread", &[("author", &bad.author), ("at", &bad.at), ("error", &bad.error)])
+        };
+        self.unread.iter().map(line).collect()
+    }
+
+    /// The lines as one alert assistive tech reads whole.
+    fn unread_alert(&self, cx: &App) -> Option<gpui::AnyElement> {
+        let lines = self.unread_lines(cx);
+        let said: SharedString = lines.join("\n").into();
+        (!lines.is_empty()).then(|| {
+            div()
+                .id("doc-review-unread")
+                .role(gpui::Role::Alert)
+                .aria_label(said)
+                .flex()
+                .flex_col()
+                .gap_1()
+                .children(lines.into_iter().map(|line| InlineMessage::new(Severity::Danger, line)))
+                .into_any_element()
+        })
+    }
+}
+
+/// Notes threaded under their first comment; bad times apart.
+fn threads(notes: &[Note]) -> (Vec<Thread>, Vec<Unread>) {
     let parents: HashMap<&str, &str> = notes
         .iter()
         .map(|note| (note.id.as_str(), note.parent.as_str()))
@@ -384,13 +424,16 @@ fn threads(notes: &[Note]) -> Result<Vec<Thread>, String> {
         id.to_string()
     };
     let authors: Vec<&str> = notes.iter().map(|note| note.author.as_str()).collect();
-    let mut threads: Vec<Thread> = Vec::new();
+    let (mut threads, mut unread): (Vec<Thread>, Vec<Unread>) = (Vec::new(), Vec::new());
     for note in notes {
-        let at = note
-            .at
-            .parse::<jiff::civil::DateTime>()
-            .and_then(|at| at.to_zoned(jiff::tz::TimeZone::system()))
-            .map_err(|error| format!("a bad comment time {}: {error}", note.at))?;
+        let read = note.at.parse::<jiff::civil::DateTime>().and_then(|at| at.to_zoned(jiff::tz::TimeZone::system()));
+        let at = match read {
+            Ok(at) => at,
+            Err(error) => {
+                unread.push(Unread { author: note.author.clone(), at: note.at.clone(), error: error.to_string() });
+                continue;
+            }
+        };
         let hue = authors
             .iter()
             .position(|name| *name == note.author)
@@ -412,7 +455,7 @@ fn threads(notes: &[Note]) -> Result<Vec<Thread>, String> {
             }),
         }
     }
-    Ok(threads)
+    (threads, unread)
 }
 
 #[cfg(test)]

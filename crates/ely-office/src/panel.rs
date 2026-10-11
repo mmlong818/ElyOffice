@@ -225,7 +225,7 @@ pub fn size_menu<P: Panel>(panel: &P, id: &'static str, cx: &Context<P>) -> AnyE
     if let Some(size) = size.clone().filter(|size| !sizes.contains(size)) {
         sizes.push(size);
     }
-    sizes.sort_by(|a, b| points(a).total_cmp(&points(b)));
+    let sizes = ordered(sizes);
     let mut menu = Select::new(
         id,
         sizes
@@ -279,7 +279,28 @@ pub fn known(state: &str) -> bool {
     !state.is_empty() && state != ely_lok::MIXED
 }
 
-/// A size label's points, for ordering.
-fn points(size: &str) -> f64 {
-    size.parse().expect("sizes are numbers")
+/// Sizes by points; one the kernel words oddly shows last.
+fn ordered(sizes: Vec<SharedString>) -> Vec<SharedString> {
+    let (mut sized, mut odd) = (Vec::new(), Vec::new());
+    for size in sizes {
+        match size.parse::<f64>() {
+            Ok(points) => sized.push((points, size)),
+            Err(_) => odd.push(size),
+        }
+    }
+    sized.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut sizes: Vec<SharedString> = sized.into_iter().map(|(_, size)| size).collect();
+    sizes.append(&mut odd);
+    sizes
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn an_odd_size_shows_last_and_panics_nothing() {
+        let sizes = ["12", "disabled", "9", "10.5"]
+            .map(gpui::SharedString::from)
+            .to_vec();
+        assert_eq!(super::ordered(sizes), ["9", "10.5", "12", "disabled"]);
+    }
 }

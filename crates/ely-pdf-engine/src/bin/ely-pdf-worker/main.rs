@@ -68,7 +68,11 @@ impl Doc {
             return Err(io::Error::other(format!("nothing to {}", if redo { "redo" } else { "undo" })));
         }
         loop {
-            mupdf.undo(&self.open, redo)?;
+            if let Err(error) = mupdf.undo(&self.open, redo) {
+                // MuPDF may have moved part way; follow it.
+                self.at = mupdf.state(&self.open)?.0;
+                return Err(error);
+            }
             let passed = match redo {
                 true => {
                     self.at += 1;
@@ -147,6 +151,7 @@ impl Worker {
         Ok(match wrote? {
             content::Wrote::Done => Pack::new().u64(0).str(&doc.mark()).bytes(),
             content::Wrote::Missing(c) => Pack::new().u64(2).u64(u64::from(c)).bytes(),
+            content::Wrote::Unwritable => Pack::new().u64(3).bytes(),
             content::Wrote::Preview(pixels, (w, h), grew) => {
                 Pack::new().u64(1).u64(u64::from(w)).u64(u64::from(h)).u64(u64::from(grew)).blob(&pixels).bytes()
             }

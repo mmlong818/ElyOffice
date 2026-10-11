@@ -12,9 +12,8 @@ use tempfile::tempdir;
 use windows_sys::Win32::{
     Foundation::{CloseHandle, FILETIME, HANDLE, WAIT_OBJECT_0},
     System::Threading::{
-        GetExitCodeProcess, GetProcessId, GetProcessTimes, OpenProcess,
-        PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, QueryFullProcessImageNameW,
-        WaitForSingleObject,
+        GetExitCodeProcess, GetProcessId, GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+        PROCESS_SYNCHRONIZE, QueryFullProcessImageNameW, WaitForSingleObject,
     },
 };
 
@@ -645,9 +644,12 @@ fn wait_file(path: &std::path::Path) {
 
 #[cfg(windows)]
 fn assert_process_gone(pid: u32) {
-    let handle = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, pid) };
+    let handle = unsafe { OpenProcess(PROCESS_SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
     if !handle.is_null() {
+        let signaled = unsafe { WaitForSingleObject(handle, 0) } == WAIT_OBJECT_0;
+        let mut exit_code = 259u32;
+        let readable = unsafe { GetExitCodeProcess(handle, &mut exit_code) } != 0;
         unsafe { CloseHandle(handle) };
-        panic!("process {pid} remained open after bounded reap");
+        assert!(signaled && readable && exit_code != 259, "process {pid} is still active after bounded reap");
     }
 }

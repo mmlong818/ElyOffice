@@ -1,12 +1,12 @@
 // The model turned about the desk centre, as the montage draws it.
 import { project } from "../../src/iso.ts";
 import { model } from "../../src/model.ts";
-import { type Box, SCREEN, screens } from "./parts.ts";
+import recs from "../montage/recs.json" with { type: "json" };
+import { type Box, grown } from "./parts.ts";
 
 const SVG = "http://www.w3.org/2000/svg";
 export const PIVOT = [8, 5.5];
 const COS = Math.cos(Math.PI / 6);
-const TOP = model[0].blocks[0].h;
 
 /** A world point turned by `a`, then projected. */
 export function turned(a: number, x: number, y: number, z: number): [number, number] {
@@ -15,12 +15,33 @@ export function turned(a: number, x: number, y: number, z: number): [number, num
 }
 
 /** The montage's grown screens, which leave in bar 35. */
-export const slabs: Box[] = ["ElyMark", "ElyTable", "ElyShow", "ElyDoc", "ElyPDF", "ElyTree"].map((app) => {
-  if (app === "ElyShow") return { x: 8.6, y: 2, z: TOP + 0.25, w: 4.8, d: 0.08, h: 2.7, tone: SCREEN };
-  // The montage drew Tree's screen at its old depth.
-  const b = app === "ElyTree" ? { ...screens[app], y: 7.9 } : screens[app];
-  return { ...b, x: b.x - b.w / 4, w: b.w * 1.5, h: b.h * 1.5 };
-});
+export const slabs: Box[] = recs.apps.map(({ app }) => grown(app));
+
+/** A leaving slab's recording at frame `f`, if any. */
+export function recording(box: Box, land: number, f: number): string | null {
+  const slab = slabs.indexOf(box);
+  if (slab < 0 || land <= 0) return null;
+  return `rec/${recs.apps[slab].rec}/${String(f - recs.first + 1).padStart(5, "0")}.jpg`;
+}
+
+/** A slab's recording frame, pinned affinely on its +y face. */
+export function film(b: Box, a: number, href: string): { el: SVGImageElement; ready: Promise<void> } {
+  const Y = b.y + b.d;
+  const [o, r, d] = [turned(a, b.x, Y, b.z + b.h), turned(a, b.x + b.w, Y, b.z + b.h), turned(a, b.x, Y, b.z)];
+  const [w, h] = [1280, 720];
+  const el = document.createElementNS(SVG, "image");
+  const m = [(r[0] - o[0]) / w, (r[1] - o[1]) / w, (d[0] - o[0]) / h, (d[1] - o[1]) / h, o[0], o[1]];
+  el.setAttribute("width", String(w));
+  el.setAttribute("height", String(h));
+  el.setAttribute("preserveAspectRatio", "none");
+  el.setAttribute("transform", `matrix(${m.map((v) => v.toFixed(5)).join(" ")})`);
+  const ready = new Promise<void>((ok, fail) => {
+    el.addEventListener("load", () => ok());
+    el.addEventListener("error", () => fail(new Error(`no frame ${href}`)));
+  });
+  el.setAttribute("href", href);
+  return { el, ready };
+}
 
 /** The montage's fixed framing, in this renderer's camera terms. */
 export const montage = (() => {

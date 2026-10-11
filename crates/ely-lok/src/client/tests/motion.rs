@@ -220,3 +220,62 @@ fn an_animated_object_is_its_own_layer_under_its_effect_hash() {
 
 
 
+
+#[test]
+fn layers_larger_than_one_frame_arrive_one_by_one() {
+    if install().is_none() {
+        eprintln!("SKIP: no pinned LOK build");
+        return;
+    }
+    let (_dir, mut worker, doc) = open_deck();
+    worker.run(&doc, "draw.shape", &["rectangle", "true"]).expect("draws");
+    let json = serde_json::json!({ "preset": "ooo-entrance-fade-in" }).to_string();
+    worker.run(&doc, "animation.add", &[&json]).expect("adds");
+    // Three layers at this size pass one 64 MB frame.
+    let layers = doc.slide_layers(&mut worker, 0, (5000, 2812)).expect("layers");
+    let (w, h) = layers.size;
+    let bytes = w as usize * h as usize * 4;
+    assert!(layers.list.len() * bytes > crate::ipc::MAX_FRAME, "{} layers of {bytes}", layers.list.len());
+    assert!(layers.list.iter().all(|layer| layer.pixels.len() == bytes), "every layer arrives whole");
+}
+
+#[test]
+fn a_layer_larger_than_one_frame_arrives_in_pieces() {
+    if install().is_none() {
+        eprintln!("SKIP: no pinned LOK build");
+        return;
+    }
+    let (_dir, mut worker, doc) = open_deck();
+    worker.run(&doc, "slide.size", &["10000", "120000", "true"]).expect("a tall slide");
+    worker.run(&doc, "draw.shape", &["rectangle", "true"]).expect("draws");
+    let layers = doc.slide_layers(&mut worker, 0, (1280, 15360)).expect("layers");
+    let (w, h) = layers.size;
+    let bytes = w as usize * h as usize * 4;
+    assert!(bytes > crate::ipc::MAX_FRAME, "one layer of {bytes} bytes");
+    assert!(layers.list.iter().all(|layer| layer.pixels.len() == bytes), "every layer arrives whole");
+    // The rectangle lands where the kernel put it.
+    let objects = show::objects(&worker.values(&doc, show::OBJECTS).expect("reads")).expect("parses");
+    let shape = objects.objects.iter().find(|o| o.selected).expect("the new rectangle");
+    let want = ((shape.rect.1 + shape.rect.3 / 2) as f64 / 120000.0 * f64::from(h)) as usize;
+    let row = |layer: &show::Layer, y: usize| layer.pixels[y * w as usize * 4..(y + 1) * w as usize * 4].chunks(4).any(|px| px[3] != 0);
+    let inked = |layer: &show::Layer| (0..h as usize).filter(|y| row(layer, *y)).collect::<Vec<_>>();
+    assert!(want > 16 * 1024 * 1024 / (w as usize * 4), "the shape lies past the first piece");
+    let around = want - 20..want + 20;
+    let found = layers.list.iter().map(inked).any(|rows| around.clone().all(|y| rows.contains(&y)) && rows.len() < h as usize);
+    assert!(found, "no layer inks rows {around:?}");
+}
+
+#[test]
+fn closing_a_deck_drops_its_waiting_layers() {
+    if install().is_none() {
+        eprintln!("SKIP: no pinned LOK build");
+        return;
+    }
+    let (_dir, mut worker, doc) = open_deck();
+    let id = worker.doc_id(&doc).expect("the id");
+    let ask = crate::ipc::Pack::new().u64(id).u64(0).u64(1920).u64(1080).bytes();
+    worker.request(crate::ipc::tag::SLIDE_LAYERS, &ask).expect("layers wait");
+    worker.close_doc(doc).expect("closes");
+    let late = crate::ipc::Pack::new().u64(id).u64(0).u64(0).bytes();
+    assert!(worker.request(crate::ipc::tag::SLIDE_LAYER, &late).is_err(), "no layer outlives its deck");
+}

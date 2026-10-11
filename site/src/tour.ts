@@ -4,8 +4,8 @@ import { grow } from "./beat.ts";
 import { model } from "./model.ts";
 import { touch } from "./touch.ts";
 import { said, TEXT, type Key } from "./text.ts";
+import { RELEASES } from "./release.ts";
 
-const RELEASE = "https://github.com/ZacharyZhang-NY/ElyOffice/releases/download/v0.1.0";
 const SCREEN = "#3a3a3c";
 const DESK = "#e6e6e2";
 const STEP = 60 / 112 / 4;
@@ -227,7 +227,7 @@ export function tour(hero: HTMLElement): { section: HTMLElement; host: HTMLEleme
     h2.textContent = p.name;
     const get = said("a", "download");
     get.className = "get";
-    get.href = `${RELEASE}/${p.name}-0.1.0-arm64.dmg`;
+    get.href = RELEASES;
     const acts = document.createElement("div");
     acts.className = "acts";
     acts.append(get, plays[i]);
@@ -319,6 +319,7 @@ export function tour(hero: HTMLElement): { section: HTMLElement; host: HTMLEleme
     const tx = cam.ax - cam.s * (cam.cx - origin[0]);
     const ty = cam.ay - cam.s * (cam.cy - origin[1]);
     world.style.transform = `matrix(${cam.s}, 0, 0, ${cam.s}, ${tx}, ${ty})`;
+    host.dispatchEvent(new Event("moved"));
     const fade = still() ? (p < 0.5 ? 1 : 0) : Math.max(0, 1 - p / HOLD);
     hero.style.opacity = String(fade);
     hero.style.visibility = fade > 0 ? "" : "hidden";

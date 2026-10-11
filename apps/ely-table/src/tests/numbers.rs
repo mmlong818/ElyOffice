@@ -44,3 +44,27 @@ fn a_failed_command_still_moves_the_state_on() {
     update(&mut cx, &book, |book, cx| book.run_active("sheet.rename", &["Plan", "1"], cx));
     settle(&cx, |app| sheet_names(app, &book) == ["Plan"]);
 }
+
+#[test]
+fn a_failed_print_says_printing_failed() {
+    use ely_gpui_component::primitives::Severity;
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let mut cx = TestAppContext::single();
+    let Some((window, book)) = book(&mut cx, dir.path()) else {
+        eprintln!("SKIP: no LOK build");
+        return;
+    };
+    // The window's toasts live on its root.
+    let root = window
+        .update(&mut cx, |_, window, cx| {
+            let root = ely_ui::document_root(ely_platform::AppId::Table, book.clone().into(), &ely_ui::commands::FILE, Vec::new(), window, cx);
+            book.update(cx, |book, _| book.core.root = root.downgrade());
+            root
+        })
+        .expect("the window");
+    let gone = dir.path().join("gone.pdf");
+    update(&mut cx, &book, |_, cx| ely_office::print_later(gone, cx));
+    cx.run_until_parked();
+    let (toasts, prefix) = cx.update(|app| (root.read(app).toasts(app), ely_office::text(app, "office.print.failed", &[("error", "")])));
+    assert!(toasts.iter().any(|(text, severity)| *severity == Some(Severity::Danger) && text.starts_with(prefix.as_ref())), "{toasts:?}");
+}

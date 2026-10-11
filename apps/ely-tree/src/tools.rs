@@ -97,6 +97,16 @@ fn launch(editor: &Path, file: &Path) -> io::Result<()> {
         .map_err(|error| io::Error::other(format!("{}: {error}", editor.display())))
 }
 
+/// Only macOS opens a terminal; elsewhere it is hidden.
+pub const TERMINAL: bool = cfg!(target_os = "macos");
+
+/// The reveal entry, named for this platform's file browser.
+pub const REVEAL: &str = if cfg!(target_os = "macos") {
+    "tree.tool.reveal"
+} else {
+    "tree.tool.reveal_folder"
+};
+
 #[cfg(target_os = "macos")]
 fn terminal_at(dir: &Path) -> io::Result<()> {
     Command::new("open")

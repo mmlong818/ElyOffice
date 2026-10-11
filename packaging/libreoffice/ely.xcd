@@ -48,7 +48,7 @@
           <node oor:name="Shadow"><prop oor:name="Color"><value>0</value></prop></node>
           <node oor:name="WriterFieldShadings"><prop oor:name="Color"><value>4144959</value></prop></node>
           <node oor:name="WriterIdxShadings"><prop oor:name="Color"><value>4144959</value></prop></node>
-          <node oor:name="CalcNotesBackground"><prop oor:name="Color"><value>3417617</value></prop></node>
+          <node oor:name="CalcNotesBackground"><prop oor:name="Color"><value>16777152</value></prop></node>
           <node oor:name="CalcPageBreak"><prop oor:name="Color"><value>6052440</value></prop></node>
           <node oor:name="CalcHiddenColRow"><prop oor:name="Color"><value>6052440</value></prop></node>
           <node oor:name="CalcCellFocus"><prop oor:name="Color"><value>6922728</value></prop></node>
@@ -75,6 +75,14 @@
           <node oor:name="DrawGrid"><prop oor:name="Color"><value>6710886</value></prop></node>
         </node>
       </node>
+    </node>
+  </oor:component-data>
+  <!-- Ely checks conflicts itself; a crash's lock file would hang the next load. -->
+  <oor:component-data oor:package="org.openoffice.Office" oor:name="Common">
+    <node oor:name="Misc">
+      <prop oor:name="UseLocking">
+        <value>false</value>
+      </prop>
     </node>
   </oor:component-data>
 </oor:data>

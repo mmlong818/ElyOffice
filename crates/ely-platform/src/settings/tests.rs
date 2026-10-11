@@ -73,9 +73,10 @@ fn shared_fields_type_strictly_and_default_when_absent() {
         Shared::default()
     );
     let read = Shared::from_fields(&fields(
-        r#"{"appearance":"dark","language":"zh-CN","motion":"reduce","omarchy_sync":false,"author":" Ana "}"#,
+        r#"{"appearance":"dark","language":"zh-CN","motion":"reduce","omarchy_sync":false,"author":" Ana ","check_updates":true}"#,
     ))
     .unwrap();
+    assert!(read.check_updates && !Shared::default().check_updates, "asked for, never by default");
     assert_eq!(
         (
             read.appearance,
@@ -96,6 +97,7 @@ fn shared_fields_type_strictly_and_default_when_absent() {
         r#"{"appearance":"blue"}"#,
         r#"{"omarchy_sync":"yes"}"#,
         r#"{"author":3}"#,
+        r#"{"check_updates":1}"#,
     ] {
         assert!(Shared::from_fields(&fields(bad)).is_err(), "{bad}");
     }

@@ -71,6 +71,66 @@ impl Axis {
     }
 }
 
+impl Axis {
+    /// Where `index` starts in tile pixels.
+    fn tile_start(&self, index: u32, ppt: f64) -> i64 {
+        let (mut at, mut first) = (0i64, 0u32);
+        for &(last, size) in &self.runs {
+            let pixels = i64::from(to_pixels(size, ppt));
+            if index <= last {
+                return at + i64::from(index - first) * pixels;
+            }
+            at += i64::from(last - first + 1) * pixels;
+            first = last + 1;
+        }
+        at
+    }
+
+    /// A print-twips position in tile twips at `ppt`.
+    pub fn tile(&self, print: i32, ppt: f64) -> i32 {
+        let end = self.start(self.count());
+        if print >= end {
+            return clamp(twips_of(self.tile_start(self.count(), ppt), ppt) + i64::from(print - end));
+        }
+        let index = self.at(print);
+        let (from, size) = (self.start(index), self.size(index));
+        let start = twips_of(self.tile_start(index, ppt), ppt);
+        let span = twips_of(self.tile_start(index + 1, ppt), ppt) - start;
+        clamp(start + i64::from(print - from) * span / i64::from(size))
+    }
+
+    /// The print-twips position under tile twips `tile`.
+    pub fn print(&self, tile: i32, ppt: f64) -> i32 {
+        let pixel = (f64::from(tile.max(0)) * ppt) as i64;
+        let (mut at, mut first) = (0i64, 0u32);
+        for &(last, size) in &self.runs {
+            let pixels = i64::from(to_pixels(size, ppt));
+            let span = i64::from(last - first + 1) * pixels;
+            if pixels > 0 && pixel < at + span {
+                let index = first + u32::try_from((pixel - at) / pixels).expect("inside a run");
+                let start = twips_of(self.tile_start(index, ppt), ppt);
+                let width = twips_of(self.tile_start(index + 1, ppt), ppt) - start;
+                let into = i64::from(tile) - start;
+                return clamp(i64::from(self.start(index)) + into * i64::from(size) / width.max(1));
+            }
+            at += span;
+            first = last + 1;
+        }
+        let end = twips_of(self.tile_start(self.count(), ppt), ppt);
+        clamp(i64::from(self.start(self.count())) + i64::from(tile) - end)
+    }
+}
+
+/// The kernel's `ScViewData::ToPixel`: truncates, never to 0.
+fn to_pixels(twips: i32, ppt: f64) -> i32 {
+    let pixels = (f64::from(twips) * ppt) as i32;
+    if pixels == 0 && twips != 0 { 1 } else { pixels }
+}
+
+fn twips_of(pixels: i64, ppt: f64) -> i64 {
+    (pixels as f64 / ppt).round() as i64
+}
+
 fn clamp(twips: i64) -> i32 {
     i32::try_from(twips).unwrap_or(i32::MAX)
 }
@@ -371,4 +431,29 @@ mod tests {
         assert_eq!(flags("1:2 5").expect("flags"), [(2, 1), (5, 0)]);
         assert!(merge(&[(3, 10)], &[(5, 0)]).is_err(), "lengths must agree");
     }
+
+    #[test]
+    fn tiles_round_each_row_to_whole_pixels() {
+        // 293 twips at 2/15 px per twip truncate to 39.
+        let rows = Axis { runs: vec![(9999, 293)] };
+        let ppt = 2.0 / 15.0;
+        assert_eq!(to_pixels(293, ppt), 39);
+        let row = 4997u32;
+        let print = rows.start(row);
+        let tile = rows.tile(print, ppt);
+        assert_eq!(tile, (f64::from(39 * row) / ppt).round() as i32, "row tops line up");
+        assert_eq!(rows.print(tile, ppt), print, "and come back");
+        let mid = rows.tile(print + 146, ppt);
+        assert_eq!(rows.at(rows.print(mid, ppt)), row, "a point inside stays in its row");
+        assert!(tile < print, "rounding down pulls far rows up");
+    }
+
+    #[test]
+    fn hidden_rows_take_no_tile_space_and_tiny_rows_take_a_pixel() {
+        let rows = Axis { runs: vec![(1, 300), (3, 0), (4, 3)] };
+        let ppt = 1.0 / 15.0;
+        assert_eq!(rows.tile(rows.start(4), ppt), rows.tile(rows.start(2), ppt), "hidden rows fold");
+        assert_eq!(to_pixels(3, ppt), 1, "never 0 for a shown row");
+    }
+
 }

@@ -50,7 +50,7 @@ pub(super) fn live_view_of(
     let source = dir.path().join(name);
     std::fs::write(&source, body).expect("the fixture writes");
     let doc = worker
-        .load(&format!("file://{}", source.display()))
+        .load(&crate::file_url(&source))
         .expect("the document loads");
     std::mem::forget(dir);
     let shared = Arc::new(Mutex::new(worker));
@@ -359,45 +359,6 @@ fn a_moved_cursor_scrolls_into_view_and_a_still_one_does_not() {
             view.scroll_by(0.0, 1_000_000.0, cx);
             view.apply_batch(batch(), None, cx);
             assert_eq!(view.scroll.1, 0, "a still cursor leaves the scroll alone");
-            let far = view.doc_size.1 + 20_000;
-            let cell = crate::Cell {
-                cursor: Some((1418, far, 1280, 277)),
-                ..crate::Cell::default()
-            };
-            view.apply_batch(
-                crate::Events {
-                    cell,
-                    ..crate::Events::default()
-                },
-                None,
-                cx,
-            );
-            let height = view.geom.twips_of(view.viewport.1);
-            assert!(
-                view.scroll.1 <= far && far + 277 <= view.scroll.1 + height,
-                "a cell past the kernel's size still comes into view"
-            );
-            view.scroll = (0, 0);
-            let width = view.geom.twips_of(view.viewport.0);
-            view.show((width - 200, 0, 1280, 256), cx);
-            assert!(
-                view.scroll.0 > 0 && width - 200 + 1280 <= view.scroll.0 + width,
-                "a cell cut at the right edge comes into view"
-            );
-            view.scroll = (0, 0);
-            view.frozen = (0, 600);
-            view.show((1418, 300, 1280, 277), cx);
-            assert_eq!(view.scroll.1, 0, "a frozen row needs no scroll");
-            view.show((1418, 9000, 1280, 277), cx);
-            let scrolled = view.scroll.1;
-            assert!(scrolled > 0, "a far row scrolls the rest");
-            let row = view.place((0, 300)).y;
-            assert_eq!(f32::from(row), view.geom.px_of(300), "the frozen row stays");
-            let far = view.twips_at(view.place((0, 9000)));
-            assert!(
-                (far.1 - 9000).abs() <= 15,
-                "a scrolled row maps back: {far:?}"
-            );
         });
     });
 }

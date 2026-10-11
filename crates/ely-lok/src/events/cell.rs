@@ -209,7 +209,7 @@ pub fn marks_of(text: &str) -> Option<Vec<Mark>> {
         .iter()
         .map(|mark| {
             Some(Mark {
-                rect: super::parse::rect_of(mark["rectangle"].as_str()?)?,
+                rect: super::parse::rect_of(mark["rectangle"].as_str()?).ok()??,
                 color: u32::from_str_radix(mark["color"].as_str()?, 16).ok()?,
                 part: mark["part"].as_str()?.parse().ok()?,
             })

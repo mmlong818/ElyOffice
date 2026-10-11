@@ -50,7 +50,8 @@ fn open() -> (tempfile::TempDir, Worker, Doc, Events) {
 /// The cells of `range`, as the kernel copies them.
 fn cells(worker: &mut Worker, doc: &Doc, range: &str) -> String {
     worker.run(doc, "cell.goto", &[range]).expect("the range");
-    doc.selection_text(worker).expect("the text")
+    // Windows ends copied lines with CRLF.
+    doc.selection_text(worker).expect("the text").replace("\r\n", "\n")
 }
 
 /// The latest report of `name`.
@@ -112,7 +113,7 @@ fn number_formats_alignment_and_fills_apply() {
     // The cell properties of the document's own cell formats.
     let saved = |worker: &mut Worker| {
         let out = _dir.path().join("borders.fods");
-        doc.save_as(worker, &format!("file://{}", out.display()), "fods")
+        doc.save_as(worker, &crate::file_url(&out), "fods")
             .expect("the save");
         let xml = std::fs::read_to_string(&out).expect("the saved book");
         let start = xml.find("<office:automatic-styles>").expect("cell formats");

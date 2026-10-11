@@ -21,6 +21,9 @@ fetch() { # name url rev [sparse paths...]
   fi
   rm -rf "$dir"
   git init -q "$dir"
+  # Upstream bytes, whatever the host's line-ending setting.
+  git -C "$dir" config core.autocrlf false
+  git -C "$dir" config core.eol lf
   git -C "$dir" remote add origin "$url"
   if [ $# -gt 0 ]; then
     git -C "$dir" sparse-checkout init --cone
@@ -33,7 +36,7 @@ fetch() { # name url rev [sparse paths...]
   echo "fetch $name $rev"
 }
 
-fetch Ely-GPUI-Components https://github.com/ZacharyZhang-NY/Ely-GPUI-Components.git 69265b4fd4da888e2d8e1268021af4d358e67afb
+fetch Ely-GPUI-Components https://git.zacharyzhang.com/ZacharyZhang-NY/Ely-GPUI-Components.git bd014707fd47cd9d0651a9af8c1db6033718a6ea
 fetch zed https://github.com/zed-industries/zed.git 1a28cff4b409169bac058bca40dfbfeb7621d19b
 fetch libreoffice-core https://github.com/LibreOffice/core.git 8221e31b3ac356a1623c672912a3d2b492f7e3d1 \
   include/LibreOfficeKit libreofficekit desktop/source/lib desktop/inc \

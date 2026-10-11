@@ -83,6 +83,11 @@ pub(super) const EN: &[(&str, &str)] = &[
     ("mark.git.failed", "ElyTree did not open: {error}"),
     ("mark.large", "This file is {size} MB: it shows as source. Visual and preview are off; saving keeps every byte."),
     ("mark.large.modes", "Large files stay in source mode"),
+    (
+        "mark.visual.broke",
+        "The visual editor failed ({what}); the file shows as source",
+    ),
+    ("mark.page.broke", "The editor did not open ({what})"),
     ("mark.mode.visual", "Visual"),
     ("mark.mode.source", "Source"),
     ("mark.mode.preview", "Preview"),
@@ -179,6 +184,11 @@ pub(super) const ZH_CN: &[(&str, &str)] = &[
     ("mark.git.failed", "ElyTree 没能打开：{error}"),
     ("mark.large", "此文件 {size} MB，以源码显示。可视与预览已关闭；保存时保留全部内容。"),
     ("mark.large.modes", "大文件只用源码模式"),
+    (
+        "mark.visual.broke",
+        "可视编辑器出错（{what}），文件以源码显示",
+    ),
+    ("mark.page.broke", "编辑器没有打开（{what}）"),
     ("mark.mode.visual", "可视"),
     ("mark.mode.source", "源码"),
     ("mark.mode.preview", "预览"),

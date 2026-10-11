@@ -99,7 +99,7 @@ impl Book {
         };
         let length = if column { width } else { height };
         let pick = |pair: (i32, i32)| if column { pair.0 } else { pair.1 };
-        let (frozen, scroll) = (pick(read.frozen()), pick(read.scroll()));
+        let (frozen, first) = (pick(read.frozen()), pick(read.scrolled_start()));
         let mut spans = Vec::new();
         let mut take = |index: u32| {
             let (start, end) = (along(axis.start(index)), along(axis.start(index + 1)));
@@ -114,7 +114,7 @@ impl Book {
             0
         };
         (0..held).for_each(&mut take);
-        let mut index = axis.at(frozen + scroll).max(held);
+        let mut index = axis.at(first).max(held);
         while index < axis.count() && along(axis.start(index)) < length {
             take(index);
             index += 1;

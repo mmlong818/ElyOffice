@@ -121,7 +121,7 @@ impl Book {
             |worker, doc| doc.selection_text(worker),
             move |book, text, _, cx| match text {
                 Ok(text) if filled(&text) > 1 => {
-                    book.dialog = Some(Dialog::Merge { tab });
+                    book.open_dialog(Dialog::Merge { tab });
                     cx.notify();
                 }
                 Ok(_) => book.run_in(id, "cells.merge", &["false"], cx),
@@ -150,7 +150,7 @@ impl Book {
             return self.toast(text, ely_gpui_component::primitives::Severity::Warning, cx);
         };
         let field = cx.new(|cx| TextInput::new(window, cx));
-        self.dialog = Some(Dialog::Size { tab, column, field });
+        self.open_dialog(Dialog::Size { tab, column, field });
         cx.notify();
     }
 }

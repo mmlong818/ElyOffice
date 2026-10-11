@@ -9,10 +9,10 @@ use gpui::{AnyElement, App, Context, IntoElement, Pixels, Point, Styled as _, ca
 use crate::content::{Aim, Tool};
 use crate::layout::Placed;
 use crate::pages::{rect_on, to_view};
-use crate::view::PdfView;
+use crate::view::{PdfView, Unread};
 
 /// How far a click may move, in window pixels.
-const CLICK: f32 = 3.0;
+pub(crate) const CLICK: f32 = 3.0;
 /// Pages read for their annotations at once.
 const BATCH: usize = 20;
 
@@ -77,31 +77,49 @@ impl PdfView {
         if self.reading_notes {
             return;
         }
-        let wanted: Vec<usize> = pages.into_iter().filter(|page| !self.notes.contains_key(page)).take(BATCH).collect();
+        let wanted: Vec<usize> = (pages.into_iter())
+            .filter(|page| !self.notes.contains_key(page) && !self.unread.contains(&Unread::Notes(*page)))
+            .take(BATCH)
+            .collect();
         if wanted.is_empty() {
             return;
         }
+        let asked = wanted.clone();
         self.reading_notes = true;
         let (doc, version) = (self.doc, self.version);
         self.off(
+            // Page by page: one bad page spares the rest.
             move |worker| {
-                (wanted.into_iter())
-                    .map(|page| Ok((page, worker.marks(doc, page)?, worker.links(doc, page)?)))
-                    .collect::<std::io::Result<Vec<_>>>()
+                let read = (wanted.into_iter())
+                    .map(|page| (page, worker.marks(doc, page).and_then(|marks| Ok((marks, worker.links(doc, page)?)))))
+                    .collect::<Vec<_>>();
+                Ok(read)
             },
-            move |view, read, cx| {
+            move |view, read: std::io::Result<Vec<_>>, cx| {
                 view.reading_notes = false;
                 if view.version != version {
                     return cx.notify();
                 }
-                match read {
-                    Ok(read) => {
-                        for (page, marks, links) in read {
+                // No worker at all: every page asked failed.
+                let read = read.unwrap_or_else(|error| {
+                    let why = error.to_string();
+                    asked.into_iter().map(|page| (page, Err(std::io::Error::other(why.clone())))).collect()
+                });
+                let mut first = None;
+                for (page, page_read) in read {
+                    match page_read {
+                        Ok((marks, links)) => {
                             view.notes.insert(page, marks);
                             view.links.insert(page, links);
                         }
+                        Err(error) => {
+                            view.unread.insert(Unread::Notes(page));
+                            first.get_or_insert(error);
+                        }
                     }
-                    Err(error) => view.fail("reading annotations", &error, cx),
+                }
+                if let Some(error) = first {
+                    view.fail("reading annotations", &error, cx);
                 }
                 cx.notify();
             },
@@ -111,7 +129,7 @@ impl PdfView {
 
     /// Reads every field name in the form, once an edit.
     pub fn ask_names(&mut self, cx: &mut Context<Self>) {
-        if self.form_names.is_some() || self.reading_names {
+        if self.form_names.is_some() || self.reading_names || self.unread.contains(&Unread::Names) {
             return;
         }
         self.reading_names = true;
@@ -125,7 +143,10 @@ impl PdfView {
                 }
                 match read {
                     Ok(names) => view.form_names = Some(names),
-                    Err(error) => view.fail("reading field names", &error, cx),
+                    Err(error) => {
+                        view.unread.insert(Unread::Names);
+                        view.fail("reading field names", &error, cx)
+                    }
                 }
                 cx.notify();
             },
@@ -253,11 +274,12 @@ impl PdfView {
         if annots.is_empty() {
             return;
         }
-        self.settled_edit(what, cx, move |worker, doc| {
-            let name = ely_platform::user::name()?;
+        let author = ely_ui::settings::current(cx).author.clone();
+        self.edit_at(what, move |worker, doc| {
+            let name = ely_platform::user::named(&author)?;
             annots.iter_mut().for_each(|annot| annot.author = name.clone());
             worker.annotate(doc, &annots)
-        });
+        }, cx);
     }
 
     /// A press with a drawing or form tool.

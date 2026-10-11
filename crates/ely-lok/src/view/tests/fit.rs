@@ -88,3 +88,77 @@ fn a_resized_slide_reaches_the_view_and_still_fits() {
         })
     });
 }
+
+#[test]
+fn a_page_stays_centred_when_the_cursor_moves() {
+    let Some(install) = crate::client::tests::install() else {
+        eprintln!("SKIP: no pinned LOK build");
+        return;
+    };
+    let cx = gpui::TestAppContext::single();
+    cx.update(|app| {
+        let (view, _) = live_view(app, &install);
+        view.update(app, |view, cx| {
+            let wide = Bounds { origin: point(px(0.0), px(0.0)), size: size(px(2400.0), px(900.0)) };
+            view.prepare(wide);
+            let centred = view.spare.0;
+            assert!(centred > 0.0, "a page narrower than the view sits centred");
+            view.show((1440, 1440, 20, 300), cx);
+            view.prepare(wide);
+            assert_eq!(view.spare.0, centred, "moving the cursor keeps it centred");
+            let narrow = Bounds { origin: point(px(0.0), px(0.0)), size: size(px(800.0), px(900.0)) };
+            view.prepare(narrow);
+            view.set_zoom(2.0, cx);
+            view.prepare(narrow);
+            let right = view.scroll.0 + view.geom.twips_of(view.viewport.0);
+            assert!(right <= view.doc_size.0, "no grey past the page: {right} > {}", view.doc_size.0);
+        })
+    });
+}
+
+#[test]
+fn zooming_keeps_the_left_page_edge_or_the_pointed_spot() {
+    let Some(install) = crate::client::tests::install() else {
+        eprintln!("SKIP: no pinned LOK build");
+        return;
+    };
+    let cx = gpui::TestAppContext::single();
+    cx.update(|app| {
+        let (view, _) = live_view(app, &install);
+        view.update(app, |view, cx| {
+            let room = Bounds { origin: point(px(0.0), px(0.0)), size: size(px(1200.0), px(900.0)) };
+            view.prepare(room);
+            let page = *view.pages.first().expect("a laid out page");
+            // Unclamped, so a cut edge reads below zero.
+            let left = |view: &LokView| view.spare.0 + view.geom.px_of(view.tile_of((page.0, page.1)).0 - view.scroll.0);
+            for _ in 0..3 {
+                view.zoom_step(true, cx);
+                view.prepare(room);
+                assert!(left(view) >= 0.0, "at {}% the left edge is at {}", view.zoom() * 100.0, left(view));
+            }
+            view.set_zoom(1.0, cx);
+            view.prepare(room);
+            view.set_zoom(2.0, cx);
+            view.prepare(room);
+            assert!(left(view) >= 0.0, "a set zoom keeps the left edge: {}", left(view));
+            view.set_zoom(1.0, cx);
+            view.prepare(room);
+            let at = point(px(600.0), px(400.0));
+            let before = view.doc_point(at);
+            view.zoom_at(1.5, Some(at), cx);
+            view.prepare(room);
+            let after = view.doc_point(at);
+            assert!((after.0 - before.0).abs() < 30 && (after.1 - before.1).abs() < 30, "{before:?} moved to {after:?}");
+            // Wheel steps that land within one frame.
+            view.set_zoom(1.0, cx);
+            view.prepare(room);
+            let before = view.doc_point(at);
+            for zoom in [1.25, 1.5, 2.0] {
+                view.zoom_at(zoom, Some(at), cx);
+            }
+            view.prepare(room);
+            let after = view.doc_point(at);
+            assert!((after.0 - before.0).abs() < 30 && (after.1 - before.1).abs() < 30, "bunched: {before:?} moved to {after:?}");
+        })
+    });
+}

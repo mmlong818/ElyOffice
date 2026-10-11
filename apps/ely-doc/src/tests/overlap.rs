@@ -86,10 +86,10 @@ fn interleaved_previews_keep_their_sources() {
     };
     let alpha = blank(&mut cx, &docs);
     type_into(&mut cx, &docs, "SourceAlpha ");
-    update_doc(&mut cx, &docs, |docs, cx| docs.insert_field("Name", cx));
+    update_doc(&mut cx, &docs, |docs, cx| docs.field_here("Name", cx));
     let beta = blank(&mut cx, &docs);
     type_into(&mut cx, &docs, "SourceBeta ");
-    update_doc(&mut cx, &docs, |docs, cx| docs.insert_field("Name", cx));
+    update_doc(&mut cx, &docs, |docs, cx| docs.field_here("Name", cx));
     settled(&cx, &docs);
     let csv = dir.path().join("two.csv");
     std::fs::write(&csv, "Name\nAda\nGrace\n").expect("the csv writes");

@@ -164,6 +164,7 @@ impl Docs {
         cx: &mut Context<Self>,
     ) {
         log::info!("doc: previewing merge record {}", at + 1);
+        self.merge.update(cx, |merge, _| merge.previews.insert(into));
         self.load_into(into, Source::Copy(copy), cx);
         self.core.waiting.push((
             into,
@@ -246,9 +247,11 @@ impl Docs {
                         let mut worker = worker.lock().expect("the worker lock");
                         let staged = template.with_file_name(format!("record.{extension}"));
                         let made = worker.load(&ely_lok::file_url(&template)).and_then(|doc| {
-                            fill(&mut worker, &doc, &table.headers, row)?;
-                            doc.save_as(&mut worker, &ely_lok::file_url(&staged), extension)?;
-                            worker.close_doc(doc)?;
+                            let saved = fill(&mut worker, &doc, &table.headers, row)
+                                .and_then(|()| doc.save_as(&mut worker, &ely_lok::file_url(&staged), extension));
+                            // Closed even when this record failed.
+                            let closed = worker.close_doc(doc);
+                            saved.and(closed)?;
                             publish(&staged, target)
                         });
                         made.map_err(|error| (n + 1, error))?;
@@ -260,9 +263,8 @@ impl Docs {
                 let folder = folder.display().to_string();
                 let text = match written {
                     Ok(count) => {
-                        let count = count.to_string();
-                        let text =
-                            Docs::text(cx, "doc.merge.done", &[("n", &count), ("folder", &folder)]);
+                        let n = count.to_string();
+                        let text = ely_ui::i18n::counted(cx, "doc.merge.done", count as u64, &[("n", &n), ("folder", &folder)]);
                         return docs.toast(text, Severity::Success, cx);
                     }
                     Err((n, error)) => Docs::text(

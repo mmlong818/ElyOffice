@@ -6,13 +6,10 @@ use std::{
     process::{Command, Output, Stdio},
 };
 
-/// A Git binary and its version.
+/// A Git binary whose version was checked.
 #[derive(Clone, Debug)]
 pub struct Git {
     pub path: PathBuf,
-    pub version: String,
-    /// Ely's own build, not a system Git.
-    pub bundled: bool,
 }
 
 impl Git {
@@ -39,11 +36,7 @@ impl Git {
             path.display(),
             if bundled { "bundled" } else { "system" }
         );
-        Ok(Git {
-            path,
-            version,
-            bundled,
-        })
+        Ok(Git { path })
     }
 
     /// Runs Git in `dir`; failure carries Git's words.
@@ -72,6 +65,29 @@ impl Git {
             .join()
             .map_err(|_| io::Error::other("the stdin writer panicked"))??;
         checked(args, output)
+    }
+
+    /// HEAD names a commit; a new repository has none yet.
+    pub fn born(&self, dir: &Path) -> io::Result<bool> {
+        if !self.run_or_one(dir, &["rev-parse", "--verify", "-q", "HEAD"])?.is_empty() {
+            return Ok(true);
+        }
+        // Unborn: HEAD names a branch with no ref at all.
+        let branch = String::from_utf8(self.run(dir, &["symbolic-ref", "-q", "HEAD"])?)
+            .map_err(|_| io::Error::other("HEAD names a ref that is not UTF-8"))?;
+        // Only Git's line end goes; a name keeps every byte.
+        let branch = branch.strip_suffix('\n').unwrap_or(&branch).to_owned();
+        let found = self.command(dir, &["for-each-ref", "--format=%(refname)", &branch]).output()?;
+        let unborn = branch.starts_with("refs/heads/") && found.status.success();
+        if unborn && found.stdout.is_empty() && found.stderr.is_empty() {
+            return Ok(false);
+        }
+        let mut why = format!("HEAD names {branch}: no commit, and no branch yet to begin");
+        let said = String::from_utf8_lossy(&found.stderr);
+        if !said.trim().is_empty() {
+            why = format!("{why}; Git says {}", said.trim());
+        }
+        Err(io::Error::other(why))
     }
 
     /// Exit 1 is an answer: files differ, key unset.

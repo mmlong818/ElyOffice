@@ -186,8 +186,8 @@ impl Deck {
                     return log::info!("show: a chart dialog for tab {tab} came late");
                 }
                 let editing = Editing::new(tab, chart, window, cx);
-                deck.dialog = Some(Dialog::Chart(Box::new(editing)));
-                cx.notify();
+                // Refused while another dialog is open; it says so.
+                let _ = deck.open_dialog(Dialog::Chart(Box::new(editing)), cx);
             })
         })
         .detach_and_log_err(cx);

@@ -43,7 +43,6 @@ fn main() -> io::Result<()> {
         let mut id = [0; 8];
         input.read_exact(&mut tag)?;
         input.read_exact(&mut id)?;
-        count += 1;
         if mode.trim() == "block-payload" && tag[0] == 250 {
             fs::write(profile.join("accepted-payload"), b"header accepted")?;
             loop {
@@ -58,6 +57,15 @@ fn main() -> io::Result<()> {
         }
         let mut payload = vec![0; u32::from_le_bytes(len) as usize];
         input.read_exact(&mut payload)?;
+        // The Windows readiness check sends BUILD_ID and VERIFY before the
+        // fixture scenarios start counting ordinary client requests.
+        if tag[0] != 7 {
+            count += 1;
+        }
+        if tag[0] == 7 {
+            ely_ipc::write_frame(&mut output, 100, u64::from_le_bytes(id), &ely_ipc::Pack::new().u64(1).bytes())?;
+            continue;
+        }
         if matches!(mode.trim(), "stall-second" | "fatal-second") && count == 2 {
             fs::write(profile.join(format!("accepted-{count}")), b"yes")?;
             if mode.trim() == "fatal-second" {

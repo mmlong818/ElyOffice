@@ -17,7 +17,7 @@ use crate::book::Book;
 
 /// The open choices menu: tab, values, request.
 pub struct Choices {
-    tab: u64,
+    pub(crate) tab: u64,
     pub(crate) values: Vec<String>,
     request: (u64, Point<Pixels>),
 }

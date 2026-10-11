@@ -1,9 +1,9 @@
 import { expect, test, type Page } from "@playwright/test";
 import { TEXT, type Key, type Lang } from "../src/text.ts";
 
-const REPO = "https://github.com/ZacharyZhang-NY/ElyOffice";
+const REPO = "https://git.zacharyzhang.com/ZacharyZhang-NY/ElyOffice";
 const APPS = ["ElyDoc", "ElyTable", "ElyShow", "ElyPDF", "ElyTree", "ElyMark"];
-const dmg = (app: string) => `${REPO}/releases/download/v0.1.0/${app}-0.1.0-arm64.dmg`;
+const RELEASES = `${REPO}/releases/tag/v0.1.3`;
 
 test.use({ reducedMotion: "reduce" });
 
@@ -78,26 +78,26 @@ test.describe("English locale", () => {
     await expect(lang).toHaveText("中文");
   });
 
-  test("links point at the release and the repository", async ({ page }) => {
+  test("downloads go to the release page, never to a file", async ({ page }) => {
     await page.goto("/");
     await expect(page.locator(".tour .get")).toHaveCount(APPS.length);
-    for (const [i, app] of APPS.entries()) {
-      await expect(page.locator(".tour .get").nth(i)).toHaveAttribute("href", dmg(app));
-    }
-    await expect(page.locator("#download ul a")).toHaveText([...APPS, TEXT.en.source]);
-    for (const [i, app] of APPS.entries()) {
-      await expect(page.locator("#download ul a").nth(i)).toHaveAttribute("href", dmg(app));
-    }
-    await expect(page.locator("[data-t=source]")).toHaveAttribute("href", REPO);
-    await expect(page.locator(".hero > a")).toHaveText("GitHub");
-    await expect(page.locator(".hero > a")).toHaveAttribute("href", REPO);
+    for (const i of APPS.keys()) await expect(page.locator(".tour .get").nth(i)).toHaveAttribute("href", RELEASES);
+    await expect(page.locator("#download a")).toHaveCount(1);
+    await expect(page.locator("#download [data-t=get]")).toHaveAttribute("href", RELEASES);
+    await expect(page.locator(".hero .links a").last()).toHaveText("Source");
+    await expect(page.locator(".hero .links a").last()).toHaveAttribute("href", REPO);
+    await expect(page.locator(".hero [data-t=get]")).toHaveAttribute("href", RELEASES);
+    const files = await page.locator("a[href]").evaluateAll((as) =>
+      as.map((a) => (a as HTMLAnchorElement).href).filter((h) => /\.(dmg|tar\.gz|zip|exe|AppImage)$/.test(h)),
+    );
+    expect(files).toEqual([]);
   });
 
   test("every external link answers @net", async ({ page, request }) => {
     await page.goto("/");
     const hrefs = await page.locator("a[href^='http']").evaluateAll((as) => as.map((a) => (a as HTMLAnchorElement).href));
     const unique = [...new Set(hrefs)];
-    expect(unique.sort()).toEqual([REPO, ...APPS.map(dmg)].sort());
+    expect(unique.sort()).toEqual([REPO, RELEASES].sort());
     for (const url of unique) {
       const res = await request.head(url);
       expect(res.status(), url).toBeLessThan(400);
@@ -123,4 +123,21 @@ test.describe("English locale", () => {
       await get.blur();
     }
   });
+});
+
+test("the download area tells how to open an unnotarized app", async ({ browser }) => {
+  for (const [locale, words] of [
+    ["en-US", ["System Settings", "Privacy & Security", "Open Anyway"]],
+    ["zh-CN", ["系统设置", "隐私与安全性", "仍要打开"]],
+  ] as const) {
+    const page = await browser.newPage({ locale, reducedMotion: "reduce" });
+    await page.goto("/");
+    const steps = page.locator("#download [data-t=unsigned]");
+    await expect(steps).toBeVisible();
+    for (const word of words) await expect(steps).toContainText(word);
+    await page.locator(".lang").click();
+    await expect(steps).toBeVisible();
+    await expect(steps).not.toContainText(words[0]);
+    await page.close();
+  }
 });

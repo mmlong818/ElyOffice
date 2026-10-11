@@ -95,7 +95,7 @@ impl Viewer {
             id,
             move |worker, doc| worker.get()?.print_copy(*doc, &out),
             move |viewer, done, _, cx| match done {
-                Ok(()) => ely_office::print_later(printing, cx, |viewer, error, cx| viewer.panel_failed(&error, cx)),
+                Ok(()) => ely_office::print_later(printing, cx),
                 Err(error) => viewer.failed(&error, cx),
             },
             cx,
@@ -177,7 +177,7 @@ impl Viewer {
             },
             move |viewer, done, _, cx| match done {
                 Ok(count) => {
-                    let text = Self::text(cx, "pdf.export.images_done", &[("count", &count.to_string())]);
+                    let text = ely_ui::i18n::counted(cx, "pdf.export.images_done", count as u64, &[("count", &count.to_string())]);
                     match folder.clone() {
                         Some(folder) => viewer.toast_output(text, folder, cx),
                         None => viewer.toast(text, Severity::Success, cx),
@@ -203,6 +203,8 @@ impl Viewer {
             Err(error) => return self.failed(&error, cx),
         }
         let (work, path, revision) = (tab.work.join("export.out"), tab.session.path().map(PathBuf::from), tab.session.revision());
+        // Unsaved edits: the file on disk is not "before".
+        let compared = path.clone().filter(|_| !tab.view.read(cx).modified());
         let opened = target.clone();
         log::info!("pdf: exports {}", if kind == Kind::Text { "text" } else { "an optimized copy" });
         self.read_in(
@@ -214,7 +216,7 @@ impl Viewer {
                 }
                 let bytes = std::fs::read(&work)?;
                 std::fs::remove_file(&work)?;
-                let before = path.as_deref().map(std::fs::metadata).transpose()?.map(|meta| meta.len());
+                let before = compared.as_deref().map(std::fs::metadata).transpose()?.map(|meta| meta.len());
                 ely_files::export(&target, path.as_deref(), &bytes, revision)?;
                 Ok((before, bytes.len() as u64))
             },

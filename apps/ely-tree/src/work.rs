@@ -267,7 +267,17 @@ fn as_shown(root: &std::path::Path, path: &str, folder: bool) -> io::Result<()> 
     let parts: Vec<&str> = path.trim_end_matches('/').split('/').collect();
     for (ix, part) in parts.iter().enumerate() {
         at.push(part);
-        let kind = std::fs::symlink_metadata(&at)?.file_type();
+        // Gone since the preview is a change; others name paths.
+        let kind = match std::fs::symlink_metadata(&at) {
+            Ok(meta) => meta.file_type(),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Err(changed()),
+            Err(error) => {
+                return Err(io::Error::new(
+                    error.kind(),
+                    format!("{}: {error}", at.display()),
+                ));
+            }
+        };
         let last = ix + 1 == parts.len();
         if (!last && !kind.is_dir()) || (last && kind.is_dir() != folder) {
             return Err(changed());
@@ -349,15 +359,18 @@ impl Tree {
         let Some(write) = opened.writes.pop_front() else {
             return;
         };
-        let born = matches!(&opened.status, Some(Ok(status)) if status.head.oid.is_some());
         opened.writing = true;
         if let Write::Remote(args) = write {
             return self.start_remote(id, args, cx);
         }
-        let (root, args) = (opened.repo.root.clone(), write.args(born));
-        log::info!("tree: {:?} in {}", args.first(), root.display());
+        let root = opened.repo.root.clone();
         let task = cx.background_spawn(async move {
-            let done = run(&git, &root, &write, &args);
+            // Asked now, not cached: a commit may just have landed.
+            let done = git.born(&root).and_then(|born| {
+                let args = write.args(born);
+                log::info!("tree: {:?} in {}", args.first(), root.display());
+                run(&git, &root, &write, &args)
+            });
             let stopped = match (&write, &done) {
                 (Write::Git(args), Err(error)) => {
                     ops::stopped(&git, &root, args, &error.to_string())
@@ -411,6 +424,10 @@ impl Tree {
             }
             (Write::Config { .. }, Ok(())) => self.read_me(id, cx),
             (Write::Save { path, text }, Ok(())) => self.merge_saved(id, path, text, cx),
+            // A file write, not Git: the result did not save.
+            (Write::Save { .. }, Err(error)) => {
+                self.failed("tree.error.save", &error.to_string(), cx)
+            }
             // A conflict stop is no failure; Git says which.
             (
                 Write::Git(_)

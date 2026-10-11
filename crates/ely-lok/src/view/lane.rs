@@ -23,7 +23,8 @@ pub(super) struct Job {
 
 /// What came back from the lane.
 enum Landed {
-    Input(u64, bool, (io::Result<Option<String>>, Option<u64>)),
+    /// Sequence, whether it edits, whether it switched part, outcome.
+    Input(u64, bool, bool, (io::Result<Option<String>>, Option<u64>)),
     Tile(Job, io::Result<Tile>),
 }
 
@@ -46,6 +47,7 @@ impl LokView {
                         input = input_queue.next() => {
                             let Some((seq, input, sent)) = input else { break };
                             let (waited, edits) = (sent.elapsed().as_millis(), input.edits());
+                            let switched = matches!(input, super::input::Input::Part(_));
                             let outcome = super::input::run(&worker, &doc, input);
                             let took = sent.elapsed().as_millis();
                             if took > SLOW_MS {
@@ -53,7 +55,7 @@ impl LokView {
                             } else {
                                 log::debug!("lok: input {seq} waited {waited}, took {took} ms");
                             }
-                            Landed::Input(seq, edits, outcome)
+                            Landed::Input(seq, edits, switched, outcome)
                         }
                         job = tile_queue.next() => {
                             let Some(job) = job else { break };
@@ -96,8 +98,12 @@ impl LokView {
         let mut reported = false;
         for landed in batch {
             match landed {
-                Landed::Input(seq, edits, outcome) => {
+                Landed::Input(seq, edits, switched, outcome) => {
                     self.applied = seq;
+                    // Same tile keys, another slide or sheet.
+                    if switched {
+                        self.invalidate(cx);
+                    }
                     self.edited += u64::from(edits);
                     let (outcome, now) = outcome;
                     if edits {

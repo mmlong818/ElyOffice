@@ -146,7 +146,7 @@ static void write_file(fz_context *ctx, fz_output *out, const char *key, const c
 	fz_write_string(ctx, out, ",\"name\":");
 	ely_json_string(ctx, out, name);
 	fz_write_printf(ctx, out, ",\"page\":%d,\"size\":%ld,\"created\":%ld,\"modified\":%ld,\"type\":", page,
-		(long)file_size(ctx, fs), (long)params.created, (long)params.modified);
+		file_size(ctx, fs), (int64_t)params.created, (int64_t)params.modified);
 	ely_json_string(ctx, out, params.mimetype ? params.mimetype : "");
 	fz_write_string(ctx, out, ",\"note\":");
 	ely_json_string(ctx, out, pdf_dict_get_text_string(ctx, fs, PDF_NAME(Desc)));

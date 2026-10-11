@@ -21,12 +21,8 @@ use crate::dialog::{Dialog, edit};
 impl Deck {
     pub fn ask_table(&mut self, cx: &mut Context<Self>) {
         if let Some(tab) = self.core.active {
-            self.dialog = Some(Dialog::Table {
-                tab,
-                columns: 3,
-                rows: 3,
-            });
-            cx.notify();
+            // Refused while another dialog is open; it says so.
+            let _ = self.open_dialog(Dialog::Table { tab, columns: 3, rows: 3 }, cx);
         }
     }
 

@@ -314,3 +314,29 @@ fn changes_sees_a_theme_swap_in_the_order_omarchy_does_it() {
         "no event for a swapped theme"
     );
 }
+
+#[test]
+fn reading_the_theme_is_no_change() {
+    let current = tempfile::tempdir().unwrap();
+    let theme_dir = current.path().join("theme");
+    fs::create_dir(&theme_dir).unwrap();
+    fs::write(theme_dir.join("colors.toml"), LATTE).unwrap();
+    fs::write(current.path().join("theme.name"), "catppuccin-latte\n").unwrap();
+    let (_watcher, mut events) = changes(current.path()).unwrap();
+
+    load(current.path()).unwrap().expect("a theme");
+    assert!(!event_within(&mut events, 10), "a read counted as a change");
+}
+
+#[test]
+fn an_unreadable_theme_name_is_an_error_and_a_missing_one_is_none() {
+    let current = tempfile::tempdir().unwrap();
+    let theme_dir = current.path().join("theme");
+    fs::create_dir(&theme_dir).unwrap();
+    fs::write(theme_dir.join("colors.toml"), LATTE).unwrap();
+    assert_eq!(load(current.path()).unwrap().unwrap().name, None);
+
+    fs::create_dir(current.path().join("theme.name")).unwrap();
+    let error = format!("{:#}", load(current.path()).unwrap_err());
+    assert!(error.contains("theme.name"), "{error}");
+}

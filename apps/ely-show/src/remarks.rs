@@ -19,20 +19,21 @@ use gpui::{
 use crate::deck::Deck;
 use crate::dialog::Dialog;
 
-/// Each comment as a thread quoted with its slide.
-fn threads(remarks: &[Remark], cx: &App) -> Result<Vec<Thread>, String> {
+/// Threads quoted with their slides; unreadable comments apart.
+fn threads(remarks: &[Remark], cx: &App) -> (Vec<Thread>, Vec<(String, String)>) {
     let authors: Vec<&str> = remarks
         .iter()
         .map(|remark| remark.author.as_str())
         .collect();
-    remarks
+    let (good, bad): (Vec<_>, Vec<_>) = remarks
         .iter()
         .map(|remark| {
             let at = remark
                 .at
                 .parse::<jiff::civil::DateTime>()
                 .and_then(|at| at.to_zoned(jiff::tz::TimeZone::system()))
-                .map_err(|error| format!("a bad comment time {}: {error}", remark.at))?;
+                .map_err(|error| (remark.at.clone(), error.to_string()))?
+                .timestamp();
             let hue = authors
                 .iter()
                 .position(|name| *name == remark.author)
@@ -43,14 +44,16 @@ fn threads(remarks: &[Remark], cx: &App) -> Result<Vec<Thread>, String> {
                 quote: Some(Deck::text(cx, "show.remark.slide", &[("n", &slide)])),
                 comments: vec![Comment {
                     author: Peer::new(remark.author.clone(), remark.author.clone(), hue),
-                    at: at.timestamp(),
+                    at,
                     body: remark.text.clone().into(),
                     reactions: Vec::new(),
                 }],
                 resolved: false,
             })
         })
-        .collect()
+        .partition(Result::is_ok);
+    let bad = bad.into_iter().filter_map(Result::err).collect();
+    (good.into_iter().filter_map(Result::ok).collect(), bad)
 }
 
 impl Deck {
@@ -77,8 +80,8 @@ impl Deck {
             input.set_text(text, cx);
             input
         });
-        self.dialog = Some(Dialog::Remark { tab, edit, field });
-        cx.notify();
+        // Refused while another dialog is open; it says so.
+        let _ = self.open_dialog(Dialog::Remark { tab, edit, field }, cx);
     }
 
     /// Sends the dialog's text: a new comment or an edit.
@@ -166,14 +169,15 @@ impl Deck {
             .active_tab()
             .map(|tab| tab.extra.remarks.clone())
             .unwrap_or_default();
-        let threads = match threads(&remarks, cx) {
-            Ok(threads) => threads,
-            Err(error) => {
-                log::error!("show: {error}");
-                let message = InlineMessage::new(Severity::Danger, error);
-                return div().p_2().child(message).into_any_element();
-            }
-        };
+        let (threads, bad) = threads(&remarks, cx);
+        for (at, error) in &bad {
+            log::error!("show: a bad comment time {at}: {error}");
+        }
+        // One line however many: the comments below stay in view.
+        let bad = bad.first().map(|(at, _)| {
+            let n = bad.len().to_string();
+            InlineMessage::new(Severity::Danger, Deck::text(cx, "show.remark.bad", &[("n", &n), ("at", at)]))
+        });
         let active = self.shown_remark();
         let act = |id: &'static str,
                    key: &str,
@@ -227,6 +231,7 @@ impl Deck {
             .gap_2()
             .p_2()
             .child(head)
+            .children(bad)
             .child(div().flex_1().min_h_0().child(sidebar))
             .into_any_element()
     }
@@ -287,5 +292,34 @@ impl Deck {
             })
             .collect();
         (!pins.is_empty()).then(|| div().absolute().inset_0().children(pins).into_any_element())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use ely_lok::show::Remark;
+    use gpui::TestAppContext;
+
+    use super::threads;
+
+    #[test]
+    fn one_unreadable_time_spares_the_other_comments() {
+        let cx = TestAppContext::single();
+        cx.update(|cx| ely_ui::i18n::install_as("en-US", cx));
+        let remark = |id: &str, at: &str| Remark {
+            id: id.into(),
+            author: "A".into(),
+            text: "t".into(),
+            at: at.into(),
+            part: 0,
+            anchor: (0, 0, 0, 0),
+        };
+        // The kernel writes an empty date as 0-00-00.
+        let remarks = [remark("1", "2025-03-01"), remark("2", "0-00-00"), remark("3", "2025-03-01T10:15:00")];
+        let (good, bad) = cx.update(|cx| threads(&remarks, cx));
+        let keys: Vec<_> = good.iter().map(|thread| thread.key.to_string()).collect();
+        assert_eq!(keys, ["1", "3"]);
+        assert_eq!(bad.len(), 1);
+        assert_eq!(bad[0].0, "0-00-00");
     }
 }

@@ -148,7 +148,8 @@ impl Deck {
             |worker, doc| ely_lok::show::slide_show(&worker.values(doc, ely_lok::show::SLIDE_SHOW)?),
             move |deck, read, _, cx| match read {
                 Ok(slides) if deck.dialog_due(asked, id) => {
-                    deck.dialog = Some(Dialog::Output(Output {
+                    // Refused while another dialog is open; it says so.
+                    let output = Output {
                         tab: id,
                         print,
                         kind: Kind::Slides,
@@ -156,8 +157,8 @@ impl Deck {
                         per: 3,
                         current,
                         hidden: slides.iter().map(|slide| slide.hidden).collect(),
-                    }));
-                    cx.notify();
+                    };
+                    let _ = deck.open_dialog(Dialog::Output(output), cx);
                 }
                 Ok(_) => log::info!("show: the output dialog is no longer due"),
                 Err(error) => deck.engine_failed(&format!("the slides: {error}"), cx),
@@ -185,7 +186,7 @@ impl Deck {
             let path = work.join("print.pdf");
             let printing = path.clone();
             return self.write_pdf(&output, path, cx, move |_, cx| {
-                ely_office::print_later(printing, cx, |deck, error, cx| deck.output_failed(&error, cx))
+                ely_office::print_later(printing, cx)
             });
         }
         let Some(dir) = ely_office::folder(source) else {
@@ -292,8 +293,8 @@ impl Deck {
             },
             move |deck, written, _, cx| match written {
                 Ok(count) => {
-                    let count = count.to_string();
-                    let text = Deck::text(cx, "show.output.pictures_done", &[("n", &count), ("folder", &shown)]);
+                    let n = count.to_string();
+                    let text = ely_ui::i18n::counted(cx, "show.output.pictures_done", count as u64, &[("n", &n), ("folder", &shown)]);
                     deck.toast_output(text, opened.clone(), cx);
                 }
                 Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {

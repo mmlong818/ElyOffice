@@ -11,7 +11,7 @@ use crate::deck::Deck;
 use crate::dialog::Dialog;
 
 /// Runs `f` on the deck inside its window.
-fn in_window<R>(
+pub(super) fn in_window<R>(
     cx: &mut TestAppContext,
     deck: &Entity<Deck>,
     f: impl FnOnce(&mut Deck, &mut Window, &mut gpui::Context<Deck>) -> R,
@@ -25,7 +25,7 @@ fn in_window<R>(
     .expect("the window lives")
 }
 
-fn type_in(cx: &mut TestAppContext, field: &Entity<TextInput>, text: &str) {
+pub(super) fn type_in(cx: &mut TestAppContext, field: &Entity<TextInput>, text: &str) {
     let text = text.to_string();
     cx.update(|app| field.update(app, |field, cx| field.set_text(text, cx)));
 }
@@ -105,28 +105,20 @@ fn the_table_dialog_inserts_a_table() {
 }
 
 #[test]
-fn typed_notes_reach_the_slide() {
+fn an_open_dialog_is_not_pushed_aside() {
     let dir = tempfile::tempdir().expect("a temp dir");
     let mut cx = TestAppContext::single();
     let Some(deck) = blank(&mut cx, dir.path()) else {
         eprintln!("SKIP: no LOK build");
         return;
     };
-    let notes = |app: &gpui::App| {
-        deck.read(app)
-            .active_tab()
-            .and_then(|tab| tab.extra.notes.clone())
-    };
-    settle(&cx, |app| notes(app).is_some());
-    let field = in_window(&mut cx, &deck, |deck, window, cx| {
-        deck.notes_input(window, cx)
-    });
-    let field = field.expect("the field");
-    type_in(&mut cx, &field, "Start with the totals");
-    update(&mut cx, &deck, |deck, cx| deck.commit_notes(cx));
-    settle(&cx, |app| {
-        notes(app).is_some_and(|notes| notes.text == "Start with the totals")
-    });
+    update(&mut cx, &deck, |deck, cx| deck.ask_table(cx));
+    update(&mut cx, &deck, |deck, cx| deck.ask_new(cx));
+    // The chart dialog opens after a background read.
+    update(&mut cx, &deck, |deck, cx| deck.ask_chart(cx));
+    cx.run_until_parked();
+    let kept = cx.update(|app| matches!(deck.read(app).dialog, Some(crate::dialog::Dialog::Table { .. })));
+    assert!(kept, "the table dialog stays");
 }
 
 #[test]
@@ -383,4 +375,89 @@ fn a_comment_picked_on_another_slide_shows_its_slide_again() {
     update(&mut cx, &deck, |deck, cx| deck.pick_remark(&key, cx));
     settle(&cx, |app| current(app) == Some(0));
     assert_eq!(cx.update(|app| deck.read(app).shown_remark()), Some(key));
+}
+
+#[test]
+fn a_zoom_stays_through_later_reports() {
+    use ely_gpui_component::shell::ZoomStep;
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let mut cx = TestAppContext::single();
+    let Some(deck) = blank(&mut cx, dir.path()) else {
+        eprintln!("SKIP: no LOK build");
+        return;
+    };
+    let view = |app: &gpui::App| deck.read(app).active_tab().expect("a tab").view.clone();
+    settle(&cx, |app| view(app).read(app).fitting());
+    update(&mut cx, &deck, |deck, cx| deck.zoom(ZoomStep::In, cx));
+    let zoom = cx.update(|app| view(app).read(app).zoom());
+    update(&mut cx, &deck, |deck, cx| {
+        let (id, view) = deck.active_tab().map(|tab| (tab.id, tab.view.clone())).expect("a tab");
+        deck.observed(id, &view, cx);
+    });
+    cx.update(|app| {
+        let view = view(app);
+        assert!(!view.read(app).fitting(), "a report does not fit the slide again");
+        assert_eq!(view.read(app).zoom(), zoom, "the zoom stays");
+    });
+}
+
+#[test]
+fn a_check_row_does_not_jump_among_masters() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let mut cx = TestAppContext::single();
+    let Some(deck) = blank(&mut cx, dir.path()) else {
+        eprintln!("SKIP: no LOK build");
+        return;
+    };
+    update(&mut cx, &deck, |deck, cx| deck.masters(true, cx));
+    settle(&cx, |app| deck.read(app).active_tab().is_some_and(|tab| tab.extra.masters));
+    update(&mut cx, &deck, |deck, cx| {
+        deck.dialog = Some(crate::dialog::Dialog::Check(Vec::new()));
+        deck.go_to_finding(0, cx);
+    });
+    assert!(cx.update(|app| deck.read(app).dialog.is_some()), "the check stays open");
+}
+
+#[test]
+fn a_refused_size_does_not_stay_shown() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let mut cx = TestAppContext::single();
+    let Some(deck) = blank(&mut cx, dir.path()) else {
+        eprintln!("SKIP: no LOK build");
+        return;
+    };
+    let before = cx.update(|app| deck.read(app).active_tab().expect("a tab").extra.size);
+    update(&mut cx, &deck, |deck, cx| deck.resize((-500, -500), cx));
+    settle(&cx, |app| {
+        deck.read(app).active_tab().is_some_and(|tab| tab.extra.size_asked.is_none())
+    });
+    let extra = cx.update(|app| {
+        let tab = deck.read(app).active_tab().expect("a tab");
+        (tab.extra.size, tab.extra.shown_size())
+    });
+    assert_eq!(extra.0, before, "the kernel kept its size");
+    assert_eq!(extra.1, crate::design::mm100(before), "the fields show it");
+}
+
+#[test]
+fn a_size_the_kernel_does_not_take_clears_after_its_read() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let mut cx = TestAppContext::single();
+    let Some(deck) = blank(&mut cx, dir.path()) else {
+        eprintln!("SKIP: no LOK build");
+        return;
+    };
+    update(&mut cx, &deck, |deck, cx| {
+        deck.resize((30_000, 19_050), cx);
+        // As if the kernel refused: it keeps another size.
+        let id = deck.core.active.expect("a tab");
+        let tab = deck.tab_mut(id).expect("a tab");
+        let (_, seq) = tab.extra.size_asked.expect("asked");
+        tab.extra.size_asked = Some(((40_000, 19_050), seq));
+    });
+    settle(&cx, |app| {
+        deck.read(app).active_tab().is_some_and(|tab| tab.extra.size_asked.is_none())
+    });
+    let read = cx.update(|app| crate::design::mm100(deck.read(app).active_tab().expect("a tab").extra.size));
+    assert!((read.0 - 30_000).abs() <= 50, "the kernel's own size shows: {read:?}");
 }

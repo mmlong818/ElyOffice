@@ -150,11 +150,10 @@ impl Tree {
                 (self.amend, self.draft) = (false, None);
                 self.fill("", "", cx);
             }
-        } else if let Some(opened) = self.opened_mut(id) {
-            if commit::message(&opened.held.subject, &opened.held.body) == message {
+        } else if let Some(opened) = self.opened_mut(id)
+            && commit::message(&opened.held.subject, &opened.held.body) == message {
                 opened.held = Held::default();
             }
-        }
         cx.notify();
     }
 

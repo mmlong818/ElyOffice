@@ -18,8 +18,8 @@ use ely_lok::{Doc, Worker, show::ShowSlide};
 use ely_office::prelude::*;
 use ely_platform::AppId;
 use gpui::{
-    AnyElement, AnyWindowHandle, App, AppContext as _, Context, Entity, EntityId, IntoElement,
-    ParentElement as _, PlatformDisplay, Window, WindowBounds, WindowOptions,
+    AnyElement, AnyWindowHandle, App, AppContext as _, Bounds, Context, Entity, EntityId, IntoElement,
+    ParentElement as _, Pixels, PlatformDisplay, Window, WindowBounds, WindowOptions,
 };
 
 use super::{Show, audience::Audience, presenter::Presenter};
@@ -80,14 +80,32 @@ fn copy(
     }
 }
 
+/// macOS covers its menu bar and Dock by simple fullscreen.
+const SIMPLE: bool = cfg!(target_os = "macos");
+
+/// A show window's bounds: fullscreen, or macOS's simple kind.
+fn bounds(area: Bounds<Pixels>) -> WindowBounds {
+    match SIMPLE {
+        true => WindowBounds::Windowed(area),
+        false => WindowBounds::Fullscreen(area),
+    }
+}
+
 fn options(display: &Rc<dyn PlatformDisplay>) -> WindowOptions {
     WindowOptions {
-        window_bounds: Some(WindowBounds::Fullscreen(display.bounds())),
+        window_bounds: Some(bounds(display.bounds())),
         display_id: Some(display.id()),
         titlebar: None,
         focus: true,
         app_id: Some(AppId::Show.slug().into()),
         ..Default::default()
+    }
+}
+
+/// Hides the menu bar and Dock over a macOS show.
+fn cover(window: &mut Window) {
+    if SIMPLE {
+        window.toggle_simple_fullscreen();
     }
 }
 
@@ -102,6 +120,7 @@ pub fn show_window(
     Ok(match presenter {
         true => cx
             .open_window(options(display), |window, cx| {
+                cover(window);
                 let view = cx.new(|cx| Presenter::new(show, cx));
                 window.focus(&view.read(cx).focus.clone(), cx);
                 view
@@ -109,6 +128,7 @@ pub fn show_window(
             .into(),
         false => cx
             .open_window(options(display), |window, cx| {
+                cover(window);
                 let view = cx.new(|cx| Audience::new(show, cx));
                 window.focus(&view.read(cx).focus.clone(), cx);
                 view
@@ -121,7 +141,9 @@ impl Deck {
     /// Plays a copy from the first or shown slide.
     pub fn start_show(&mut self, here: bool, cx: &mut Context<Self>) {
         if self.show.is_some() || self.show_starting {
-            return log::info!("show: already playing or starting");
+            log::info!("show: already playing or starting");
+            let text = Deck::text(cx, "show.play.busy", &[]);
+            return self.toast(text, Severity::Warning, cx);
         }
         let Some(id) = self.core.active else {
             return;
@@ -160,7 +182,9 @@ impl Deck {
                 let Some(first) = first.filter(|_| deck.core.active == Some(id)) else {
                     discard(worker, doc, path, cx);
                     if deck.core.active != Some(id) {
-                        return log::info!("show: tab {id} is no longer shown");
+                        log::info!("show: tab {id} is no longer shown");
+                        let text = Deck::text(cx, "show.play.gone", &[]);
+                        return deck.toast(text, Severity::Warning, cx);
                     }
                     let text = Deck::text(cx, "show.play.none", &[]);
                     return deck.toast(text, Severity::Warning, cx);
@@ -176,11 +200,11 @@ impl Deck {
                 };
                 match cx.displays().len() {
                     1 => deck.open_show(starting, cx),
-                    _ => {
-                        deck.show_starting = true;
-                        deck.dialog = Some(Dialog::Show(starting));
-                        cx.notify();
-                    }
+                    _ => match deck.open_dialog(Dialog::Show(starting), cx) {
+                        Ok(()) => deck.show_starting = true,
+                        Err(Dialog::Show(refused)) => discard(worker, refused.doc, refused.copy, cx),
+                        Err(_) => unreachable!("the show dialog comes back"),
+                    },
                 }
             },
             cx,
@@ -194,6 +218,8 @@ impl Deck {
         let (Some(tab), Some(audience)) = (self.tab(starting.tab), displays.get(starting.audience))
         else {
             log::warn!("show: the tab or screen {} is gone", starting.audience);
+            let text = Deck::text(cx, "show.play.gone", &[]);
+            self.toast(text, Severity::Warning, cx);
             return discard(worker, starting.doc, starting.copy, cx);
         };
         let presenter = (displays.iter())
@@ -311,5 +337,61 @@ impl Deck {
                     })
             })
             .into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui::{Bounds, WindowBounds, point, px, size};
+
+    #[test]
+    fn a_show_covers_the_display_on_every_platform() {
+        let area = Bounds::new(point(px(0.), px(0.)), size(px(1920.), px(1080.)));
+        let want = match cfg!(target_os = "macos") {
+            true => WindowBounds::Windowed(area),
+            false => WindowBounds::Fullscreen(area),
+        };
+        assert_eq!(super::bounds(area), want);
+    }
+
+    #[test]
+    fn a_start_whose_screen_is_gone_says_so_and_drops_its_copy() {
+        use ely_office::prelude::*;
+        use gpui::AppContext as _;
+
+        use crate::tests::{settle, update};
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let mut cx = gpui::TestAppContext::single();
+        let Some(deck) = crate::tests::deck(&mut cx, dir.path()) else {
+            eprintln!("SKIP: no LOK build");
+            return;
+        };
+        update(&mut cx, &deck, |deck, cx| deck.new_blank(cx));
+        settle(&cx, |app| deck.read(app).active_tab().is_some_and(|tab| !tab.extra.slides.list.is_empty()));
+        // The window's toasts live on its root.
+        let handle = cx.update(|app| deck.read(app).core.window).expect("a window");
+        let root = cx
+            .update_window(handle, |_, window, app| {
+                let root = ely_ui::document_root(ely_platform::AppId::Show, deck.clone().into(), &ely_ui::commands::FILE, Vec::new(), window, app);
+                deck.update(app, |deck, _| deck.core.root = root.downgrade());
+                root
+            })
+            .expect("the window lives");
+        let path = dir.path().join("copy.odp");
+        let starting = cx.update(|app| {
+            let deck = deck.read(app);
+            let tab = deck.active_tab().expect("a tab");
+            let mut worker = deck.core.worker.lock().expect("the worker lock");
+            let (_, doc, slides) = super::copy(&mut worker, &tab.doc, (&path, None)).expect("a copy");
+            super::Starting { tab: tab.id, slides, first: 0, doc, copy: path.clone(), audience: 99, presenter: false }
+        });
+        update(&mut cx, &deck, |deck, cx| {
+            deck.show_starting = true;
+            deck.open_show(starting, cx);
+        });
+        settle(&cx, |_| !path.exists());
+        let (toasts, gone) = cx.update(|app| (root.read(app).toasts(app), crate::deck::Deck::text(app, "show.play.gone", &[])));
+        assert!(toasts.iter().any(|(text, _)| *text == gone), "{toasts:?}");
+        assert!(cx.update(|app| !deck.read(app).show_starting && deck.read(app).show.is_none()));
     }
 }

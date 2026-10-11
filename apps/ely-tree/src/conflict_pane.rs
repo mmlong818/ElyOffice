@@ -29,6 +29,7 @@ pub fn sides(doing: Option<&Doing>, cx: &App) -> [SharedString; 2] {
                 Op::Rebase => ("tree.ours.rebase", "tree.theirs.rebase"),
                 Op::CherryPick => ("tree.ours.pick", "tree.theirs.pick"),
                 Op::Revert => ("tree.ours.revert", "tree.theirs.revert"),
+                Op::Am => ("tree.ours.am", "tree.theirs.am"),
             };
             [
                 text(cx, ours, &[("name", &doing.ours)]),
@@ -59,8 +60,14 @@ fn button(
 impl Tree {
     /// A stopped operation: continue, skip or abort.
     pub fn op_alert(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let Some(Some(Ok(Some(doing)))) = self.active().map(|opened| opened.doing.as_ref()) else {
-            return None;
+        let doing = match self.active().map(|opened| opened.doing.as_ref()) {
+            Some(Some(Ok(Some(doing)))) => doing,
+            // A read that failed says so in Git's own words.
+            Some(Some(Err(error))) => {
+                let title = text(cx, "tree.op.unread", &[("error", error)]);
+                return Some(Alert::new("tree-op", Severity::Danger, title).into_any_element());
+            }
+            _ => return None,
         };
         let op = doing.op;
         let key = match op {
@@ -68,6 +75,7 @@ impl Tree {
             Op::Rebase => "tree.op.rebasing",
             Op::CherryPick => "tree.op.picking",
             Op::Revert => "tree.op.reverting",
+            Op::Am => "tree.op.applying",
         };
         let title = text(cx, key, &[("ours", &doing.ours), ("theirs", &doing.theirs)]);
         let mut alert = Alert::new("tree-op", Severity::Warning, title)

@@ -9,7 +9,7 @@ fn log_lines_reach_the_app_file_and_a_second_init_fails() {
     log::logger().flush();
 
     let text = std::fs::read_to_string(dir.path().join("ely.log")).unwrap();
-    assert!(text.contains("ElyDoc 0.1.0 started"), "{text}");
+    assert!(text.contains(&format!("ElyDoc {} started", env!("CARGO_PKG_VERSION"))), "{text}");
     assert!(text.contains("hello from the test"), "{text}");
 
     let error = logging::init_in(AppId::Mail, dir.path()).unwrap_err();

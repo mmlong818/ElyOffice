@@ -203,12 +203,9 @@ pub fn same_file(a: &Path, b: &Path) -> io::Result<bool> {
     if resolved(a)? == resolved(b)? {
         return Ok(true);
     }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt;
-        if let (Ok(ma), Ok(mb)) = (std::fs::metadata(a), std::fs::metadata(b)) {
-            return Ok((ma.dev(), ma.ino()) == (mb.dev(), mb.ino()));
-        }
+    // A missing side is another file.
+    if let (Ok(Some(ia)), Ok(Some(ib))) = (crate::session::file_id(a), crate::session::file_id(b)) {
+        return Ok(ia == ib);
     }
     Ok(false)
 }

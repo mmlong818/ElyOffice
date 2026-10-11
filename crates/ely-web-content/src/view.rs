@@ -64,8 +64,11 @@ pub struct WebView {
     /// Shown instead of the page until reloaded.
     fault: Option<String>,
     /// Takes a paste before the page; true when it did.
-    pub(crate) paste: Option<std::rc::Rc<dyn Fn(&mut Window, &mut App) -> bool>>,
+    pub(crate) paste: Option<Paste>,
 }
+
+/// Takes a paste before the page; true when it did.
+pub(crate) type Paste = std::rc::Rc<dyn Fn(&mut Window, &mut App) -> bool>;
 
 impl EventEmitter<Event> for WebView {}
 
@@ -86,9 +89,19 @@ impl WebView {
     }
 
     /// Opens `page`, a file in `root`, in a new browser.
-    pub fn open(
+    pub fn open(page: &Path, root: &Path, window: &mut Window, cx: &mut App) -> Result<Entity<Self>> {
+        Self::opened(page, root, true, window, cx)
+    }
+
+    /// Opens `page` with its scripts off: shown, never run.
+    pub fn open_inert(page: &Path, root: &Path, window: &mut Window, cx: &mut App) -> Result<Entity<Self>> {
+        Self::opened(page, root, false, window, cx)
+    }
+
+    fn opened(
         page: &Path,
         root: &Path,
+        scripts: bool,
         window: &mut Window,
         cx: &mut App,
     ) -> Result<Entity<Self>> {
@@ -97,7 +110,9 @@ impl WebView {
         }
         let root = std::fs::canonicalize(root)?;
         let page = std::fs::canonicalize(page)?;
-        let surface = Arc::new(Mutex::new(Surface::new(root, window.scale_factor())));
+        let mut surface = Surface::new(root, window.scale_factor());
+        surface.scripts = scripts;
+        let surface = Arc::new(Mutex::new(surface));
         let url = file_url(&page);
         if !surface.lock().expect("the surface lock").navigable(&url) {
             bail!("{} is outside its content folder", page.display());

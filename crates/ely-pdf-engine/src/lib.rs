@@ -14,7 +14,7 @@ pub mod proto;
 #[cfg(any(test, feature = "test-support"))]
 pub mod sample;
 
-pub use client::{Doc, Opened, Tile, Worker, is_stale};
+pub use client::{Doc, Opened, Refused, Tile, Worker, is_stale, refused};
 pub use content::{Drawn, TextBlock, Writing, Wrote};
 pub use ocr::{OcrLine, tessdata};
 pub use output::Optimizing;

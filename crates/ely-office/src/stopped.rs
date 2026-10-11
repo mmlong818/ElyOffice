@@ -5,7 +5,7 @@ use std::{path::PathBuf, sync::Arc};
 use ely_gpui_component::{feedback::Banner, primitives::Severity};
 use gpui::{AppContext as _, Context};
 
-use crate::{Closing as _, Dialog, Engine, Host, Opening as _, Recovering as _, Tabs as _, recover::clock, text};
+use crate::{Closing as _, Dialog, Engine, Host, Opening as _, Recovering as _, recover::clock, text};
 
 /// Why the engine ended, and whether it is coming back.
 pub struct Stopped {
@@ -93,7 +93,7 @@ pub trait Stopping: Host {
             .iter()
             .map(|tab| (tab.id, tab.name.to_string(), tab.session.path().map(PathBuf::from), tab.dirty(cx)))
             .collect();
-        let mut lost = Vec::new();
+        let (mut taken, mut lost) = (Vec::new(), Vec::new());
         for (id, name, path, dirty) in tabs {
             if !dirty {
                 self.release_tab(id, cx);
@@ -102,13 +102,9 @@ pub trait Stopping: Host {
                 }
                 continue;
             }
-            match self.reopen_point(id, cx) {
-                Ok(true) => {}
-                Ok(false) => lost.push(name),
-                Err(error) => {
-                    log::error!("office: tab {id} point does not open ({:?})", error.kind());
-                    lost.push(format!("{name} ({error})"));
-                }
+            match self.take_slot(id, name.clone()) {
+                Some(slot) => taken.push(slot),
+                None => lost.push(name),
             }
             self.release_tab(id, cx);
         }
@@ -116,11 +112,7 @@ pub trait Stopping: Host {
         if matches!(self.core().dialog, Some(Dialog::Unsaved { .. } | Dialog::Conflict { .. })) {
             self.core_mut().dialog = None;
         }
-        log::info!("{}: the engine is back, {} tab(s) lost", Self::KIND.app.slug(), lost.len());
-        if !lost.is_empty() {
-            let shown = text(cx, "office.stopped.lost", &[("names", &lost.join(", "))]);
-            self.toast_unlogged(shown, Severity::Danger, cx);
-        }
+        self.reopen_taken(taken, lost, cx);
     }
 }
 

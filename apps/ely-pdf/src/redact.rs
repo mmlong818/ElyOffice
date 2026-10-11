@@ -185,7 +185,7 @@ impl Viewer {
             },
             move |viewer, done, _, cx| match done {
                 Ok(0) => viewer.toast_output(Self::text(cx, "pdf.clean.done", &[("name", &shown)]), opened.clone(), cx),
-                Ok(n) => viewer.toast_output(Self::text(cx, "pdf.redact.done", &[("name", &shown), ("count", &n.to_string())]), opened.clone(), cx),
+                Ok(n) => viewer.toast_output(ely_ui::i18n::counted(cx, "pdf.redact.done", n as u64, &[("name", &shown), ("count", &n.to_string())]), opened.clone(), cx),
                 Err(error) => viewer.failed(&error, cx),
             },
             cx,
@@ -200,8 +200,8 @@ impl Viewer {
         let (title, body) = match removal {
             Removal::Clean { reach, what, .. } => ("pdf.clean.title", self.clean_rows(reach, *what, &this, cx)),
             Removal::Redact { regions, .. } => {
-                let count = regions.len().to_string();
-                ("pdf.redact.title", div().child(Self::text(cx, "pdf.redact.count", &[("count", &count)])).into_any_element())
+                let count = ely_ui::i18n::counted(cx, "pdf.redact.count", regions.len() as u64, &[("count", &regions.len().to_string())]);
+                ("pdf.redact.title", div().child(count).into_any_element())
             }
         };
         let title = Self::text(cx, title, &[("name", &name)]);

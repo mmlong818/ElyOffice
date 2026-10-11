@@ -1,6 +1,6 @@
 //! Only the pages on screen, drawn in tiles (PDF-01, PERF-05).
 
-use std::{collections::HashSet, sync::Arc};
+use std::sync::Arc;
 
 use ely_gpui_component::theme::ActiveTheme as _;
 use gpui::{
@@ -10,7 +10,7 @@ use gpui::{
 };
 use image::{Frame, ImageBuffer, Rgba};
 
-use crate::layout::{GAP, Layout, Mode, Placed, layout, visible};
+use crate::layout::{GAP, Layout, Mode, Placed, layout};
 use crate::view::{PdfView, Reported};
 
 /// A tile's side in device pixels.
@@ -58,7 +58,7 @@ pub fn rect_on(rect: [f32; 4], size: (f32, f32), rotate: i32, scale: f32) -> (f3
 }
 
 /// Tiles covering `[from, to)` view pixels of a `side`-pixel page.
-fn span(from: f32, to: f32, sf: f32, side: i32) -> std::ops::RangeInclusive<i32> {
+pub(crate) fn span(from: f32, to: f32, sf: f32, side: i32) -> std::ops::RangeInclusive<i32> {
     let first = (from.max(0.0) * sf).floor() as i32 / TILE;
     let last = ((to * sf).ceil() as i32 - 1).min(side - 1).max(0) / TILE;
     first..=last
@@ -69,11 +69,13 @@ fn drawn_tile(image: Arc<RenderImage>, page: usize, view: gpui::Entity<PdfView>)
     canvas(
         |_, _, _| {},
         move |bounds, _, window, cx| match window.paint_image(bounds, bounds, Default::default(), image, 0, false) {
-            Ok(()) if !view.read(cx).drawn => {
-                view.update(cx, |view, _| view.drawn = true);
-                log::info!("pdf: first tile drawn, page {page}");
-            }
-            Ok(()) => {}
+            Ok(()) => view.update(cx, |view, _| {
+                let area = f64::from(f32::from(bounds.size.width) * f32::from(bounds.size.height));
+                if view.painted == 0.0 && area > 0.0 {
+                    log::info!("pdf: first tile drawn, page {page}");
+                }
+                view.painted += area;
+            }),
             Err(error) => log::error!("pdf: drawing a page failed: {error}"),
         },
     )
@@ -127,18 +129,14 @@ impl PdfView {
             (colors.sunken, if dark { colors.surface } else { colors.paper })
         };
         let laid = self.laid_out();
-        let (room_w, room_h) = (f32::from(self.room.size.width), f32::from(self.room.size.height));
         if let Some((x, y)) = self.go_to.take() {
             self.scroll.set_offset(point(px(-x), px(-y)));
         }
-        let (left, top) = (-f32::from(self.scroll.offset().x), -f32::from(self.scroll.offset().y));
-        let shown: Vec<Placed> = visible(&laid, top, top + room_h)
-            .filter(|p| p.x < left + room_w && p.x + p.w > left)
-            .copied()
-            .collect();
+        let top = -f32::from(self.scroll.offset().y);
+        let showing = self.showing(sf, dark);
         // The current page: first showing more than a sliver.
-        if let Some(first) = shown.iter().find(|p| p.y + p.h > top + GAP * 3.0) {
-            let paired = shown.iter().any(|p| p.page == self.current) && first.page / 2 == self.current / 2;
+        if let Some(first) = showing.iter().map(|s| s.place).find(|p| p.y + p.h > top + GAP * 3.0) {
+            let paired = showing.iter().any(|s| s.place.page == self.current) && first.page / 2 == self.current / 2;
             let now = match self.mode {
                 Mode::Single => self.current,
                 // Either page of a pair in view may be current.
@@ -150,47 +148,33 @@ impl PdfView {
                 cx.emit(Reported);
             }
         }
-        let scale = (laid.scale * sf * 1000.0).round() as u32;
-        let (mut wanted, mut pages, mut seen) = (Vec::new(), Vec::new(), HashSet::new());
-        for place in &shown {
-            let (dw, dh) = ((place.w * sf).ceil() as i32, (place.h * sf).ceil() as i32);
-            let (ys, xs) = (
-                span(top - place.y, top + room_h - place.y, sf, dh),
-                span(left - place.x, left + room_w - place.x, sf, dw),
-            );
-            let mut tiles = Vec::new();
-            for ty in ys {
-                for tx in xs.clone() {
-                    let key = TileKey { page: place.page, scale, rotate: self.rotate, dark, tx, ty };
-                    let rect = [tx * TILE, ty * TILE, TILE.min(dw - tx * TILE), TILE.min(dh - ty * TILE)];
-                    seen.insert(key);
-                    match self.tiles.get(&key) {
-                        Some(image) => tiles.push(
-                            drawn_tile(image.clone(), place.page, cx.entity())
-                                .absolute()
-                                .left(px(rect[0] as f32 / sf))
-                                .top(px(rect[1] as f32 / sf))
-                                .w(px(rect[2] as f32 / sf))
-                                .h(px(rect[3] as f32 / sf))
-                                .into_any_element(),
-                        ),
-                        None if !self.failed.contains(&key) => wanted.push((key, rect)),
-                        None => {}
-                    }
-                }
-            }
-            pages.push((*place, tiles));
-        }
-        // Tiles out of view go.
-        let retired = &mut self.retired;
-        self.tiles.retain(|key, image| {
-            let kept = seen.contains(key);
-            if !kept {
-                retired.push(image.clone());
-            }
-            kept
-        });
-        let pages_shown: Vec<usize> = shown.iter().map(|place| place.page).collect();
+        let wanted: Vec<(TileKey, [i32; 4])> = showing
+            .iter()
+            .flat_map(|s| s.keys.iter().copied())
+            .filter(|(key, _)| !self.tiles.contains_key(key) && !self.failed.contains(key))
+            .collect();
+        let pages: Vec<(Placed, Vec<AnyElement>)> = showing
+            .iter()
+            .map(|s| {
+                let (w, h) = (s.place.w, s.place.h);
+                let tiles = self
+                    .pieces(s)
+                    .into_iter()
+                    .map(|(image, at)| {
+                        drawn_tile(image, s.place.page, cx.entity())
+                            .absolute()
+                            .left(px(at[0] * w))
+                            .top(px(at[1] * h))
+                            .w(px(at[2] * w))
+                            .h(px(at[3] * h))
+                            .into_any_element()
+                    })
+                    .collect();
+                (s.place, tiles)
+            })
+            .collect();
+        self.settle(&showing);
+        let pages_shown: Vec<usize> = showing.iter().map(|s| s.place.page).collect();
         self.ask_layers(&pages_shown, cx);
         self.ask_notes(pages_shown.iter().copied(), cx);
         self.paint(wanted, cx);

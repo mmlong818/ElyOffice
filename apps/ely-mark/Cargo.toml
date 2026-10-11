@@ -5,6 +5,10 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
+build = "../../packaging/windows/icon.rs"
+
+[build-dependencies]
+embed-resource.workspace = true
 
 [dependencies]
 anyhow.workspace = true
@@ -27,4 +31,5 @@ serde_json.workspace = true
 workspace = true
 
 [dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
 tempfile.workspace = true

@@ -5,17 +5,12 @@ use gpui::Context;
 
 use crate::view::{Failed, PdfView};
 
-/// Addresses that may leave the document.
-pub fn outward(uri: &str) -> bool {
-    ["https://", "http://", "mailto:"].iter().any(|scheme| uri.starts_with(scheme))
-}
-
 /// A target as typed: a page number or an address.
 pub fn parse(typed: &str, pages: usize) -> Option<Target> {
     let typed = typed.trim();
     match typed.parse::<usize>() {
         Ok(n) => (1..=pages).contains(&n).then(|| Target::Page(n - 1, 0.0)),
-        Err(_) => outward(typed).then(|| Target::Web(typed.to_string())),
+        Err(_) => ely_office::outward(typed).then(|| Target::Web(typed.to_string())),
     }
 }
 
@@ -35,12 +30,12 @@ impl PdfView {
                 log::info!("pdf: follows a link to page {}", page + 1);
                 self.show(page, link.y, cx)
             }
-            None if outward(&link.uri) => {
+            None if ely_office::outward(&link.uri) => {
                 log::info!("pdf: opens a link outside");
                 cx.open_url(&link.uri)
             }
             None => {
-                let text = crate::viewer::Viewer::text(cx, "pdf.link.refused", &[]);
+                let text = crate::viewer::Viewer::text(cx, "office.link.refused", &[]);
                 cx.emit(Failed(text.to_string()))
             }
         }

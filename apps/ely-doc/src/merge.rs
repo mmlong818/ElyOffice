@@ -36,6 +36,10 @@ pub fn menu(cx: &gpui::App) -> gpui::Menu {
 pub struct Merge {
     docs: WeakEntity<Docs>,
     pub table: Option<Table>,
+    /// The template's tab, active when the data was chosen.
+    pub source: Option<u64>,
+    /// Tabs opened as previews; none is a template.
+    pub previews: std::collections::HashSet<u64>,
     /// The record to preview, from 1.
     record: usize,
     pdf: bool,
@@ -46,6 +50,8 @@ impl Merge {
         Merge {
             docs,
             table: None,
+            source: None,
+            previews: std::collections::HashSet::new(),
             record: 1,
             pdf: false,
         }
@@ -62,11 +68,20 @@ impl Docs {
     }
 
     pub(crate) fn choose_csv(&mut self, cx: &mut Context<Self>) {
-        self.pick(false, cx, |docs, path, cx| match read_csv(&path) {
+        let Some(source) = self.core.active else {
+            let text = Docs::text(cx, "command.blocked.no_document", &[]);
+            return self.toast(text, Severity::Warning, cx);
+        };
+        if self.merge.read(cx).previews.contains(&source) {
+            let text = Docs::text(cx, "doc.merge.from_preview", &[]);
+            return self.toast(text, Severity::Warning, cx);
+        }
+        self.pick(false, cx, move |docs, path, cx| match read_csv(&path) {
             Ok(table) => {
                 log::info!("doc: merge data has {} rows", table.rows.len());
                 docs.merge.update(cx, |merge, cx| {
                     merge.table = Some(table);
+                    merge.source = Some(source);
                     merge.record = 1;
                     cx.notify();
                 });
@@ -84,20 +99,20 @@ impl Docs {
         });
     }
 
-    /// The tab a merge starts from: the active one.
+    /// The template's tab, while it is open.
     fn source(&self, cx: &mut Context<Self>) -> Option<u64> {
-        if self.core.active.is_none() {
-            let text = Docs::text(cx, "command.blocked.no_document", &[]);
+        let source = self.merge.read(cx).source.filter(|source| self.tab(*source).is_some());
+        if source.is_none() {
+            let text = Docs::text(cx, "doc.merge.gone", &[]);
             self.toast(text, Severity::Warning, cx);
         }
-        self.core.active
+        source
     }
 
-    /// Types a field's marker at the cursor.
+    /// Types a field's marker at the template's cursor.
     pub(crate) fn insert_field(&mut self, header: &str, cx: &mut Context<Self>) {
-        let Some(tab) = self.active_tab() else {
-            let text = Docs::text(cx, "command.blocked.no_document", &[]);
-            return self.toast(text, Severity::Warning, cx);
+        let Some(tab) = self.source(cx).and_then(|source| self.tab(source)) else {
+            return;
         };
         tab.view.update(cx, |view, _| view.insert(&marker(header)));
     }
@@ -194,7 +209,12 @@ impl Render for Merge {
                 })
         };
         let row = || div().flex().flex_wrap().items_center().gap_1();
+        let template = self.source.and_then(|source| {
+            let docs = self.docs.upgrade()?;
+            Some(docs.read(cx).tab(source)?.name.clone())
+        });
         let group = PropertyGroup::new(table.name.clone())
+            .row(text("doc.merge.template"), div().child(template.unwrap_or_else(|| text("doc.merge.gone"))))
             .row(text("doc.merge.data"), choose)
             .row(text("doc.merge.fields"), row().children(fields))
             .row(

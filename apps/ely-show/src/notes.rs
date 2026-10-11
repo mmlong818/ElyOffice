@@ -20,7 +20,7 @@ pub struct NotesField {
     field: Option<Entity<TextInput>>,
     shown: Option<(u64, usize, String)>,
     /// The state the shown slide number was read in.
-    at: Option<ely_lok::Doc>,
+    pub(crate) at: Option<ely_lok::Doc>,
     _events: Option<gpui::Subscription>,
 }
 
@@ -66,7 +66,7 @@ impl Deck {
             return log::warn!("show: notes for slide {part} have no read state");
         };
         log::info!("show: notes for slide {part} changed");
-        self.notes.shown = Some((tab, part, text.clone()));
+        // `shown` stays the kernel's until a read confirms the send.
         self.run_on(tab, &at, "notes.set", &[&text, &part.to_string()], cx);
         self.force_reread(tab, cx);
     }
@@ -90,6 +90,9 @@ impl Deck {
         if !typing && self.notes.shown.as_ref() != Some(&read) {
             field.update(cx, |field, cx| field.set_text(notes.text, cx));
             self.notes.shown = Some(read);
+        } else if let Some(shown) = self.notes.shown.as_mut().filter(|shown| (shown.0, shown.1) == (id, part)) {
+            // A read while typing moves the base, not the draft.
+            shown.2 = notes.text;
         }
         Some(field)
     }

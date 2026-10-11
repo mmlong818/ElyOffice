@@ -1,6 +1,7 @@
 // Renders iso scenes to PNG frames, faces and MP4s.
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
@@ -16,6 +17,9 @@ const hide = [["type-title", ["title"]], ["type-end", ["name", "version", "url"]
   .filter(([d]) => existsSync(join(extra, d)))
   .flatMap(([, t]) => t);
 
+const recs = JSON.parse(readFileSync(resolve(here, "../montage/recs.json"), "utf8"));
+const frames = mkdtempSync(join(tmpdir(), "slabs-"));
+
 const server = await createServer({ root: site, configFile: false, logLevel: "error", server: { port: 0 } });
 await server.listen();
 const url = `${server.resolvedUrls.local[0]}video/scenes/index.html`;
@@ -29,6 +33,10 @@ async function open() {
   });
   page.on("console", (m) => {
     if (m.type() === "error") throw new Error(m.text());
+  });
+  await page.route("**/rec/**", (route) => {
+    const path = new URL(route.request().url()).pathname.split("/rec/")[1];
+    route.fulfill({ body: readFileSync(join(frames, path)), contentType: "image/jpeg" });
   });
   await page.goto(url, { waitUntil: "networkidle" });
   await page.evaluate(() => document.fonts.ready);
@@ -69,6 +77,18 @@ async function scene(page, s) {
   return { name: s.name, app: s.app ?? null, bars: [s.from, s.to], first, frames: end - first };
 }
 
+/** The montage's recording frames, continued for the leaving slabs. */
+const files = scenes.find((s) => s.name === "files");
+if (files) {
+  for (const { rec, from } of recs.apps) {
+    mkdirSync(join(frames, rec));
+    const args = ["-ss", String(from), "-i", resolve(here, `../out/rec/${rec}.mp4`), "-frames:v", String(files.range[1] - recs.first)];
+    const vf = ["-vf", "fps=30,scale=1280:720:flags=lanczos", "-q:v", "2", join(frames, rec, "%05d.jpg")];
+    const run = spawnSync("ffmpeg", ["-y", "-v", "error", ...args, ...vf], { stdio: "inherit" });
+    if (run.status !== 0) throw new Error(`ffmpeg failed for ${rec}`);
+  }
+}
+
 const queue = [...scenes];
 const done = [];
 await Promise.all(
@@ -82,3 +102,4 @@ if (!wanted.length) {
 }
 await browser.close();
 await server.close();
+rmSync(frames, { recursive: true, force: true });

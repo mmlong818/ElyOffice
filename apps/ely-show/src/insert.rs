@@ -31,7 +31,8 @@ actions!(
 /// Insert and View; View checks what is on.
 pub fn menus((grid, guides, remarks): (bool, bool, bool), cx: &App) -> [Menu; 2] {
     let label = |key: &str| Deck::text(cx, key, &[]);
-    let insert = Menu::new(label("menu.insert")).items([
+    let media = ely_platform::media::BUILT.then(|| MenuItem::action(label("show.insert.media"), InsertMedia));
+    let insert = [
         MenuItem::action(label("show.insert.text"), InsertTextBox),
         MenuItem::separator(),
         MenuItem::action(label("show.insert.rectangle"), InsertRectangle),
@@ -42,12 +43,16 @@ pub fn menus((grid, guides, remarks): (bool, bool, bool), cx: &App) -> [Menu; 2]
         MenuItem::action(label("show.insert.connector"), InsertConnector),
         MenuItem::separator(),
         MenuItem::action(label("show.insert.picture"), InsertPicture),
-        MenuItem::action(label("show.insert.media"), InsertMedia),
+    ]
+    .into_iter()
+    .chain(media)
+    .chain([
         MenuItem::action(label("show.insert.table"), InsertTable),
         MenuItem::action(label("show.insert.chart"), InsertChart),
         MenuItem::separator(),
         MenuItem::action(label("show.insert.remark"), InsertRemark),
     ]);
+    let insert = Menu::new(label("menu.insert")).items(insert);
     let view = Menu::new(label("menu.view")).items([
         MenuItem::action(label("show.view.remarks"), ShowRemarks).checked(remarks),
         MenuItem::separator(),
@@ -148,5 +153,28 @@ impl Deck {
             ("0", 0, h / 2)
         };
         self.object_command("guide.add", &[kind, &x.to_string(), &y.to_string()], cx);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn insert_media_shows_only_where_it_plays() {
+        let cx = gpui::TestAppContext::single();
+        cx.update(ely_gpui_component::init_for_tests);
+        let (offered, total) = cx.update(|cx| {
+            ely_ui::settings::install_defaults(cx);
+            ely_ui::i18n::install(cx);
+            let media = crate::deck::Deck::text(cx, "show.insert.media", &[]);
+            let [insert, _] = super::menus((false, false, false), cx);
+            let names = insert.items.iter().filter_map(|item| match item {
+                gpui::MenuItem::Action { name, .. } => Some(name.clone()),
+                _ => None,
+            });
+            let names: Vec<_> = names.collect();
+            (names.contains(&media), names.len())
+        });
+        assert_eq!(offered, ely_platform::media::BUILT);
+        assert!(total >= 11, "the rest stay: {total}");
     }
 }

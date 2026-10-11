@@ -18,7 +18,8 @@ pub struct Ref {
     /// The commit it names, through an annotated tag.
     pub commit: String,
     pub subject: String,
-    pub at: i64,
+    /// When made; a tag on a blob has none.
+    pub at: Option<i64>,
     /// An annotated tag's own message.
     pub message: Option<String>,
 }
@@ -103,7 +104,10 @@ pub fn parse(bytes: &[u8]) -> io::Result<Vec<Ref>> {
             track: (!upstream.is_empty()).then(|| track(tracking)).flatten(),
             commit: if annotated { peeled } else { object }.to_string(),
             subject: if annotated { peeled_subject } else { subject }.to_string(),
-            at: at.parse().map_err(|_| bad(record))?,
+            at: match at {
+                "" => None,
+                at => Some(at.parse().map_err(|_| bad(record))?),
+            },
             message: annotated.then(|| subject.to_string()),
         });
     }

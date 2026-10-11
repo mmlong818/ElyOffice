@@ -13,7 +13,7 @@ use ely_lok::{LokView, show::Media};
 use ely_office::prelude::*;
 use ely_platform::media::{Player, State};
 use gpui::{
-    AnyElement, App, Context, Entity, IntoElement, ParentElement as _, Styled as _, SurfaceSource,
+    AnyElement, App, Context, Entity, ParentElement as _, Styled as _, SurfaceSource,
     TaskExt as _, Window, div,
 };
 
@@ -275,6 +275,7 @@ pub(crate) fn video(
     frame: SurfaceSource,
     (at, size): (gpui::Point<gpui::Pixels>, gpui::Point<gpui::Pixels>),
 ) -> AnyElement {
+    use gpui::IntoElement as _;
     gpui::surface(frame)
         .absolute()
         .left(at.x)

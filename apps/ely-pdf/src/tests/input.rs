@@ -185,3 +185,172 @@ fn tiles_beside_the_view_are_neither_asked_nor_kept() {
     }));
     settle(cx, |app| columns(app).contains(&last) && !columns(app).contains(&0));
 }
+
+/// Flags any notify leaving a shown page with nothing drawn.
+fn never_bare(cx: &mut VisualTestContext, view: &Entity<PdfView>) -> (gpui::Subscription, std::rc::Rc<std::cell::Cell<bool>>) {
+    let (sf, dark) = cx.update(|window, app| (window.scale_factor(), ely_gpui_component::theme::ActiveTheme::theme(app).is_dark()));
+    let bare = std::rc::Rc::new(std::cell::Cell::new(false));
+    let seen = bare.clone();
+    let watch = cx.update(|_, app| {
+        app.observe(view, move |view, app| {
+            let read = view.read(app);
+            if read.showing(sf, dark).iter().any(|page| read.pieces(page).is_empty()) {
+                seen.set(true);
+            }
+        })
+    });
+    (watch, bare)
+}
+
+/// Only new tiles drawn, and none on its way.
+fn repainted(view: &PdfView) -> bool {
+    view.backdrop.is_empty() && !view.painting && !view.tiles.is_empty()
+}
+
+fn note() -> ely_pdf_engine::NewAnnot {
+    ely_pdf_engine::NewAnnot {
+        page: 0,
+        shape: ely_pdf_engine::Shape::Note((100.0, 500.0)),
+        rgb: None,
+        contents: "Look".into(),
+        author: String::new(),
+    }
+}
+
+#[test]
+fn an_edit_keeps_the_page_drawn_until_its_repaint_lands() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let mut cx = TestAppContext::single();
+    let (viewer, cx) = windowed(&mut cx, dir.path(), &[file(dir.path(), "one.pdf", &[(612.0, 792.0, &["Hello"])])], true);
+    let view = shown(cx, &viewer);
+    settle(cx, |app| repainted(view.read(app)));
+    let before: Vec<_> = cx.update(|_, app| view.read(app).tiles.values().cloned().collect());
+    let (_watch, bare) = never_bare(cx, &view);
+    cx.update(|_, app| view.update(app, |view, cx| view.annotate("adding a note", vec![note()], cx)));
+    settle(cx, |app| view.read(app).edited == 1 && repainted(view.read(app)));
+    assert!(!bare.get(), "the page never goes blank");
+    let after = cx.update(|_, app| view.read(app).tiles.values().cloned().collect::<Vec<_>>());
+    assert!(
+        after.iter().all(|image| before.iter().all(|old| !std::sync::Arc::ptr_eq(old, image))),
+        "every tile was painted again"
+    );
+}
+
+#[test]
+fn a_new_scale_keeps_the_old_tiles_until_new_ones_land() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let mut cx = TestAppContext::single();
+    let (viewer, cx) = windowed(&mut cx, dir.path(), &[file(dir.path(), "one.pdf", &[(612.0, 792.0, &["Hello"])])], true);
+    let view = shown(cx, &viewer);
+    settle(cx, |app| repainted(view.read(app)));
+    let scale = cx.update(|_, app| view.read(app).laid_out().scale);
+    let (_watch, bare) = never_bare(cx, &view);
+    cx.simulate_resize(gpui::size(px(700.), px(800.)));
+    // The new size lays out before any new tile lands.
+    cx.run_until_parked();
+    let (sf, dark) = cx.update(|window, app| (window.scale_factor(), ely_gpui_component::theme::ActiveTheme::theme(app).is_dark()));
+    let now = cx.update(|_, app| {
+        let read = view.read(app);
+        read.showing(sf, dark).iter().map(|page| read.pieces(page).len()).collect::<Vec<_>>()
+    });
+    assert!(now.iter().all(|count| *count > 0), "drawn right after the resize: {now:?}");
+    settle(cx, |app| view.read(app).laid_out().scale != scale && repainted(view.read(app)));
+    assert!(!bare.get(), "the page never goes blank");
+}
+
+#[test]
+fn an_edit_past_the_first_hundred_sizes_keeps_the_page_drawn() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let mut pages: Vec<(f32, f32, &[&str])> = vec![(612.0, 792.0, &["Page"]); 100];
+    pages.push((612.0, 900.0, &["Taller"]));
+    let mut cx = TestAppContext::single();
+    let (viewer, cx) = windowed(&mut cx, dir.path(), &[file(dir.path(), "mixed.pdf", &pages)], true);
+    let view = shown(cx, &viewer);
+    settle(cx, |app| view.read(app).sizes[100] == (612.0, 900.0) && repainted(view.read(app)));
+    let (_watch, bare) = never_bare(cx, &view);
+    cx.update(|_, app| view.update(app, |view, cx| view.annotate("adding a note", vec![note()], cx)));
+    settle(cx, |app| view.read(app).edited == 1 && repainted(view.read(app)));
+    assert!(!bare.get(), "the page never goes blank");
+}
+
+#[test]
+fn an_edit_on_page_101_keeps_its_measured_size_and_its_tiles() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let mut pages: Vec<(f32, f32, &[&str])> = vec![(612.0, 792.0, &["Page"]); 100];
+    pages.push((612.0, 900.0, &["Taller"]));
+    let mut cx = TestAppContext::single();
+    let (viewer, cx) = windowed(&mut cx, dir.path(), &[file(dir.path(), "mixed.pdf", &pages)], true);
+    let view = shown(cx, &viewer);
+    settle(cx, |app| view.read(app).sizes[100] == (612.0, 900.0));
+    cx.update(|_, app| view.update(app, |view, cx| view.show(100, 0.0, cx)));
+    settle(cx, |app| view.read(app).current == 100 && repainted(view.read(app)));
+    let (_watch, bare) = never_bare(cx, &view);
+    let late = ely_pdf_engine::NewAnnot { page: 100, ..note() };
+    cx.update(|_, app| view.update(app, |view, cx| view.annotate("adding a note", vec![late], cx)));
+    settle(cx, |app| view.read(app).edited == 1 && repainted(view.read(app)));
+    assert!(!bare.get(), "page 101 never goes blank");
+    assert_eq!(cx.update(|_, app| view.read(app).sizes[100]), (612.0, 900.0), "its measured size holds");
+}
+
+#[test]
+fn old_tiles_are_painted_and_freed_with_their_tab() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let mut cx = TestAppContext::single();
+    let (viewer, cx) = windowed(&mut cx, dir.path(), &[file(dir.path(), "one.pdf", &[(612.0, 792.0, &["Hello"])])], true);
+    let view = shown(cx, &viewer);
+    settle(cx, |app| repainted(view.read(app)));
+    // Nothing new is asked; only old tiles can paint.
+    let before = cx.update(|_, app| {
+        view.update(app, |view, cx| {
+            let keys: Vec<_> = view.tiles.keys().copied().collect();
+            view.failed.extend(keys);
+            view.keep_all();
+            cx.notify();
+            view.painted
+        })
+    });
+    cx.run_until_parked();
+    let (painted, kept) = cx.update(|_, app| (view.read(app).painted, view.read(app).backdrop.len()));
+    // Old tiles cover what shows of the page.
+    let shown = cx.update(|window, app| {
+        let read = view.read(app);
+        let room = read.room;
+        read.showing(window.scale_factor(), false).iter().map(|s| {
+            let (left, top) = (-f32::from(read.scroll.offset().x), -f32::from(read.scroll.offset().y));
+            let w = (s.place.x + s.place.w).min(left + f32::from(room.size.width)) - s.place.x.max(left);
+            let h = (s.place.y + s.place.h).min(top + f32::from(room.size.height)) - s.place.y.max(top);
+            f64::from(w.max(0.0) * h.max(0.0))
+        }).sum::<f64>()
+    });
+    assert!(kept > 0 && painted - before >= shown * 0.99, "{kept} old tiles painted {} of {shown}", painted - before);
+    cx.update(|_, app| view.update(app, |view, _| view.retire_all()));
+    assert!(cx.update(|_, app| view.read(app).backdrop.is_empty()), "closing hands every old tile over");
+}
+
+#[test]
+fn an_edit_keeps_page_pictures_until_they_repaint() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let mut cx = TestAppContext::single();
+    let (viewer, cx) = windowed(&mut cx, dir.path(), &[file(dir.path(), "one.pdf", &[(612.0, 792.0, &["Hello"])])], true);
+    let view = shown(cx, &viewer);
+    let dark = cx.update(|_, app| ely_gpui_component::theme::ActiveTheme::theme(app).is_dark());
+    settle(cx, |app| view.read(app).picture(0, dark).is_some() && repainted(view.read(app)));
+    let old = cx.update(|_, app| view.read(app).picture(0, dark).expect("a picture"));
+    // A picture on its way holds back the repaint.
+    cx.update(|_, app| view.update(app, |view, _| view.thumbing = true));
+    cx.update(|_, app| view.update(app, |view, cx| view.annotate("adding a note", vec![note()], cx)));
+    settle(cx, |app| view.read(app).edited == 1 && repainted(view.read(app)));
+    // Dropped from the atlas, it returns only if drawn.
+    cx.update(|window, _| window.drop_image(old.clone())).expect("drops");
+    super::frames(cx);
+    assert!(cx.update(|window, _| window.has_image_atlas_entry(&old)), "the old picture shows meanwhile");
+    cx.update(|_, app| view.update(app, |view, cx| {
+        view.thumbing = false;
+        cx.notify()
+    }));
+    settle(cx, |app| view.read(app).thumbs_stale.is_empty());
+    let new = cx.update(|_, app| view.read(app).picture(0, dark).expect("a picture"));
+    assert!(!std::sync::Arc::ptr_eq(&new, &old), "the new picture replaces it");
+    super::frames(cx);
+    assert!(cx.update(|window, _| window.has_image_atlas_entry(&new)), "and is drawn");
+}

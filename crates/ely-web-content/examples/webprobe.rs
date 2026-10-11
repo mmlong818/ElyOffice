@@ -16,6 +16,10 @@ use gpui::{
 
 /// How many views open and close to show their release.
 const CHURN: usize = 20;
+/// Views dropped before the pump makes their browsers.
+const UNMADE: usize = 5;
+/// Views dropped within 3 ms steps of opening.
+const EARLY: u64 = 10;
 
 struct Probe {
     view: Entity<WebView>,
@@ -175,21 +179,36 @@ impl Probe {
             cx.background_executor()
                 .timer(Duration::from_millis(500))
                 .await;
-            let _ = view.update(cx, |view, _| view.run_js("report('edited')"));
+            view.update(cx, |view, _| view.run_js("report('edited')"));
         })
         .detach();
     }
 
     /// Opens and drops pages; each must free its memory.
     fn churn(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let page = self.fixtures.join("probe.html");
         if self.churned == CHURN {
             println!("probe: closed {CHURN}");
+            for _ in 0..UNMADE {
+                drop(WebView::open(&page, &self.fixtures, window, cx).expect("a view"));
+            }
+            for step in 0..EARLY {
+                let view = WebView::open(&page, &self.fixtures, window, cx).expect("a view");
+                self.others.push(view.clone());
+                later(cx.weak_entity(), step * 3, window, cx, move |probe, _, _| {
+                    probe.others.retain(|other| *other != view);
+                });
+            }
+            println!("probe: dropped {UNMADE} unmade, {EARLY} early");
             let this = cx.weak_entity();
-            later(this, 2000, window, cx, |_, _, _| println!("probe: hold"));
+            later(this, 2000, window, cx, |_, _, _| {
+                // The log marks what freed before the hold.
+                log::info!("probe: hold");
+                println!("probe: hold");
+            });
             return;
         }
         self.churned += 1;
-        let page = self.fixtures.join("probe.html");
         let view = WebView::open(&page, &self.fixtures, window, cx).expect("a view");
         cx.subscribe_in(&view, window, |probe, view, event, window, cx| {
             if matches!(event, Event::Loaded) {
@@ -201,8 +220,30 @@ impl Probe {
         self.others.push(view);
     }
 
-    /// A page named like a URL, and one gone.
+    /// A page named like a URL, one gone, one inert.
     fn edges(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let page = self.fixtures.join("inert.html");
+        let inert = WebView::open_inert(&page, &self.fixtures, window, cx).expect("a view");
+        cx.subscribe_in(&inert, window, |_, _, event, _, _| match event {
+            Event::Loaded => println!("probe: inert loaded"),
+            Event::Query(_, reply) => {
+                println!("probe: inert ran");
+                reply.ok("");
+            }
+            _ => {}
+        })
+        .detach();
+        // The same page with scripts: it must run.
+        let scripted = WebView::open(&page, &self.fixtures, window, cx).expect("a view");
+        cx.subscribe_in(&scripted, window, |_, _, event, window, cx| {
+            if let Event::Query(_, reply) = event {
+                println!("probe: scripted ran");
+                reply.ok("");
+                later(cx.weak_entity(), 2000, window, cx, |_, _, _| println!("probe: inert checked"));
+            }
+        })
+        .detach();
+        self.others.extend([inert, scripted]);
         let hash = self.work.join("hash");
         std::fs::create_dir_all(&hash).expect("makes");
         std::fs::copy(

@@ -27,9 +27,8 @@ async function draw(tree) {
     try {
       const svg = await paint(node.value, 'paper')
       Object.assign(node, { type: 'html', value: `<figure class="diagram">${svg}</figure>` })
-    } catch (error) {
+    } catch {
       // Lines only: Mermaid's message quotes the document.
-      console.warn(`ely: a diagram did not draw: ${error.name}`)
       failed.push(node.position.start.line)
     }
   }

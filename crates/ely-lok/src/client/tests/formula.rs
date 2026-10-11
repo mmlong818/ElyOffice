@@ -12,7 +12,7 @@ fn open() -> (tempfile::TempDir, Worker, Doc, Events) {
     let source = dir.path().join("in.fods");
     write(&source, FODS);
     let doc = worker
-        .load(&format!("file://{}", source.display()))
+        .load(&crate::file_url(&source))
         .expect("the sheet loads");
     let seen = poll_until(&mut worker, &doc, &Events::default(), SETTLE, |seen| {
         seen.cell.cursor.is_some()
@@ -29,7 +29,8 @@ fn type_text(worker: &mut Worker, doc: &Doc, text: &str) {
 /// The cells of `range`, as the kernel copies them.
 fn values(worker: &mut Worker, doc: &Doc, range: &str) -> String {
     worker.run(doc, "cell.goto", &[range]).expect("the range");
-    doc.selection_text(worker).expect("the text")
+    // Windows ends copied lines with CRLF.
+    doc.selection_text(worker).expect("the text").replace("\r\n", "\n")
 }
 
 #[test]
@@ -359,4 +360,21 @@ fn names_are_defined_changed_removed_and_flag_breaks() {
         .run(&doc, "names.remove", &["Local", &sheet])
         .expect("a removal");
     assert!(!read(&mut worker).iter().any(|name| name.name == "Local"));
+}
+
+#[test]
+fn selection_figures_follow_the_cells_number_format() {
+    if install().is_none() {
+        eprintln!("SKIP: no pinned LOK build");
+        return;
+    }
+    let (_dir, mut worker, doc, seen) = open();
+    enter(&mut worker, &doc, &[("H1", "8128.33333333333"), ("H2", "8128.33333333333")]);
+    worker.run(&doc, "cell.goto", &["H1:H2"]).expect("both");
+    worker.run(&doc, "number.code", &["0.00"]).expect("two decimals");
+    let figures = |seen: &Events| {
+        seen.states.iter().rfind(|(name, _)| name == ".uno:StateTableCell").map(|(_, value)| value.clone())
+    };
+    let state = poll_until(&mut worker, &doc, &seen, SETTLE, |seen| figures(seen).is_some_and(|v| v.contains("8128.33;")));
+    assert!(figures(&state).is_some_and(|v| v.contains("Average: 8128.33;")), "{:?}", figures(&state));
 }

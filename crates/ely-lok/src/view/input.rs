@@ -60,8 +60,8 @@ pub(super) enum Input {
         from: (i32, i32),
         to: (i32, i32),
     },
-    /// The area the view shows, in twips.
-    Visible(Rect),
+    /// The area shown in twips, and the tile scale.
+    Visible(Rect, (u32, i32)),
     /// Shows sheet or slide `part`, from 0.
     Part(usize),
 }
@@ -74,7 +74,7 @@ impl Input {
             Input::Key { key_code, .. } => !matches!(key_code & 0x0FFF, 1024..=1031 | 1281),
             Input::Mouse(_)
             | Input::Copy { cut: false }
-            | Input::Visible(_)
+            | Input::Visible(..)
             | Input::Part(_)
             | Input::Theme(_) => false,
             Input::Run { commands, .. } => commands.iter().any(|(id, _)| *id != "edit.select_all"),
@@ -171,7 +171,7 @@ fn lok_button(button: MouseButton) -> Option<i32> {
 /// Runs one input; gives a copy's mark and the revision.
 pub(super) fn run(worker: &Mutex<Worker>, doc: &Doc, input: Input) -> (io::Result<Option<String>>, Option<u64>) {
     let mut worker = worker.lock().expect("the worker lock");
-    let counts = !matches!(input, Input::Visible(_));
+    let counts = !matches!(input, Input::Visible(..));
     let copied = apply(&mut worker, doc, input);
     // A failed input may have moved the revision too.
     let now = match counts {
@@ -189,7 +189,7 @@ fn apply(worker: &mut Worker, doc: &Doc, input: Input) -> io::Result<Option<Stri
         } => worker.post_key(doc, char_code, key_code),
         Input::Mouse(event) => worker.post_mouse(doc, event),
         Input::Drag { from, to } => worker.drag_graphic(doc, from, to),
-        Input::Visible(area) => doc.visible_area(worker, area),
+        Input::Visible(area, scale) => doc.visible_area(worker, area, scale),
         Input::Part(part) => doc.show_sheet(worker, part),
         Input::Complete(name) => doc.complete_function(worker, &name),
         Input::Theme(scheme) => worker.run(doc, "view.theme", &[scheme]),
@@ -280,7 +280,8 @@ impl LokView {
         count: usize,
         modifiers: &Modifiers,
     ) {
-        let (x, y) = self.doc_point(position);
+        // The kernel reads clicks in tile twips.
+        let (x, y) = self.tile_point(position);
         self.send(Input::Mouse(Mouse {
             kind,
             x,

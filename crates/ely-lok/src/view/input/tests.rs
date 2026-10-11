@@ -81,7 +81,7 @@ fn a_failed_input_still_reports_the_revision_it_reached() {
     let mut worker = Worker::spawn(&install, &dir.path().join("profile")).expect("the worker");
     let source = dir.path().join("book.fods");
     std::fs::write(&source, crate::client::tests::input::FODS).expect("the fixture writes");
-    let doc = worker.load(&format!("file://{}", source.display())).expect("the book loads");
+    let doc = worker.load(&crate::file_url(&source)).expect("the book loads");
     let worker = Mutex::new(worker);
     // Nothing merged to split: the kernel refuses.
     let input = Input::Run { commands: vec![("cells.split", Vec::new())], at: None };

@@ -38,6 +38,7 @@ static void inv_q(fz_context *ctx, pdf_processor *proc)
 static void inv_Q(fz_context *ctx, pdf_processor *proc)
 {
 	inventory *inv = (inventory *)proc;
+	(void)ctx;
 	if (inv->depth > 0)
 		inv->ctm = inv->stack[--inv->depth];
 }
@@ -45,6 +46,7 @@ static void inv_Q(fz_context *ctx, pdf_processor *proc)
 static void inv_cm(fz_context *ctx, pdf_processor *proc, float a, float b, float c, float d, float e, float f)
 {
 	inventory *inv = (inventory *)proc;
+	(void)ctx;
 	inv->ctm = fz_concat(fz_make_matrix(a, b, c, d, e, f), inv->ctm);
 }
 
@@ -62,12 +64,15 @@ static void found(fz_context *ctx, inventory *inv, int form, fz_rect box)
 
 static void inv_image(fz_context *ctx, pdf_processor *proc, const char *name, fz_image *image)
 {
+	(void)name;
+	(void)image;
 	found(ctx, (inventory *)proc, 0, fz_unit_rect);
 }
 
 static void inv_form(fz_context *ctx, pdf_processor *proc, const char *name, pdf_obj *form)
 {
 	fz_rect box = fz_transform_rect(pdf_xobject_bbox(ctx, form), pdf_xobject_matrix(ctx, form));
+	(void)name;
 	found(ctx, (inventory *)proc, 1, box);
 }
 
@@ -269,7 +274,7 @@ int ely_place(fz_context *ctx, fz_document *doc, int number, int index, const fl
 			own = (float)image->w / image->h;
 			change = fz_concat(fz_concat(fz_translate(-cx, -cy), fz_scale(fminf(1, own / box), fminf(1, box / own))), fz_translate(cx, cy));
 			ref = pdf_add_image(ctx, pdf, image);
-			h.rename = ely_add_resource(ctx, pdf, page->obj, PDF_NAME(XObject), "ElyIm", ref, name, sizeof name);
+			h.rename = ely_add_resource(ctx, page->obj, PDF_NAME(XObject), "ElyIm", ref, name, sizeof name);
 		}
 		if (fz_matrix_expansion(change) < 0.001f)
 			fz_throw(ctx, FZ_ERROR_ARGUMENT, "a change that leaves nothing");
@@ -315,7 +320,7 @@ int ely_add_image(fz_context *ctx, fz_document *doc, int number, const char *pat
 		pdf_begin_operation(ctx, pdf, "Add an image");
 		begun = 1;
 		ref = pdf_add_image(ctx, pdf, image);
-		ely_add_resource(ctx, pdf, page->obj, PDF_NAME(XObject), "ElyIm", ref, name, sizeof name);
+		ely_add_resource(ctx, page->obj, PDF_NAME(XObject), "ElyIm", ref, name, sizeof name);
 		/* The unit square, bottom left first, onto the box. */
 		m = fz_concat(fz_make_matrix(rect[2] - rect[0], 0, 0, rect[1] - rect[3], rect[0], rect[3]), ely_to_user(ctx, page));
 		buf = fz_new_buffer(ctx, 128);

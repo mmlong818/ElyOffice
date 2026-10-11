@@ -55,14 +55,16 @@ impl Doc {
         Ok(Sheets { current, list })
     }
 
-    /// Tells the kernel the area the view shows, in twips.
-    pub fn visible_area(&self, worker: &mut Worker, (x, y, w, h): Rect) -> io::Result<()> {
+    /// Tells the kernel the shown area and the tile scale.
+    pub fn visible_area(&self, worker: &mut Worker, (x, y, w, h): Rect, (tile, tile_twips): (u32, i32)) -> io::Result<()> {
         let request = Pack::new()
             .u64(worker.doc_id(self)?)
             .i64(x.into())
             .i64(y.into())
             .i64(w.into())
             .i64(h.into())
+            .i64(tile.into())
+            .i64(tile_twips.into())
             .bytes();
         worker.request(tag::VISIBLE_AREA, &request)?;
         Ok(())
@@ -94,6 +96,15 @@ impl Doc {
         let payload = worker.request(tag::DOC_SIZE, &Pack::new().u64(worker.doc_id(self)?).bytes())?;
         let mut unpack = Unpack::new(&payload);
         Ok((unpack.i64()?, unpack.i64()?))
+    }
+
+    /// The size and the client zoom it was measured at.
+    pub fn size_at(&self, worker: &mut Worker) -> io::Result<((i64, i64), (i32, i32))> {
+        let payload = worker.request(tag::DOC_SIZE, &Pack::new().u64(worker.doc_id(self)?).bytes())?;
+        let mut unpack = Unpack::new(&payload);
+        let size = (unpack.i64()?, unpack.i64()?);
+        let number = |value: i64| i32::try_from(value).map_err(io::Error::other);
+        Ok((size, (number(unpack.i64()?)?, number(unpack.i64()?)?)))
     }
 
     /// Page rectangles in twips; empty without pages.
@@ -178,7 +189,38 @@ impl Doc {
             .u64(u64::from(pixels.0))
             .u64(u64::from(pixels.1))
             .bytes();
-        crate::show::layers(&worker.request(tag::SLIDE_LAYERS, &request)?)
+        let head = worker.request(tag::SLIDE_LAYERS, &request)?;
+        let mut unpack = Unpack::new(&head);
+        let (width, height, count) = (unpack.u64()?, unpack.u64()?, unpack.u64()?);
+        // Layers arrive in pieces that keep each frame small.
+        let mut whole = Pack::new().u64(width).u64(height).u64(count);
+        for index in 0..count {
+            let (json, painted) = (unpack.str()?, unpack.u64()?);
+            whole = whole.str(&json).u64(painted);
+            if painted != 0 {
+                whole = whole.blob(&self.slide_layer(worker, index)?);
+            }
+        }
+        crate::show::layers(&whole.bytes())
+    }
+
+    /// Layer `index` of the last layers read, piece by piece.
+    fn slide_layer(&self, worker: &mut Worker, index: u64) -> io::Result<Vec<u8>> {
+        let id = worker.doc_id(self)?;
+        let mut pixels = Vec::new();
+        loop {
+            let ask = Pack::new().u64(id).u64(index).u64(pixels.len() as u64).bytes();
+            let reply = worker.request(tag::SLIDE_LAYER, &ask)?;
+            let mut unpack = Unpack::new(&reply);
+            let (total, piece) = (unpack.u64()?, unpack.blob()?);
+            pixels.extend_from_slice(&piece);
+            if pixels.len() as u64 >= total {
+                return Ok(pixels);
+            }
+            if piece.is_empty() {
+                return Err(io::Error::other(format!("layer {index} stopped at byte {}", pixels.len())));
+            }
+        }
     }
 
     /// Saves to `url` as `format`; failure surfaces (LOK-09).

@@ -47,14 +47,23 @@ impl LokView {
             Some(at) => (f32::from(at.x - self.origin.x), f32::from(at.y - self.origin.y)),
             None => (self.viewport.0 / 2.0, self.viewport.1 / 2.0),
         };
-        let under = (self.scroll.0 + self.geom.twips_of(ax), self.scroll.1 + self.geom.twips_of(ay));
+        // The offset now, not the last frame's: zooms may bunch.
+        let spare = self.slack();
+        let (sx, sy) = (ax - spare.0, ay - spare.1);
+        // Anchored in print twips: tile twips change with the zoom.
+        let under = self.print_of((self.scroll.0 + self.geom.twips_of(sx), self.scroll.1 + self.geom.twips_of(sy)));
         self.fit = false;
         if (zoom - self.geom.zoom).abs() > 0.0001 {
-            self.geom.zoom = zoom;
+            self.carry_size(|view| view.geom.zoom = zoom);
             self.retire_tiles();
             self.failed.clear();
         }
-        self.scroll = (under.0 - self.geom.twips_of(ax), under.1 - self.geom.twips_of(ay));
+        let (under, spare) = (self.tile_of(under), self.slack());
+        self.scroll = (under.0 - self.geom.twips_of(ax - spare.0), under.1 - self.geom.twips_of(ay - spare.1));
+        // Keys and menus keep the page's left edge in view.
+        if let (None, Some(page)) = (at, self.pages.first()) {
+            self.scroll.0 = self.scroll.0.min(self.tile_of((page.0, page.1)).0);
+        }
         self.clamp_scroll();
         log::debug!("lok: zoom {:.0}%", zoom * 100.0);
         cx.emit(Zoomed);

@@ -66,6 +66,9 @@ impl Tree {
         let task = cx.background_spawn(async move { ops::doing(&git, &root, &dir) });
         cx.spawn(async move |this, cx| {
             let read = task.await.map_err(|error| error.to_string());
+            if let Err(error) = &read {
+                log::error!("tree: what Git is doing did not read: {error}");
+            }
             this.update(cx, |tree, cx| {
                 if let Some(opened) = tree
                     .opened_mut(id)

@@ -189,6 +189,8 @@ static void put_field(fz_context *ctx, fz_output *out, pdf_document *pdf, pdf_ob
 	fz_rect r;
 	int number = placed(ctx, pdf, field, &r), signd = pdf_signature_is_signed(ctx, pdf, field);
 	char *name = pdf_load_field_name(ctx, field);
+	fz_var(number);
+	fz_var(r);
 	fz_try(ctx)
 	{
 		fz_write_printf(ctx, out, "%s{\"page\":%d,\"object\":%d,\"rect\":[%g,%g,%g,%g],\"signed\":%s,\"name\":",
@@ -401,6 +403,7 @@ void ely_unsign(fz_context *ctx, pdf_document *pdf)
 int ely_signed(fz_context *ctx, fz_document *doc)
 {
 	int n = 0;
+	fz_var(n);
 	fz_try(ctx)
 		n = signed_fields(ctx, ely_pdf_of(ctx, doc), 0);
 	fz_catch(ctx)

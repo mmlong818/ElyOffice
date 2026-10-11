@@ -1,6 +1,7 @@
 //! ElyShow's one open dialog.
 
-use ely_gpui_component::forms::TextInput;
+use ely_gpui_component::{forms::TextInput, primitives::Severity};
+use ely_office::prelude::*;
 use gpui::{App, Context, Entity, IntoElement as _};
 
 use crate::deck::Deck;
@@ -41,6 +42,18 @@ pub(crate) fn edit(
 }
 
 impl Deck {
+    /// Opens `dialog`, or hands it back while another is open.
+    pub(crate) fn open_dialog(&mut self, dialog: Dialog, cx: &mut Context<Self>) -> Result<(), Dialog> {
+        if self.dialog.is_some() {
+            let text = Deck::text(cx, "show.dialog.busy", &[]);
+            self.toast(text, Severity::Warning, cx);
+            return Err(dialog);
+        }
+        self.dialog = Some(dialog);
+        cx.notify();
+        Ok(())
+    }
+
     /// A read that will open a dialog; earlier ones lapse.
     pub fn ask_dialog(&mut self) -> u64 {
         self.dialog_asked += 1;
@@ -56,9 +69,9 @@ impl Deck {
         }
     }
 
-    /// Whether read `asked` may open its dialog now.
+    /// Whether read `asked` still stands; `open_dialog` checks the rest.
     pub fn dialog_due(&self, asked: u64, id: u64) -> bool {
-        self.dialog_asked == asked && self.dialog.is_none() && self.core.active == Some(id)
+        self.dialog_asked == asked && self.core.active == Some(id)
     }
 
     /// The open dialog, drawn.

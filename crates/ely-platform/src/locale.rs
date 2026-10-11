@@ -26,7 +26,7 @@ fn platform() -> String {
 
 #[cfg(target_os = "linux")]
 fn platform() -> String {
-    resolve_env(|key| env::value(key))
+    resolve_env(env::value)
 }
 
 #[cfg(target_os = "windows")]

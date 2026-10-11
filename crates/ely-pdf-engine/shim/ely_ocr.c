@@ -255,7 +255,7 @@ int ely_text_layer(fz_context *ctx, fz_document *doc, const char *json, int repl
 			{
 				if (!font)
 					font = glyphless(ctx, pdf);
-				ely_add_resource(ctx, pdf, page->obj, PDF_NAME(Font), "ElyOCR", font, name, sizeof name);
+				ely_add_resource(ctx, page->obj, PDF_NAME(Font), "ElyOCR", font, name, sizeof name);
 				buf = fz_new_buffer(ctx, 1024);
 				/* Its own state, so later text stays seen. */
 				fz_append_string(ctx, buf, "q\n");

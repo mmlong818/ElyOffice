@@ -1,6 +1,6 @@
 //! Editing text and objects from the app (C11.3).
 
-use ely_pdf_engine::sample::{Extras, pdf_with};
+use ely_pdf_engine::sample::{Extras, one_page, pdf_with};
 use gpui::{Entity, Modifiers, MouseButton, TestAppContext, VisualTestContext};
 
 use super::input::over;
@@ -338,4 +338,92 @@ fn a_drag_follows_the_hand_when_the_page_shifts_under_it() {
     settle(cx, |app| view.read(app).settled() && view.read(app).layers.contains_key(&0));
     let rect = cx.update(|_, app| view.read(app).layers[&0].drawn[1].rect);
     assert!((rect[0] - 122.0).abs() < 0.5, "moved as far as the hand: {rect:?}");
+}
+
+#[test]
+fn text_on_a_full_page_picture_aims_at_the_text_and_a_shake_stays_a_click() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let mut cx = TestAppContext::single();
+    let path = dir.path().join("scan.pdf");
+    let extras = Extras { picture: true, backdrop: true, ..Extras::default() };
+    std::fs::write(&path, pdf_with(&[(612.0, 792.0, &["Hello world"])], &[], &extras)).expect("writes");
+    let (viewer, cx) = windowed(&mut cx, dir.path(), &[path], true);
+    let view = shown(cx, &viewer);
+    settle(cx, |app| view.read(app).room.size.width > gpui::px(100.0));
+    cx.update(|_, app| view.update(app, |view, cx| {
+        view.zoom = crate::layout::Zoom::Scale(1.0);
+        view.set_tool(Tool::Edit, cx)
+    }));
+    settle(cx, |app| view.read(app).layers.contains_key(&0));
+    click(cx, &view, (80.0, 66.0));
+    assert!(matches!(cx.update(|_, app| view.read(app).aim), Some(Aim::Text { .. })), "the text, not the picture under it");
+    // A two-pixel wobble on the picture moves nothing.
+    let from = over(cx, &view, 0, (300.0, 400.0));
+    cx.simulate_mouse_down(from, MouseButton::Left, Modifiers::none());
+    let to = from + gpui::point(gpui::px(2.0), gpui::px(0.0));
+    cx.simulate_mouse_move(to, MouseButton::Left, Modifiers::none());
+    cx.simulate_mouse_up(to, MouseButton::Left, Modifiers::none());
+    frames(cx);
+    assert!(matches!(cx.update(|_, app| view.read(app).aim), Some(Aim::Object { .. })), "the picture is aimed");
+    assert_eq!(cx.update(|_, app| view.read(app).edited), 0, "and not moved");
+}
+
+#[test]
+fn a_small_picture_on_text_under_a_page_form_still_aims() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let mut cx = TestAppContext::single();
+    let path = dir.path().join("layered.pdf");
+    // The page-size form comes last, on top of both.
+    let content = "q 10 0 0 10 80 722 cm /Im1 Do Q BT /F1 18 Tf 72 720 Td (Hello world) Tj ET q /Fm1 Do Q";
+    let form = "0 0 1 rg 500 50 20 20 re f";
+    let objects = [
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_string(),
+        format!("<< /Type /XObject /Subtype /Form /BBox [0 0 612 792] /Length {} >>\nstream\n{form}\nendstream", form.len()),
+        "<< /Type /XObject /Subtype /Image /Width 1 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8 /Length 1 >>\nstream\nA\nendstream".to_string(),
+    ];
+    let page = " /Resources << /Font << /F1 5 0 R >> /XObject << /Fm1 6 0 R /Im1 7 0 R >> >>";
+    std::fs::write(&path, one_page("", page, content, &objects)).expect("writes");
+    let (viewer, cx) = windowed(&mut cx, dir.path(), &[path], true);
+    let view = shown(cx, &viewer);
+    settle(cx, |app| view.read(app).room.size.width > gpui::px(100.0));
+    cx.update(|_, app| view.update(app, |view, cx| {
+        view.zoom = crate::layout::Zoom::Scale(1.0);
+        view.set_tool(Tool::Edit, cx)
+    }));
+    settle(cx, |app| view.read(app).layers.contains_key(&0));
+    // The picture sits at 80..90 across, 60..70 down.
+    click(cx, &view, (85.0, 65.0));
+    assert!(matches!(cx.update(|_, app| view.read(app).aim), Some(Aim::Object { index: 0, .. })), "the small picture");
+    click(cx, &view, (140.0, 66.0));
+    assert!(matches!(cx.update(|_, app| view.read(app).aim), Some(Aim::Text { .. })), "the text, not the form around it");
+}
+
+#[test]
+fn a_preview_overtaken_by_an_edit_says_so() {
+    use ely_gpui_component::primitives::Severity;
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let mut cx = TestAppContext::single();
+    let (viewer, cx, view) = editing(&mut cx, dir.path());
+    // The window's toasts live on its root.
+    let root = cx.update(|window, app| {
+        let root = ely_ui::document_root(ely_platform::AppId::Pdf, viewer.clone().into(), &ely_ui::commands::FILE, Vec::new(), window, app);
+        viewer.update(app, |viewer, _| viewer.core.root = root.downgrade());
+        root
+    });
+    click(cx, &view, (80.0, 66.0));
+    type_in(cx, &viewer, "Hi world\nSecond line");
+    cx.update(|_, app| viewer.update(app, |viewer, cx| {
+        // A new font asks for a preview first.
+        viewer.edit_panel.update(cx, |panel, _| panel.font = "times".into());
+        viewer.write_text(false, cx);
+        // An edit lands before the preview answers.
+        if let Some(view) = viewer.active_view() {
+            view.update(cx, |view, _| view.version += 1);
+        }
+    }));
+    let changed = cx.update(|_, app| Viewer::text(app, "pdf.object.changed", &[]));
+    settle(cx, |app| root.read(app).toasts(app).iter().any(|(text, severity)| *severity == Some(Severity::Warning) && *text == changed));
+    frames(cx);
+    assert!(cx.update(|_, app| viewer.read(app).preview.is_none()), "no stale preview");
+    assert_eq!(cx.update(|_, app| view.read(app).edited), 0, "nothing written");
 }

@@ -1,5 +1,7 @@
 use ely_platform::AppId;
-use gpui::{Action, App, KeyBinding, Menu, MenuItem, SharedString, Window, actions};
+use std::rc::Rc;
+
+use gpui::{Action, App, Global, KeyBinding, Menu, MenuItem, SharedString, Window, actions};
 
 use crate::i18n;
 
@@ -16,6 +18,7 @@ actions!(
         CloseTab,
         ToggleCommandPalette,
         OpenSettings,
+        CheckForUpdates,
         Quit
     ]
 );
@@ -24,6 +27,29 @@ actions!(
     apps,
     [OpenElyDoc, OpenElyTable, OpenElyShow, OpenElyPdf, OpenElyMail, OpenElyTree, OpenElyMark, OpenElyAgent]
 );
+
+/// The main window's own quit, run from any window.
+struct QuitRoute(Rc<dyn Fn(&mut App)>);
+
+impl Global for QuitRoute {}
+
+/// Quit from every window, settings too, runs `quit`.
+pub fn route_quit(cx: &mut App, quit: impl Fn(&mut App) + 'static) {
+    cx.set_global(QuitRoute(Rc::new(quit)));
+}
+
+/// Quit, from any window, goes through `quit`.
+pub fn bind_quit(cx: &mut App) {
+    cx.on_action(|_: &Quit, cx| quit(cx));
+}
+
+/// Quits through the main window's route, if one is set.
+pub(crate) fn quit(cx: &mut App) {
+    match cx.try_global::<QuitRoute>().map(|route| Rc::clone(&route.0)) {
+        Some(route) => route(cx),
+        None => cx.quit(),
+    }
+}
 
 /// The action that starts `app` (§16 app switching).
 pub fn switch_to(app: AppId) -> Box<dyn Action> {
@@ -105,6 +131,9 @@ fn label(command: &Command, cx: &App) -> SharedString {
 
 /// Why `id` cannot run; a document lifts the no-document block.
 pub fn blocked(id: &str, document: bool, cx: &App) -> Option<SharedString> {
+    if id == PRINT.id && !ely_platform::print::BUILT {
+        return Some(i18n::text(cx, "command.blocked.unbuilt", &[]));
+    }
     let command = RENAMING.iter().find(|command| command.id == id)?;
     let key = command.blocked.filter(|_| !document)?;
     Some(i18n::text(cx, key, &[]))
@@ -146,6 +175,10 @@ pub fn menus(
         first.push(MenuItem::separator());
     }
     first.push(MenuItem::action(i18n::text(cx, "menu.app.settings", &[]), OpenSettings));
+    // Only an installed app can update itself.
+    if crate::updates::updater(cx).is_some() {
+        first.push(MenuItem::action(i18n::text(cx, "menu.app.updates", &[]), CheckForUpdates));
+    }
     first.push(MenuItem::separator());
     first.push(MenuItem::action(i18n::text(cx, "menu.app.quit", &[("app", app.name())]), Quit));
     let mut menus = vec![
@@ -157,6 +190,10 @@ pub fn menus(
 }
 
 pub fn bind_keys(cx: &mut App) {
+    // Without a print panel, Print stays off the keyboard.
+    if ely_platform::print::BUILT {
+        cx.bind_keys([KeyBinding::new(PRINT.keys, Print, Some(CONTEXT))]);
+    }
     cx.bind_keys([
         KeyBinding::new(NEW.keys, New, Some(CONTEXT)),
         KeyBinding::new(OPEN.keys, Open, Some(CONTEXT)),
@@ -164,7 +201,6 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new(SAVE_AS.keys, SaveAs, Some(CONTEXT)),
         KeyBinding::new(RENAME.keys, Rename, Some(CONTEXT)),
         KeyBinding::new(EXPORT.keys, Export, Some(CONTEXT)),
-        KeyBinding::new(PRINT.keys, Print, Some(CONTEXT)),
         KeyBinding::new("secondary-w", CloseTab, Some(CONTEXT)),
         KeyBinding::new(TOGGLE_PALETTE, ToggleCommandPalette, Some(CONTEXT)),
         KeyBinding::new("secondary-q", Quit, None),

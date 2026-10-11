@@ -5,8 +5,13 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
+build = "../../packaging/windows/icon.rs"
+
+[build-dependencies]
+embed-resource.workspace = true
 
 [dependencies]
+dunce.workspace = true
 ely-files.workspace = true
 ely-gpui-component.workspace = true
 ely-platform.workspace = true

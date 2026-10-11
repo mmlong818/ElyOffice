@@ -13,10 +13,10 @@ typedef struct
 	int page;
 } inner_link;
 
-/* Takes page references off the source's annotations, links noted. */
-static int unhook(fz_context *ctx, pdf_document *src, inner_link *links, int room)
+/* Takes page references off; links noted, `*n` counted as kept. */
+static void unhook(fz_context *ctx, pdf_document *src, inner_link *links, int room, int *n)
 {
-	int i, j, n = 0, count = pdf_count_pages(ctx, src);
+	int i, j, count = pdf_count_pages(ctx, src);
 	for (i = 0; i < count; i++)
 	{
 		pdf_obj *annots = pdf_dict_get(ctx, pdf_lookup_page_obj(ctx, src, i), PDF_NAME(Annots));
@@ -26,7 +26,7 @@ static int unhook(fz_context *ctx, pdf_document *src, inner_link *links, int roo
 			pdf_obj *page = ely_target(ctx, src, annot);
 			int to = page ? pdf_lookup_page_number(ctx, src, page) : -1;
 			pdf_dict_del(ctx, annot, PDF_NAME(P));
-			if (to < 0 || n == room)
+			if (to < 0 || *n == room)
 				continue;
 			/* The view after the page: /XYZ, /Fit and so on. */
 			pdf_obj *dest = pdf_dict_get(ctx, annot, PDF_NAME(Dest));
@@ -36,16 +36,17 @@ static int unhook(fz_context *ctx, pdf_document *src, inner_link *links, int roo
 				dest = pdf_lookup_dest(ctx, src, dest);
 			if (pdf_is_dict(ctx, dest))
 				dest = pdf_dict_get(ctx, dest, PDF_NAME(D));
-			links[n].annot = pdf_keep_obj(ctx, annot);
-			links[n].rest = pdf_copy_array(ctx, dest);
-			pdf_array_delete(ctx, links[n].rest, 0);
-			links[n].page = to;
-			n++;
+			/* Counted as soon as kept: a throw still frees it. */
+			links[*n].annot = pdf_keep_obj(ctx, annot);
+			links[*n].rest = NULL;
+			links[*n].page = to;
+			(*n)++;
+			links[*n - 1].rest = pdf_copy_array(ctx, dest);
+			pdf_array_delete(ctx, links[*n - 1].rest, 0);
 			pdf_dict_del(ctx, annot, PDF_NAME(Dest));
 			pdf_dict_del(ctx, annot, PDF_NAME(A));
 		}
 	}
-	return n;
 }
 
 /* The top of the field tree `widget` belongs to. */
@@ -326,6 +327,7 @@ int ely_insert_file(fz_context *ctx, fz_document *doc, int at, const char *path,
 	fz_var(links);
 	fz_var(n);
 	fz_var(begun);
+	fz_var(room);
 	fz_try(ctx)
 	{
 		pdf = ely_pdf_of(ctx, doc);
@@ -338,7 +340,7 @@ int ely_insert_file(fz_context *ctx, fz_document *doc, int at, const char *path,
 		for (i = 0; i < *count; i++)
 			room += pdf_array_len(ctx, pdf_dict_get(ctx, pdf_lookup_page_obj(ctx, src, i), PDF_NAME(Annots)));
 		links = fz_calloc(ctx, room + 1, sizeof *links);
-		n = unhook(ctx, src, links, room);
+		unhook(ctx, src, links, room, &n);
 		map = pdf_new_graft_map(ctx, pdf);
 		pdf_begin_operation(ctx, pdf, "Insert pages");
 		begun = 1;

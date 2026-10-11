@@ -234,3 +234,33 @@ fn a_cancelled_run_cannot_touch_the_next() {
     assert!(cx.update(|_, app| viewer.read(app).ocr.is_some()), "the second run goes on");
     settle(cx, |app| viewer.read(app).ocr.is_none() && view.read(app).edited == 1);
 }
+
+#[test]
+fn a_refused_text_layer_reports_no_success() {
+    use ely_gpui_component::primitives::Severity;
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let mut cx = TestAppContext::single();
+    let path = scanned(dir.path());
+    let (viewer, cx) = windowed(&mut cx, dir.path(), &[path], true);
+    let view = shown(cx, &viewer);
+    // The window's toasts live on its root.
+    let root = cx.update(|window, app| {
+        let root = ely_ui::document_root(ely_platform::AppId::Pdf, viewer.clone().into(), &ely_ui::commands::FILE, Vec::new(), window, app);
+        viewer.update(app, |viewer, _| viewer.core.root = root.downgrade());
+        root
+    });
+    let tab = cx.update(|_, app| viewer.read(app).core.tabs[0].id);
+    let run = cx.update(|window, app| viewer.update(app, |viewer, cx| {
+        viewer.ask_ocr(window, cx);
+        viewer.start_ocr(cx);
+        viewer.ocr_runs - 1
+    }));
+    // An edit still runs when the text is laid.
+    cx.update(|_, app| view.update(app, |view, _| view.editing = true));
+    let line = ely_pdf_engine::OcrLine { rect: [72.0, 700.0, 300.0, 720.0], text: "Hello".into() };
+    cx.update(|_, app| viewer.update(app, |viewer, cx| viewer.ocr_read((tab, run, 0), Ok(Some(vec![line])), cx)));
+    settle(cx, |app| viewer.read(app).ocr.is_none());
+    let toasts = cx.update(|_, app| root.read(app).toasts(app));
+    assert!(toasts.iter().any(|(_, severity)| *severity == Some(Severity::Warning)), "{toasts:?}");
+    assert!(!toasts.iter().any(|(_, severity)| *severity == Some(Severity::Success)), "{toasts:?}");
+}

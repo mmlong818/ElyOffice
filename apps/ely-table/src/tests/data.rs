@@ -300,3 +300,41 @@ fn the_panel_reads_number_formats_and_find_counts_cells() {
             .is_some_and(|finder| finder.all.len() == 3)
     });
 }
+
+/// Two blocks: keys in A, other numbers in C.
+const BLOCKS: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<office:document xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+ xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"
+ xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" office:version="1.3" office:mimetype="application/vnd.oasis.opendocument.spreadsheet">
+ <office:body><office:spreadsheet><table:table table:name="S">
+ <table:table-row><table:table-cell><text:p>K</text:p></table:table-cell><table:table-cell/><table:table-cell><text:p>L</text:p></table:table-cell></table:table-row>
+ <table:table-row><table:table-cell office:value-type="float" office:value="3"><text:p>3</text:p></table:table-cell><table:table-cell/><table:table-cell office:value-type="float" office:value="9"><text:p>9</text:p></table:table-cell></table:table-row>
+ <table:table-row><table:table-cell office:value-type="float" office:value="1"><text:p>1</text:p></table:table-cell><table:table-cell/><table:table-cell office:value-type="float" office:value="7"><text:p>7</text:p></table:table-cell></table:table-row>
+ <table:table-row><table:table-cell office:value-type="float" office:value="2"><text:p>2</text:p></table:table-cell><table:table-cell/><table:table-cell office:value-type="float" office:value="8"><text:p>8</text:p></table:table-cell></table:table-row>
+ </table:table></office:spreadsheet></office:body>
+</office:document>"#;
+
+#[test]
+fn a_column_button_sorts_its_own_block_not_the_cursors() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let mut cx = TestAppContext::single();
+    let Some((_window, book)) = book(&mut cx, dir.path()) else {
+        eprintln!("SKIP: no LOK build");
+        return;
+    };
+    update(&mut cx, &book, |book, cx| {
+        book.new_from_text("blocks.fods", BLOCKS, cx)
+    });
+    settle(&cx, |app| sheet_names(app, &book) == ["S"]);
+    run(&mut cx, &book, "cell.goto", &["A1"]);
+    run(&mut cx, &book, "data.autofilter", &[]);
+    run(&mut cx, &book, "cell.goto", &["C3"]);
+    let id = cx.update(|app| book.read(app).core.active.expect("a tab"));
+    update(&mut cx, &book, |book, cx| {
+        book.ask_column(id, &Request::Filter { column: 0, row: 0 }, cx)
+    });
+    asked(&cx, &book, |dialog| matches!(dialog, Dialog::Column { .. }));
+    update(&mut cx, &book, |book, cx| book.column_asked(Some(true), cx));
+    assert_eq!(cells(&mut cx, &book, "A2:A4"), "1\n2\n3");
+    assert_eq!(cells(&mut cx, &book, "C2:C4"), "9\n7\n8");
+}

@@ -45,6 +45,8 @@ impl Tree {
     /// Shows `path` as listed in `section`.
     pub fn show(&mut self, path: &str, section: ChangeSection, cx: &mut Context<Self>) {
         let Some(repo) = self.active else { return };
+        // A new pick leaves any file history or blame.
+        self.look = None;
         self.shown = Some(Shown {
             repo,
             section,

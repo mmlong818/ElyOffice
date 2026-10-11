@@ -1,6 +1,6 @@
 //! Page pictures, and bookmarks if any (PDF-01, PDF-02).
 
-use std::{collections::BTreeSet, ops::Range};
+use std::{collections::BTreeSet, ops::Range, sync::Arc};
 
 use ely_gpui_component::{
     buttons::SegmentedControl,
@@ -9,7 +9,7 @@ use ely_gpui_component::{
     theme::{ActiveTheme as _, ControlSize},
 };
 use gpui::{
-    Action, App, Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _, Render, Role,
+    Action, App, Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _, Render, RenderImage, Role,
     StatefulInteractiveElement as _, Styled as _, WeakEntity, Window, div, img, prelude::FluentBuilder as _, px,
     uniform_list,
 };
@@ -104,7 +104,8 @@ impl PdfView {
         if self.thumbing {
             return;
         }
-        let Some(page) = rows.clone().find(|page| !self.thumbs.contains_key(&(*page, dark)) && !self.thumbs_failed.contains(page)) else {
+        let due = |page: &usize| !self.thumbs.contains_key(&(*page, dark)) || self.thumbs_stale.contains(&(*page, dark));
+        let Some(page) = rows.clone().find(|page| due(page) && !self.thumbs_failed.contains(page)) else {
             return;
         };
         let (w, h) = self.sizes[page];
@@ -127,6 +128,7 @@ impl PdfView {
                 });
                 match painted.map(|bgra| crate::pages::picture((tile[2] as u32, tile[3] as u32), bgra)) {
                     Ok(Some(image)) => {
+                        view.thumbs_stale.remove(&(page, dark));
                         if let Some(old) = view.thumbs.insert((page, dark), image) {
                             view.retired.push(old);
                         }
@@ -145,13 +147,20 @@ impl PdfView {
     }
 }
 
+impl PdfView {
+    /// The picture a row draws; an old one until repainted.
+    pub fn picture(&self, page: usize, dark: bool) -> Option<Arc<RenderImage>> {
+        self.thumbs.get(&(page, dark)).cloned()
+    }
+}
+
 /// One row: the page number and its picture.
 fn row(view: &Entity<PdfView>, page: usize, dark: bool, cx: &App) -> gpui::AnyElement {
     let read = view.read(cx);
     let colors = &cx.theme().colors;
     let (w, h) = read.sizes[page];
     let picked = read.picked.contains(&page);
-    let picture = read.thumbs.get(&(page, dark)).cloned();
+    let picture = read.picture(page, dark);
     let count = read.sizes.len();
     let label = Viewer::text(cx, "pdf.page.label", &[("n", &(page + 1).to_string())]);
     let (clicked, pressed, dropped) = (view.clone(), view.clone(), view.clone());

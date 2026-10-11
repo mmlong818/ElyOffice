@@ -75,6 +75,8 @@ pub(super) const EN: &[(&str, &str)] = &[
     ),
     ("tree.op.picking", "Cherry-picking {theirs} onto {ours}"),
     ("tree.op.reverting", "Reverting {theirs} on {ours}"),
+    ("tree.op.applying", "Applying patch {theirs} onto {ours}"),
+    ("tree.op.unread", "What Git is doing did not read: {error}"),
     (
         "tree.op.next",
         "Resolve the conflicts and mark each file resolved, then continue.",
@@ -98,6 +100,8 @@ pub(super) const EN: &[(&str, &str)] = &[
     ("tree.theirs.pick", "Picked, {name}"),
     ("tree.ours.revert", "Current, {name}"),
     ("tree.theirs.revert", "Reverting, {name}"),
+    ("tree.ours.am", "Current, {name}"),
+    ("tree.theirs.am", "Patch {name}"),
     ("tree.conflict.save", "Save"),
     ("tree.conflict.resolved", "Mark Resolved"),
     ("tree.conflict.use_ours", "Use Current File"),
@@ -106,6 +110,10 @@ pub(super) const EN: &[(&str, &str)] = &[
     (
         "tree.conflict.hand",
         "The result was edited by hand; settle the rest in the result.",
+    ),
+    (
+        "tree.conflict.taken",
+        "This conflict is settled; change it in the result.",
     ),
     ("tree.conflict.unsaved", "Save the result first."),
     (
@@ -141,6 +149,7 @@ pub(super) const EN: &[(&str, &str)] = &[
     ("tree.opname.rebase", "rebase"),
     ("tree.opname.cherry-pick", "cherry-pick"),
     ("tree.opname.revert", "revert"),
+    ("tree.opname.am", "patch application"),
 ];
 
 pub(super) const ZH_CN: &[(&str, &str)] = &[
@@ -215,6 +224,8 @@ pub(super) const ZH_CN: &[(&str, &str)] = &[
     ("tree.op.rebasing", "正在变基到 {ours}，应用 {theirs}"),
     ("tree.op.picking", "正在把 {theirs} 拣选到 {ours}"),
     ("tree.op.reverting", "正在 {ours} 上撤销 {theirs}"),
+    ("tree.op.applying", "正在 {ours} 上应用补丁 {theirs}"),
+    ("tree.op.unread", "读不出 Git 正在做什么：{error}"),
     ("tree.op.next", "解决冲突并把每个文件标为已解决，然后继续。"),
     ("tree.op.continue", "继续"),
     ("tree.op.skip", "跳过…"),
@@ -232,6 +243,8 @@ pub(super) const ZH_CN: &[(&str, &str)] = &[
     ("tree.theirs.pick", "拣选的 {name}"),
     ("tree.ours.revert", "当前 {name}"),
     ("tree.theirs.revert", "撤销的 {name}"),
+    ("tree.ours.am", "当前 {name}"),
+    ("tree.theirs.am", "补丁 {name}"),
     ("tree.conflict.save", "保存"),
     ("tree.conflict.resolved", "标为已解决"),
     ("tree.conflict.use_ours", "用当前侧的文件"),
@@ -241,6 +254,7 @@ pub(super) const ZH_CN: &[(&str, &str)] = &[
         "tree.conflict.hand",
         "结果已手动改过，其余冲突请在结果里处理。",
     ),
+    ("tree.conflict.taken", "此处冲突已选定，请在结果里修改。"),
     ("tree.conflict.unsaved", "请先保存结果。"),
     ("tree.conflict.kept", "文件在磁盘上变了，未保存的结果保留。"),
     ("tree.conflict.marked.title", "把 {name} 标为已解决？"),
@@ -260,4 +274,5 @@ pub(super) const ZH_CN: &[(&str, &str)] = &[
     ("tree.opname.rebase", "变基"),
     ("tree.opname.cherry-pick", "拣选"),
     ("tree.opname.revert", "撤销"),
+    ("tree.opname.am", "补丁应用"),
 ];

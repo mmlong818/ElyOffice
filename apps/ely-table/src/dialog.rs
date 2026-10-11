@@ -94,6 +94,8 @@ pub enum Dialog {
     Column {
         tab: u64,
         column: u32,
+        /// The button's row: its cell names the filtered range.
+        row: u32,
         entries: Vec<Entry>,
         picked: Vec<SharedString>,
     },
@@ -148,6 +150,35 @@ pub enum Dialog {
         tab: u64,
         protecting: Box<crate::protect::Protecting>,
     },
+}
+
+impl Dialog {
+    /// The workbook it asks about; imports have none yet.
+    pub fn tab(&self) -> Option<u64> {
+        match self {
+            Dialog::Rename { tab, .. }
+            | Dialog::Show { tab, .. }
+            | Dialog::Delete { tab, .. }
+            | Dialog::Size { tab, .. }
+            | Dialog::Merge { tab, .. }
+            | Dialog::Define { tab, .. }
+            | Dialog::Names { tab, .. }
+            | Dialog::Sort { tab, .. }
+            | Dialog::Filter { tab, .. }
+            | Dialog::Dedupe { tab, .. }
+            | Dialog::Columns { tab, .. }
+            | Dialog::Column { tab, .. }
+            | Dialog::Validation { tab, .. }
+            | Dialog::Conditional { tab, .. }
+            | Dialog::Formats { tab, .. }
+            | Dialog::Pivot { tab, .. }
+            | Dialog::Chart { tab, .. }
+            | Dialog::Export { tab, .. }
+            | Dialog::Page { tab, .. }
+            | Dialog::Protect { tab, .. } => Some(*tab),
+            Dialog::Import(_) => None,
+        }
+    }
 }
 
 impl Book {

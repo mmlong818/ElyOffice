@@ -28,7 +28,7 @@ fn branch(found: &Ref) -> Branch {
         ahead,
         behind,
         subject: found.subject.clone().into(),
-        when: when(found.at),
+        when: found.at.map_or_else(|| "—".into(), when),
     }
 }
 
@@ -37,7 +37,7 @@ fn tag(found: &Ref) -> GitTag {
         name: found.name.clone().into(),
         message: found.message.clone().map(Into::into),
         commit: found.commit.clone().into(),
-        when: when(found.at),
+        when: found.at.map_or_else(|| "—".into(), when),
     }
 }
 
@@ -59,7 +59,7 @@ pub fn branches(tree: &Entity<Tree>, cx: &mut Context<Changes>) -> AnyElement {
         }
         Some(Ok(refs)) => refs,
     };
-    let picked = read.picked_ref.clone();
+    let picked = opened.picked_ref.clone();
     // A name shows picked only in its own kind's list.
     let picked_in = move |kind: Kind| {
         picked
@@ -71,11 +71,7 @@ pub fn branches(tree: &Entity<Tree>, cx: &mut Context<Changes>) -> AnyElement {
         let this = tree.downgrade();
         move |name: &gpui::SharedString, _: &mut gpui::Window, cx: &mut gpui::App| {
             let name = name.to_string();
-            this.update(cx, |tree, cx| {
-                tree.picked_ref = Some((kind, name));
-                cx.notify();
-            })
-            .ok();
+            this.update(cx, |tree, cx| tree.pick_ref(kind, name, cx)).ok();
         }
     };
     let switch = |kind: Kind| {
@@ -171,4 +167,15 @@ pub fn branches(tree: &Entity<Tree>, cx: &mut Context<Changes>) -> AnyElement {
                 }),
         )
         .into_any_element()
+}
+
+impl crate::tree::Tree {
+    /// A branch or tag picked: it shows, nothing else.
+    pub fn pick_ref(&mut self, kind: Kind, name: String, cx: &mut gpui::Context<Self>) {
+        self.look = None;
+        if let Some(opened) = self.active.and_then(|id| self.opened_mut(id)) {
+            opened.picked_ref = Some((kind, name));
+        }
+        cx.notify();
+    }
 }

@@ -9,6 +9,7 @@ use gpui::{AppContext as _, Entity, TestAppContext};
 use crate::deck::Deck;
 
 mod motion;
+mod notes;
 mod objects;
 mod output;
 mod play;
@@ -44,7 +45,7 @@ pub(super) fn deck(cx: &mut TestAppContext, dir: &Path) -> Option<Entity<Deck>> 
 
 /// Steps the scheduler until `done` or ten seconds pass.
 #[track_caller]
-fn settle(cx: &TestAppContext, done: impl Fn(&gpui::App) -> bool) {
+pub(super) fn settle(cx: &TestAppContext, done: impl Fn(&gpui::App) -> bool) {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     while std::time::Instant::now() < deadline {
         if !cx.executor().tick() {
@@ -58,7 +59,7 @@ fn settle(cx: &TestAppContext, done: impl Fn(&gpui::App) -> bool) {
     panic!("the state never settled");
 }
 
-fn update(
+pub(super) fn update(
     cx: &mut TestAppContext,
     deck: &Entity<Deck>,
     f: impl FnOnce(&mut Deck, &mut gpui::Context<Deck>),

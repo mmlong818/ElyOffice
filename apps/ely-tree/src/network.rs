@@ -123,7 +123,7 @@ impl Tree {
         };
         net.stopping = true;
         if let Err(error) = net.stop.now() {
-            self.failed("tree.error.stop", &error.to_string(), cx);
+            self.failed("tree.error.stop_remote", &error.to_string(), cx);
         }
         cx.notify();
     }
@@ -183,7 +183,7 @@ impl Tree {
                 if tree.active != Some(repo) {
                     return;
                 }
-                tree.ask = Some(match read {
+                let ask = match read {
                     Ok(list) if list.is_empty() => {
                         let words = text(cx, "tree.push.no_remote", &[]);
                         return tree.toast(words, Severity::Warning, cx);
@@ -198,8 +198,8 @@ impl Tree {
                         title: text(cx, "tree.remotes.unread", &[]),
                         detail: error.to_string().into(),
                     },
-                });
-                cx.notify();
+                };
+                tree.offer(ask, cx);
             })
             .ok();
         })
@@ -234,14 +234,14 @@ impl Tree {
                 if tree.active != Some(repo) {
                     return;
                 }
-                tree.ask = Some(match plan {
+                let ask = match plan {
                     Ok(plan) => Ask::Force { repo, plan },
                     Err(error) => Ask::Failed {
                         title: text(cx, "tree.force.unready", &[]),
                         detail: error.to_string().into(),
                     },
-                });
-                cx.notify();
+                };
+                tree.offer(ask, cx);
             })
             .ok();
         })
@@ -262,11 +262,10 @@ impl Tree {
             .on_click(move |_, _, cx| {
                 this.update(cx, |tree, cx| tree.stop_remote(id, cx)).ok();
             });
-        Some(
-            Alert::new("tree-net", Severity::Info, verb)
-                .body(net.said.clone())
-                .action(stop.into_any_element())
-                .into_any_element(),
-        )
+        let alert = Alert::new("tree-net", Severity::Info, verb).body(net.said.clone());
+        if !crate::running::STOPS {
+            return Some(alert.into_any_element());
+        }
+        Some(alert.action(stop.into_any_element()).into_any_element())
     }
 }

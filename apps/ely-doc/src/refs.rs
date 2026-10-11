@@ -71,35 +71,51 @@ pub fn items(cx: &App) -> Vec<MenuItem> {
 }
 
 impl Docs {
-    /// A kernel list for the active document; failures toast.
-    fn read(&self, command: &str, cx: &mut Context<Self>) -> Option<String> {
+    /// Reads a kernel list off the window thread, then `then`.
+    fn read_then(
+        &mut self,
+        command: &'static str,
+        then: impl FnOnce(&mut Self, String, &mut Window, &mut Context<Self>) + 'static,
+        cx: &mut Context<Self>,
+    ) {
         let Some(tab) = self.active_tab() else {
             let text = Docs::text(cx, "command.blocked.no_document", &[]);
-            self.toast(text, Severity::Warning, cx);
-            return None;
+            return self.toast(text, Severity::Warning, cx);
         };
-        let read = self
-            .core
-            .worker
-            .lock()
-            .expect("the worker lock")
-            .values(&tab.doc, command);
-        read.map_err(|error| {
-            let text = Docs::text(cx, "office.error.engine", &[("error", &error.to_string())]);
-            self.toast(text, Severity::Danger, cx);
-        })
-        .ok()
+        let id = tab.id;
+        self.dialog_asked += 1;
+        let asked = self.dialog_asked;
+        self.ask_in(
+            id,
+            move |worker, doc| worker.values(doc, command),
+            move |docs, read, window, cx| {
+                // A dialog opened since, or a later ask, wins.
+                if docs.dialog_asked != asked || docs.dialog.is_some() || docs.core.dialog.is_some() {
+                    return log::info!("doc: a dialog read for tab {id} lapsed");
+                }
+                match read {
+                    Ok(json) => then(docs, json, window, cx),
+                    Err(error) => docs.engine_failed(&error.to_string(), cx),
+                }
+            },
+            cx,
+        );
     }
 
-    fn bookmarks(&self, cx: &mut Context<Self>) -> Option<Vec<String>> {
-        let listed = ely_lok::review::bookmarks(&self.read(".uno:Bookmarks", cx)?);
-        listed
-            .map(|marks| marks.into_iter().map(|mark| mark.name).collect())
-            .map_err(|error| {
-                let text = Docs::text(cx, "office.error.engine", &[("error", &error.to_string())]);
-                self.toast(text, Severity::Danger, cx);
-            })
-            .ok()
+    /// The bookmarks' names, then `then`.
+    fn with_bookmarks(
+        &mut self,
+        then: impl FnOnce(&mut Self, Vec<String>, &mut Window, &mut Context<Self>) + 'static,
+        cx: &mut Context<Self>,
+    ) {
+        self.read_then(
+            ".uno:Bookmarks",
+            move |docs, json, window, cx| match ely_lok::review::bookmarks(&json) {
+                Ok(marks) => then(docs, marks.into_iter().map(|mark| mark.name).collect(), window, cx),
+                Err(error) => docs.engine_failed(&error.to_string(), cx),
+            },
+            cx,
+        );
     }
 
     fn ask(&mut self, ask: Ask, text: &str, window: &mut Window, cx: &mut Context<Self>) {
@@ -126,10 +142,8 @@ impl Docs {
         self.run_active("note.endnote", &[], cx);
     }
 
-    pub fn on_bookmark(&mut self, _: &InsertBookmark, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(taken) = self.bookmarks(cx) {
-            self.ask(Ask::Bookmark(taken), "", window, cx);
-        }
+    pub fn on_bookmark(&mut self, _: &InsertBookmark, _: &mut Window, cx: &mut Context<Self>) {
+        self.with_bookmarks(|docs, taken, window, cx| docs.ask(Ask::Bookmark(taken), "", window, cx), cx);
     }
 
     pub fn on_link(&mut self, _: &InsertLink, window: &mut Window, cx: &mut Context<Self>) {
@@ -141,19 +155,17 @@ impl Docs {
     }
 
     pub fn on_reference(&mut self, _: &InsertReference, _: &mut Window, cx: &mut Context<Self>) {
-        let Some(marks) = self.bookmarks(cx) else {
-            return;
-        };
-        let Some(mark) = marks.first().cloned() else {
-            let text = Docs::text(cx, "doc.reference.none", &[]);
-            return self.toast(text, Severity::Warning, cx);
-        };
-        self.dialog = Some(Dialog::Reference {
-            marks,
-            mark,
-            show: "2",
-        });
-        cx.notify();
+        self.with_bookmarks(
+            |docs, marks, _, cx| {
+                let Some(mark) = marks.first().cloned() else {
+                    let text = Docs::text(cx, "doc.reference.none", &[]);
+                    return docs.toast(text, Severity::Warning, cx);
+                };
+                docs.dialog = Some(Dialog::Reference { marks, mark, show: "2" });
+                cx.notify();
+            },
+            cx,
+        );
     }
 
     pub fn on_caption(&mut self, _: &InsertCaption, window: &mut Window, cx: &mut Context<Self>) {
@@ -173,18 +185,16 @@ impl Docs {
         self.ask(Ask::Caption(category), "", window, cx);
     }
 
-    pub fn on_formula(&mut self, _: &InsertFormula, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(json) = self.read(".uno:Formula", cx) else {
-            return;
-        };
-        match ely_lok::review::formula(&json) {
-            Ok(Some(formula)) => self.ask(Ask::Formula(true), &formula, window, cx),
-            Ok(None) => self.ask(Ask::Formula(false), "", window, cx),
-            Err(error) => {
-                let text = Docs::text(cx, "office.error.engine", &[("error", &error.to_string())]);
-                self.toast(text, Severity::Danger, cx);
-            }
-        }
+    pub fn on_formula(&mut self, _: &InsertFormula, _: &mut Window, cx: &mut Context<Self>) {
+        self.read_then(
+            ".uno:Formula",
+            |docs, json, window, cx| match ely_lok::review::formula(&json) {
+                Ok(Some(formula)) => docs.ask(Ask::Formula(true), &formula, window, cx),
+                Ok(None) => docs.ask(Ask::Formula(false), "", window, cx),
+                Err(error) => docs.engine_failed(&error.to_string(), cx),
+            },
+            cx,
+        );
     }
 
     pub fn on_comment(&mut self, _: &InsertComment, window: &mut Window, cx: &mut Context<Self>) {

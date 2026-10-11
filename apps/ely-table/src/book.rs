@@ -101,6 +101,17 @@ impl Host for Book {
             self.sync_bars(view, cx);
         }
     }
+
+    /// A closed tab's dialog and list go with it.
+    fn tab_closed(&mut self, tab: &ely_office::Tab<Extra, ely_office::Lok>, cx: &mut Context<Self>) {
+        if self.dialog.as_ref().and_then(crate::dialog::Dialog::tab) == Some(tab.id) {
+            self.dialog = None;
+        }
+        if self.choices.as_ref().is_some_and(|choices| choices.tab == tab.id) {
+            self.choices = None;
+        }
+        cx.notify();
+    }
 }
 
 /// The window root with a blank workbook.
@@ -143,7 +154,7 @@ pub fn open(app: AppId, window: &mut Window, cx: &mut App) -> Entity<Root> {
     let root = ely_ui::document_root(app, book.clone().into(), &ely_ui::commands::FILE, menus, window, cx);
     book.update(cx, |book, cx| {
         book.core.root = root.downgrade();
-        book.core.window = Some(window.window_handle());
+        book.own_window(window, cx);
         window.focus(&book.core.focus, cx);
     });
     let launched = ely_ui::launch_files(cx);
@@ -229,7 +240,10 @@ impl Book {
                 match read {
                     Ok((sheets, geometry, at)) => {
                         log::info!("table: tab {id} has {} sheets", sheets.list.len());
-                        view.update(cx, |view, _| view.set_part(sheets.current));
+                        view.update(cx, |view, cx| {
+                            view.set_part(sheets.current);
+                            view.set_geometry(geometry.clone(), cx);
+                        });
                         let extra = &mut tab.extra;
                         extra.sheets = sheets;
                         extra.geometry = geometry;
@@ -369,7 +383,6 @@ impl Render for Book {
             .on_action(cx.listener(Self::on_open_file))
             .on_action(cx.listener(Self::on_save))
             .on_action(cx.listener(Self::on_save_as))
-            .on_action(cx.listener(Self::on_quit))
             .on_action(cx.listener(Self::on_close_tab))
             .on_action(cx.listener(Self::on_export))
             .on_action(cx.listener(Self::on_print))
@@ -406,6 +419,8 @@ fn frozen_index(state: Option<&str>) -> Option<u32> {
     (index > 0).then_some(index)
 }
 
+impl Zooming for Book {}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -415,5 +430,3 @@ mod tests {
         assert_eq!(super::frozen_index(None), None);
     }
 }
-
-impl Zooming for Book {}

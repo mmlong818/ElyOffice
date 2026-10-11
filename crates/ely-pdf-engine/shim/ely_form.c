@@ -189,6 +189,7 @@ static pdf_obj *check_name(fz_context *ctx, pdf_obj *fields, const char *prefix,
 	if (!name[0] || strchr(name, '.'))
 		fz_throw(ctx, FZ_ERROR_ARGUMENT, "a bad field name");
 	fz_var(full);
+	fz_var(found);
 	fz_try(ctx)
 	{
 		full = fz_asprintf(ctx, "%s%s", prefix, name);

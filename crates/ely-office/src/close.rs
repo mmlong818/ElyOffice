@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use ely_gpui_component::primitives::Severity;
-use ely_ui::commands::{CloseTab, Open, Quit, Save, SaveAs};
+use ely_ui::commands::{CloseTab, Open, Save, SaveAs};
 use gpui::{App, AppContext as _, Context, PathPromptOptions, TaskExt as _, Window};
 
 use crate::{Dialog, Engine, Host, Opening, Saving, Tabs, in_window, text};
@@ -41,8 +41,37 @@ pub trait Closing: Host {
         }
     }
 
-    fn on_quit(&mut self, _: &Quit, window: &mut Window, cx: &mut Context<Self>) {
-        self.proceed(After::Quit, window, cx);
+    /// Takes `window` as home; quit anywhere asks here first.
+    fn own_window(&mut self, window: &Window, cx: &mut Context<Self>) {
+        let handle = window.window_handle();
+        self.core_mut().window = Some(handle);
+        let host = cx.entity().downgrade();
+        ely_ui::commands::route_quit(cx, move |cx| {
+            let host = host.clone();
+            // The asking window is busy until its action ends.
+            cx.defer(move |cx| {
+                let asked = handle.update(cx, |_, window, cx| {
+                    // The question shows in front, with the keys.
+                    window.activate_window();
+                    host.update(cx, |host, cx| {
+                        host.quitting(cx);
+                        host.proceed(After::Quit, window, cx);
+                    })
+                });
+                match asked {
+                    Ok(Ok(())) => {}
+                    // No home window is left to ask in.
+                    _ if handle.update(cx, |_, _, _| ()).is_err() => cx.quit(),
+                    Ok(Err(error)) | Err(error) => log::error!("office: the quit was not asked: {error}"),
+                }
+            });
+        });
+    }
+
+    /// A close or quit stopped: no update installs on it.
+    fn close_stopped(&mut self, cx: &mut Context<Self>) {
+        ely_ui::updates::quit_stopped(cx);
+        self.close_cancelled(cx);
     }
 
     fn no_document(&self, cx: &mut Context<Self>) {

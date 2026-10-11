@@ -1,6 +1,6 @@
 //! Signing by update and checking what was signed (PDF-12, QA-15).
 
-use std::{io::ErrorKind, path::{Path, PathBuf}};
+use std::path::{Path, PathBuf};
 
 use ely_pdf_engine::{
     Digest, Doc, Lock, Signing, Worker,
@@ -128,7 +128,7 @@ fn a_new_field_needs_leave_to_change_the_page() {
     worker.protect(doc, &limited, Some(&lock)).expect("protects");
     let (mut other, read) = opened(&limited);
     let refused = other.sign(read, &dir.path().join("signed.pdf"), &signing(None, "S", "ely")).expect_err("refused");
-    assert_eq!(refused.kind(), ErrorKind::PermissionDenied);
+    assert!(ely_pdf_engine::refused(&refused).is_some(), "refused: {refused}");
 }
 
 #[test]

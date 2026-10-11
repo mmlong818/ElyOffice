@@ -85,6 +85,28 @@ fn kind(path: &Path) -> &'static str {
     }
 }
 
+/// What the print page is made of.
+pub struct Print {
+    pub folder: std::path::PathBuf,
+    pub style: std::path::PathBuf,
+    pub name: String,
+    pub page: std::path::PathBuf,
+}
+
+/// Writes the print page off the window thread, images inline.
+pub fn stage(
+    background: &gpui::BackgroundExecutor,
+    rendered: serde_json::Value,
+    print: Print,
+) -> gpui::Task<std::io::Result<crate::export::Lost>> {
+    background.spawn(async move {
+        let (html, images) = Marked::read(&rendered)?.inline(&print.folder);
+        let style = format!("<style>{}</style>", std::fs::read_to_string(&print.style)?);
+        std::fs::write(&print.page, page(&print.name, &style, &html))?;
+        Ok(crate::export::Lost::of(images, &rendered))
+    })
+}
+
 /// The page's HTML; image `src` values replaced by numbered tokens.
 #[derive(Clone, Debug, Default)]
 pub struct Marked {
@@ -220,6 +242,31 @@ mod tests {
     #[test]
     fn a_page_lacking_its_parts_is_an_error() {
         assert!(Marked::read(&serde_json::json!({ "html": "<p>" })).is_err());
+    }
+
+    #[gpui::test]
+    fn the_print_page_is_written_off_the_window_thread(cx: &mut gpui::TestAppContext) {
+        let dir = tempfile::tempdir().expect("a temp dir");
+        std::fs::write(dir.path().join("a.png"), b"png").expect("an image");
+        std::fs::write(dir.path().join("export.css"), "p {}").expect("a style");
+        let rendered = serde_json::json!({
+            "html": "<p>hi</p><img src=\"T0\"><img src=\"T1\">",
+            "token": "T",
+            "images": ["a.png", "gone.png"],
+            "failed": [3],
+        });
+        let print = Print {
+            folder: dir.path().into(),
+            style: dir.path().join("export.css"),
+            name: "notes".into(),
+            page: dir.path().join("print-1.html"),
+        };
+        let staging = stage(&cx.executor(), rendered, print);
+        assert!(!dir.path().join("print-1.html").exists(), "staged on the window thread");
+        let lost = cx.foreground_executor().block_test(staging).expect("staged");
+        let written = std::fs::read_to_string(dir.path().join("print-1.html")).expect("the page");
+        assert!(written.contains("<style>p {}</style>") && written.contains("data:image/png;base64,cG5n"));
+        assert_eq!(format!("{lost:?}"), r#"Lost { images: ["gone.png"], diagrams: [3], formulas: [] }"#);
     }
 
     #[test]

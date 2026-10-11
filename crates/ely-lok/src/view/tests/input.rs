@@ -20,7 +20,7 @@ fn saved(view: &Entity<LokView>, cx: &mut TestAppContext) -> Vec<String> {
         let view = view.read(app);
         let mut worker = view.worker.lock().expect("the worker lock");
         view.doc
-            .save_as(&mut worker, &format!("file://{}", out.display()), "fodt")
+            .save_as(&mut worker, &crate::file_url(&out), "fodt")
             .expect("the save works");
     });
     paragraphs(&std::fs::read_to_string(&out).expect("the save reads"))
@@ -263,9 +263,61 @@ fn the_clipboard_moves_html_tables_and_images() {
         let view = view.read(app);
         let mut worker = view.worker.lock().expect("the worker lock");
         view.doc
-            .save_as(&mut worker, &format!("file://{}", out.display()), "fodt")
+            .save_as(&mut worker, &crate::file_url(&out), "fodt")
             .expect("the save works");
     });
     let xml = std::fs::read_to_string(&out).expect("the save reads");
     assert!(xml.contains("<draw:image"), "the image lands");
+}
+
+/// Two slides, each with one line of text.
+const DECK: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<office:document xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+ xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0"
+ xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"
+ xmlns:svg="urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0"
+ office:version="1.3" office:mimetype="application/vnd.oasis.opendocument.presentation">
+ <office:body><office:presentation>
+  <draw:page draw:name="one"><draw:frame svg:x="2cm" svg:y="2cm" svg:width="10cm" svg:height="3cm"><draw:text-box><text:p>One</text:p></draw:text-box></draw:frame></draw:page>
+  <draw:page draw:name="two"><draw:frame svg:x="2cm" svg:y="8cm" svg:width="10cm" svg:height="3cm"><draw:text-box><text:p>Two</text:p></draw:text-box></draw:frame></draw:page>
+ </office:presentation></office:body>
+</office:document>"#;
+
+/// Paints until tile (0, 0) is fresh, then its bytes.
+fn fresh_corner(view: &Entity<LokView>, cx: &mut TestAppContext, not: Option<&[u8]>) -> Vec<u8> {
+    let bounds = Bounds { origin: point(px(0.0), px(0.0)), size: size(px(800.0), px(600.0)) };
+    for _ in 0..400 {
+        let bytes = cx.update(|app| {
+            view.update(app, |view, _| view.prepare(bounds));
+            let read = view.read(app);
+            let entry = read.tiles.get(&(0, 0)).filter(|entry| !entry.stale)?;
+            let bytes = entry.image.as_bytes(0).expect("a frame").to_vec();
+            (Some(bytes.as_slice()) != not).then_some(bytes)
+        });
+        if let Some(bytes) = bytes {
+            return bytes;
+        }
+        cx.executor().tick();
+    }
+    panic!("tile (0, 0) never repainted");
+}
+
+#[test]
+fn switching_slides_repaints_the_shown_tiles() {
+    let Some(install) = crate::client::tests::install() else {
+        eprintln!("SKIP: no pinned LOK build");
+        return;
+    };
+    let mut cx = TestAppContext::single();
+    let (view, worker) = cx.update(|app| live_view_of(app, &install, "deck.fodp", DECK));
+    let one = fresh_corner(&view, &mut cx, None);
+    cx.update(|app| view.update(app, |view, _| view.show_part(1)));
+    let two = fresh_corner(&view, &mut cx, Some(&one));
+    let painted = cx.update(|app| {
+        let read = view.read(app);
+        let side = read.geom.tile_pixels();
+        let mut worker = worker.lock().expect("the worker lock");
+        read.doc.paint_tile(&mut worker, (0, 0, TILE_TWIPS, TILE_TWIPS), (side, side)).expect("paints")
+    });
+    assert_eq!(two, painted.pixels, "the corner shows slide two");
 }

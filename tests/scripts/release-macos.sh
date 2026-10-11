@@ -22,7 +22,8 @@ while IFS=$'\t' read -r slug name; do
   [ -d "$dist/$name.app" ] || fail "no $dist/$name.app; run packaging/macos/release.sh"
 done <<<"$apps"
 version=$(awk -F'"' '/^version = / { print $2; exit }' "$root/Cargo.toml")
-source=$dist/ElyOffice-$version-source.tar.gz
+commit=$(git -C "$root" rev-parse --short=12 HEAD)
+source=$dist/ElyOffice-$version-$commit-source.tar.gz
 [ -s "$source" ] || fail "no $source; run packaging/macos/release.sh"
 listed=$(tar -tzf "$source")
 for part in LICENSE Cargo.lock patches/libreoffice/ patches/mupdf/ scripts/fetch-references.sh scripts/build-git.sh; do
@@ -32,7 +33,7 @@ for part in agents.md PRD.md tasks/; do
   ! grep -qx "ElyOffice-$version/$part" <<<"$listed" || fail "the source archive has the internal $part"
 done
 # Copyleft upstream as built: MuPDF with our patches, and Git.
-upstream=$dist/ElyOffice-$version-upstream-source.tar.gz
+upstream=$dist/ElyOffice-$version-$commit-upstream-source.tar.gz
 [ -s "$upstream" ] || fail "no $upstream; run packaging/macos/release.sh"
 for part in mupdf-src/COPYING git/COPYING git/GIT-VERSION-GEN; do
   tar -tzf "$upstream" "$part" >/dev/null 2>&1 || fail "the upstream archive lacks $part"

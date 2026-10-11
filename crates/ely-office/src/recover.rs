@@ -9,16 +9,35 @@ use std::{
 
 use ely_files::{Crash, Marker, Recovery, RecoveryKey};
 use ely_gpui_component::primitives::Severity;
-use gpui::{AsyncApp, Context, WeakEntity};
+use gpui::{AppContext as _, AsyncApp, Context, WeakEntity};
 use serde::{Deserialize, Serialize};
 
-use crate::{Engine, Host, Opening as _, Source, Tabs as _, text};
+use crate::{Engine, Host, Tabs as _, text};
+
+mod reopen;
 
 /// A tab's points, and the edit the last holds.
 struct Slot {
     kept: Kept,
     written: Option<u64>,
     writing: bool,
+    /// The last failure, shown once until it changes.
+    failed: Option<String>,
+}
+
+impl Slot {
+    /// Notes a failed point; words to show, once each.
+    fn fail(&mut self, edited: u64, error: &io::Error) -> Option<String> {
+        // Too big for the cap: wait for the next edit.
+        if error.kind() == io::ErrorKind::InvalidInput {
+            self.written = Some(edited);
+        }
+        let said = error.to_string();
+        (self.failed.as_ref() != Some(&said)).then(|| {
+            self.failed = Some(said.clone());
+            said
+        })
+    }
 }
 
 /// What reopening a slot needs, kept beside its points.
@@ -47,6 +66,9 @@ pub struct Keeping {
     pub(crate) last: Option<SystemTime>,
     /// The index on disk is behind; the failure shown.
     behind: Option<String>,
+    /// An index write runs; another follows it if asked.
+    flushing: bool,
+    flush_again: bool,
 }
 
 impl Keeping {
@@ -70,7 +92,7 @@ impl Keeping {
         };
         let crash = Crash::open(&dir, std::process::id())?;
         let (reopening, held) = (Vec::new(), Vec::new());
-        Ok(Self { dir, crash: Some(crash), slots: HashMap::new(), crashed, reopening, held, last: None, behind: None })
+        Ok(Self { dir, crash: Some(crash), slots: HashMap::new(), crashed, reopening, held, last: None, behind: None, flushing: false, flush_again: false })
     }
 
     /// A clean quit: the next start finds nothing to recover.
@@ -87,15 +109,25 @@ impl Keeping {
     }
 
     fn save_index(&self) -> io::Result<()> {
+        let (path, bytes) = self.index()?;
+        write_index(&path, &bytes)
+    }
+
+    /// The index file and what it should hold now.
+    fn index(&self) -> io::Result<(PathBuf, Vec<u8>)> {
         let waiting = self.reopening.iter().map(|(_, _, kept)| kept).chain(&self.held);
         let waiting = waiting.map(|kept| Kept { held: true, ..kept.clone() });
         let slots = self.slots.values().map(|slot| slot.kept.clone());
         let kept: Vec<Kept> = slots.chain(self.crashed.iter().cloned()).chain(waiting).collect();
-        let path = self.dir.join("recovery").join("index.json");
-        std::fs::create_dir_all(self.dir.join("recovery"))?;
-        // Staged then renamed: a failed write keeps the last index.
-        ely_files::save_atomic(&path, &serde_json::to_vec(&kept).map_err(io::Error::other)?, 0).map(|_| ())
+        let bytes = serde_json::to_vec(&kept).map_err(io::Error::other)?;
+        Ok((self.dir.join("recovery").join("index.json"), bytes))
     }
+}
+
+/// Staged then renamed: a failed write keeps the last index.
+fn write_index(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    std::fs::create_dir_all(path.parent().expect("the index has a folder"))?;
+    ely_files::save_atomic(path, bytes, 0).map(|_| ())
 }
 
 fn read_index(dir: &Path) -> io::Result<Vec<Kept>> {
@@ -128,6 +160,9 @@ fn remove(path: &Path) -> io::Result<()> {
     }
 }
 
+/// A slot taken from a released tab, waiting to reopen.
+pub struct Taken(Kept, String);
+
 /// When recovery points are written and crashes come back.
 pub trait Recovering: Host {
     /// From the app's window, never its tests.
@@ -140,8 +175,17 @@ pub trait Recovering: Host {
             }
         }
         Self::keep_points_every(cx);
-        cx.on_app_quit(|host, _| {
-            if let Some(keeping) = host.core_mut().keeping.as_mut() {
+        cx.on_app_quit(|host, cx| {
+            // A write still in flight must not be the last.
+            if let Some(keeping) = host.core().keeping.as_ref()
+                && let Err(error) = keeping.save_index()
+            {
+                log::error!("recovery: the index is not saved at quit: {error}");
+            }
+            // A system end skips asking: unsaved tabs keep points.
+            if host.core().tabs.iter().any(|tab| tab.dirty(cx)) {
+                log::warn!("recovery: quit with unsaved tabs; points stay");
+            } else if let Some(keeping) = host.core_mut().keeping.as_mut() {
                 keeping.end();
             }
             async {}
@@ -219,6 +263,7 @@ pub trait Recovering: Host {
                     match written {
                         Ok(()) => {
                             slot.written = Some(edited);
+                            slot.failed = None;
                             keeping.last = Some(SystemTime::now());
                             if keeping.behind.is_some() {
                                 host.flush_index(cx);
@@ -226,7 +271,8 @@ pub trait Recovering: Host {
                         }
                         Err(error) => {
                             log::error!("recovery: tab {id} point failed ({:?})", error.kind());
-                            let shown = text(cx, "office.recovery.failed", &[("error", &error.to_string())]);
+                            let Some(said) = slot.fail(edited, &error) else { return };
+                            let shown = text(cx, "office.recovery.failed", &[("error", &said)]);
                             host.toast_unlogged(shown, Severity::Warning, cx);
                         }
                     }
@@ -236,13 +282,40 @@ pub trait Recovering: Host {
         }
     }
 
-    /// Writes the index; a failure shows once and retries.
+    /// Writes the index in the background, one at a time.
     fn flush_index(&mut self, cx: &mut Context<Self>) {
         let Some(keeping) = self.core_mut().keeping.as_mut() else { return };
-        let error = match keeping.save_index() {
-            Ok(()) => return keeping.behind = None,
-            Err(error) => error.to_string(),
+        if keeping.flushing {
+            return keeping.flush_again = true;
+        }
+        let (path, bytes) = match keeping.index() {
+            Ok(index) => index,
+            Err(error) => return self.index_failed(error.to_string(), cx),
         };
+        keeping.flushing = true;
+        let task = cx.background_spawn(async move { write_index(&path, &bytes) });
+        cx.spawn(async move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let written = task.await;
+            this.update(cx, |host, cx| {
+                let Some(keeping) = host.core_mut().keeping.as_mut() else { return };
+                keeping.flushing = false;
+                match written {
+                    Ok(()) => keeping.behind = None,
+                    Err(error) => host.index_failed(error.to_string(), cx),
+                }
+                let again = host.core_mut().keeping.as_mut().is_some_and(|keeping| std::mem::take(&mut keeping.flush_again));
+                if again {
+                    host.flush_index(cx);
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// An index failure shows once and retries.
+    fn index_failed(&mut self, error: String, cx: &mut Context<Self>) {
+        let Some(keeping) = self.core_mut().keeping.as_mut() else { return };
         if keeping.behind.as_ref() == Some(&error) {
             return;
         }
@@ -261,7 +334,7 @@ pub trait Recovering: Host {
         let Some(keeping) = self.core_mut().keeping.as_mut() else { return };
         let slot = format!("{}-{id}", std::process::id());
         let kept = Kept { slot, name: name.to_string(), format, sealed, held: false };
-        keeping.slots.insert(id, Slot { kept, written: None, writing: false });
+        keeping.slots.insert(id, Slot { kept, written: None, writing: false, failed: None });
         self.flush_index(cx);
     }
 
@@ -275,60 +348,50 @@ pub trait Recovering: Host {
         self.flush_index(cx);
     }
 
-    /// Opens each crashed slot's newest point as unsaved copy.
+    /// Reopens each crashed slot's newest point as an unsaved copy.
     fn reopen_crashed(&mut self, cx: &mut Context<Self>) {
         let Some(keeping) = self.core_mut().keeping.as_mut() else { return };
-        let crashed = std::mem::take(&mut keeping.crashed);
+        let crashed: Vec<(Kept, String)> = std::mem::take(&mut keeping.crashed).into_iter().map(|kept| { let name = kept.name.clone(); (kept, name) }).collect();
         if crashed.is_empty() {
             return;
         }
-        for kept in crashed {
-            let folder = self.core().keeping.as_ref().expect("keeping").folder(&kept.slot);
-            match restore(&kept, &folder, &self.core().work, self.core().next, false) {
-                Ok(Some((copy, at))) => {
-                    log::info!("recovery: reopening a crashed {}", kept.format);
-                    self.core_mut().keeping.as_mut().expect("keeping").reopening.push((copy.clone(), at, kept));
-                    self.load(Source::Copy(copy), cx);
-                }
-                Ok(None) => {
-                    if let Err(error) = remove(&folder) {
-                        log::error!("recovery: an empty slot stays: {error}");
-                    }
-                }
-                Err(error) => {
+        reopen::restore_off(self, crashed, false, |host, done, cx| {
+            for (name, restored) in done {
+                if let Err(error) = restored {
                     log::error!("recovery: a crashed copy cannot open ({:?})", error.kind());
-                    let shown = text(cx, "office.recovery.lost", &[("name", &kept.name), ("error", &error.to_string())]);
-                    self.toast_unlogged(shown, Severity::Danger, cx);
-                    // Its points stay for a later start.
-                    self.core_mut().keeping.as_mut().expect("keeping").held.push(kept);
+                    let shown = text(cx, "office.recovery.lost", &[("name", &name), ("error", &error.to_string())]);
+                    host.toast_unlogged(shown, Severity::Danger, cx);
                 }
             }
-        }
-        self.flush_index(cx);
+        }, cx);
     }
 
-    /// Opens `id`'s newest point as a copy; false if none.
-    fn reopen_point(&mut self, id: u64, cx: &mut Context<Self>) -> io::Result<bool> {
-        let (work, next) = (self.core().work.clone(), self.core().next);
-        let Some(keeping) = self.core_mut().keeping.as_mut() else { return Ok(false) };
-        // Out of the tab's hands: releasing it keeps these points.
-        let Some(slot) = keeping.slots.remove(&id) else { return Ok(false) };
-        let restored = restore(&slot.kept, &keeping.folder(&slot.kept.slot), &work, next, true);
-        match restored {
-            Ok(Some((copy, at))) => {
-                keeping.reopening.push((copy.clone(), at, slot.kept));
-                self.load(Source::Copy(copy), cx);
-                Ok(true)
+    /// Takes tab `id`'s slot; releasing it keeps the points.
+    fn take_slot(&mut self, id: u64, name: String) -> Option<Taken> {
+        let slot = self.core_mut().keeping.as_mut()?.slots.remove(&id)?;
+        Some(Taken(slot.kept, name))
+    }
+
+    /// Reopens taken slots as copies; names any lost.
+    fn reopen_taken(&mut self, taken: Vec<Taken>, mut lost: Vec<String>, cx: &mut Context<Self>) {
+        let taken = taken.into_iter().map(|Taken(kept, name)| (kept, name)).collect();
+        reopen::restore_off(self, taken, true, move |host, done, cx| {
+            for (name, restored) in done {
+                match restored {
+                    Ok(true) => {}
+                    Ok(false) => lost.push(name),
+                    Err(error) => {
+                        log::error!("office: a point does not open ({:?})", error.kind());
+                        lost.push(format!("{name} ({error})"));
+                    }
+                }
             }
-            Ok(None) => {
-                keeping.slots.insert(id, slot);
-                Ok(false)
+            log::info!("{}: the engine is back, {} tab(s) lost", Self::KIND.app.slug(), lost.len());
+            if !lost.is_empty() {
+                let shown = text(cx, "office.stopped.lost", &[("names", &lost.join(", "))]);
+                host.toast_unlogged(shown, Severity::Danger, cx);
             }
-            Err(error) => {
-                keeping.held.push(slot.kept);
-                Err(error)
-            }
-        }
+        }, cx);
     }
 
     /// A reopened copy takes over its old points, unsaved.
@@ -355,28 +418,6 @@ pub trait Recovering: Host {
 
 impl<H: Host> Recovering for H {}
 
-/// The newest point copied to the work folder, and when.
-fn restore(kept: &Kept, folder: &Path, work: &Path, next: u64, this_run: bool) -> io::Result<Option<(PathBuf, SystemTime)>> {
-    let recovery = match kept.sealed {
-        true => {
-            let key = RecoveryKey::load();
-            // This run's points open with this run's key.
-            if !key.lasting && !this_run {
-                return Err(io::Error::new(io::ErrorKind::PermissionDenied, "the recovery key is not in the key store"));
-            }
-            Recovery::sensitive(folder.to_path_buf(), key.key)
-        }
-        false => Recovery::new(folder.to_path_buf()),
-    };
-    let Some(point) = recovery.points()?.into_iter().next() else {
-        return Ok(None);
-    };
-    let dir = crate::files::work_dir(work, next)?;
-    let copy = dir.join(&kept.name).with_extension(&kept.format);
-    recovery.restore(&point, &copy)?;
-    Ok(Some((copy, point.at)))
-}
-
 /// A recovery time as this machine's clock reads it.
 pub(crate) fn clock(at: SystemTime) -> String {
     match jiff::Timestamp::try_from(at) {
@@ -387,7 +428,18 @@ pub(crate) fn clock(at: SystemTime) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{Keeping, Kept};
+    use super::{Keeping, Kept, Slot};
+
+    #[test]
+    fn a_failing_point_says_so_once_until_the_reason_changes() {
+        let mut slot = Slot { kept: kept("s", false), written: None, writing: false, failed: None };
+        let full = std::io::Error::other("disk full");
+        assert_eq!(slot.fail(1, &full).as_deref(), Some("disk full"));
+        assert_eq!(slot.fail(2, &full), None, "the same reason stays quiet");
+        let big = std::io::Error::new(std::io::ErrorKind::InvalidInput, "over the cap");
+        assert!(slot.fail(3, &big).is_some(), "a new reason shows");
+        assert_eq!(slot.written, Some(3), "too big waits for the next edit");
+    }
 
     fn kept(slot: &str, held: bool) -> Kept {
         Kept { slot: slot.into(), name: "a.docx".into(), format: "docx".into(), sealed: false, held }

@@ -18,7 +18,7 @@ pub fn records(bytes: &[u8], n: usize) -> io::Result<Vec<Vec<&str>>> {
     if fields.last() == Some(&"") {
         fields.pop();
     }
-    if fields.len() % n != 0 {
+    if !fields.len().is_multiple_of(n) {
         return Err(bad(text));
     }
     Ok(fields.chunks(n).map(<[&str]>::to_vec).collect())
@@ -48,6 +48,9 @@ impl Moved {
 const KEEP: usize = 200;
 
 pub fn reflog(git: &Git, root: &Path) -> io::Result<Vec<Moved>> {
+    if !git.born(root)? {
+        return Ok(Vec::new());
+    }
     // With a date mode, `%gd` carries when HEAD moved.
     let format = "--format=%H%x00%gd%x00%gs";
     let count = format!("-n{KEEP}");

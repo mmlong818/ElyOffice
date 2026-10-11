@@ -1,0 +1,59 @@
+# A tag builds, packages and uploads all three platforms.
+name: release
+on:
+  push:
+    tags: ['v*']
+jobs:
+  macos:
+    runs-on: macos-arm64
+    timeout-minutes: 720
+    steps:
+      - name: Build, package and upload for macOS
+        shell: bash
+        env:
+          ELY_RELEASE_TOKEN: ${{ secrets.GITEA_TOKEN }}
+          # The dev clone's engines: LibreOffice from scratch outlasts the runner.
+          ELY_SHARE: /Users/zacharyzhang/Documents/GitHub/ElyOfficeSuite
+          ELY_PATH: /Users/zacharyzhang/.cargo/bin:/opt/homebrew/bin
+        run: |
+          dir=$HOME/ely-ci/ElyOffice
+          [ -d "$dir/.git" ] || git clone https://git.zacharyzhang.com/ZacharyZhang-NY/ElyOffice.git "$dir"
+          git -C "$dir" fetch --force --tags origin
+          git -C "$dir" checkout --force "${{ github.sha }}"
+          "$dir/scripts/ci.sh" macos "${{ github.ref_name }}"
+  windows:
+    runs-on: windows
+    timeout-minutes: 360
+    steps:
+      - name: Build, package and upload for Windows
+        shell: bash
+        env:
+          ELY_RELEASE_TOKEN: ${{ secrets.GITEA_TOKEN }}
+          ELY_SHARE: /c/Users/zhang/Documents/Github/ElyOffice
+          ELY_PATH: /c/Program Files/CMake/bin:/c/Users/zhang/AppData/Local/Microsoft/WinGet/Packages/Ninja-build.Ninja_Microsoft.Winget.Source_8wekyb3d8bbwe
+        run: |
+          dir=$HOME/ely-ci/ElyOffice
+          [ -d "$dir/.git" ] || git clone https://git.zacharyzhang.com/ZacharyZhang-NY/ElyOffice.git "$dir"
+          git -C "$dir" fetch --force --tags origin
+          git -C "$dir" checkout --force "${{ github.sha }}"
+          "$dir/scripts/ci.sh" windows "${{ github.ref_name }}"
+  linux:
+    # WSL on the Windows runner keeps a built kernel.
+    runs-on: windows
+    needs: windows
+    timeout-minutes: 360
+    steps:
+      - name: Build, package and upload for Linux
+        shell: bash
+        env:
+          ELY_RELEASE_TOKEN: ${{ secrets.GITEA_TOKEN }}
+          WSLENV: ELY_RELEASE_TOKEN
+        run: |
+          wsl -d Ubuntu --exec bash -lc '
+            set -euo pipefail
+            dir=$HOME/ely-ci/ElyOffice
+            [ -d "$dir/.git" ] || git clone https://git.zacharyzhang.com/ZacharyZhang-NY/ElyOffice.git "$dir"
+            git -C "$dir" fetch --force --tags origin
+            git -C "$dir" checkout --force "${{ github.sha }}"
+            ELY_SHARE=$HOME/Documents/Github/ElyOffice "$dir/scripts/ci.sh" linux "${{ github.ref_name }}"
+          '

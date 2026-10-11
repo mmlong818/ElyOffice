@@ -110,19 +110,3 @@ export function stage(blocks: SVGGElement[]): SVGSVGElement {
   svg.setAttribute("class", "stage");
   return svg;
 }
-
-/** Pins an image across a block's left face. */
-export function screen(g: SVGGElement, href: string, width: number, height: number): void {
-  const b = boxes.get(g);
-  if (!b) throw new Error("not a block");
-  const [e, f] = project(b.x, b.y + b.d, b.z + b.h);
-  const sx = (b.w * UNIT) / width;
-  const sy = (b.h * UNIT) / height;
-  const image = document.createElementNS(SVG, "image");
-  image.setAttribute("href", href);
-  image.setAttribute("width", String(width));
-  image.setAttribute("height", String(height));
-  image.setAttribute("preserveAspectRatio", "none");
-  image.setAttribute("transform", `matrix(${COS * sx} ${SIN * sx} 0 ${sy} ${e} ${f})`);
-  g.append(image);
-}

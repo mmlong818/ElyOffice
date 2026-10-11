@@ -33,14 +33,14 @@ struct Key {
 }
 
 #[cfg(unix)]
-fn file_id(path: &Path) -> io::Result<Option<(u64, u64)>> {
+pub(crate) fn file_id(path: &Path) -> io::Result<Option<(u64, u64)>> {
     use std::os::unix::fs::MetadataExt;
     let meta = std::fs::metadata(path)?;
     Ok(Some((meta.dev(), meta.ino())))
 }
 
 #[cfg(windows)]
-fn file_id(path: &Path) -> io::Result<Option<(u64, u64)>> {
+pub(crate) fn file_id(path: &Path) -> io::Result<Option<(u64, u64)>> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::Storage::FileSystem::{
@@ -75,7 +75,7 @@ fn file_id(path: &Path) -> io::Result<Option<(u64, u64)>> {
 }
 
 #[cfg(not(any(unix, windows)))]
-fn file_id(_: &Path) -> io::Result<Option<(u64, u64)>> {
+pub(crate) fn file_id(_: &Path) -> io::Result<Option<(u64, u64)>> {
     Ok(None)
 }
 

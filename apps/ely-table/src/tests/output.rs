@@ -377,3 +377,124 @@ fn text_files_wait_their_turn_for_the_import_dialog() {
     names.sort();
     assert_eq!(names, ["a.csv", "b.csv"], "both files open");
 }
+
+#[test]
+fn an_import_waits_behind_a_dialog_that_displaces_it() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let mut cx = TestAppContext::single();
+    let Some((window, book)) = book(&mut cx, dir.path()) else {
+        eprintln!("SKIP: no LOK build");
+        return;
+    };
+    blank(&mut cx, &book);
+    let path = dir.path().join("wait.csv");
+    std::fs::write(&path, "Id,Ignored\n1E3,hidden\n").expect("writes");
+    update(&mut cx, &book, |book, cx| book.ask_import(path.clone(), cx));
+    asked(&cx, &book, |dialog| matches!(dialog, Dialog::Import(pending) if !pending.reading));
+    update(&mut cx, &book, |book, _| {
+        if let Some(Dialog::Import(pending)) = &mut book.dialog {
+            pending.how.columns = vec![Column::Text, Column::Skip];
+        }
+    });
+    window
+        .update(&mut cx, |_, window, cx| {
+            book.update(cx, |book, cx| book.on_export(&ely_ui::commands::Export, window, cx))
+        })
+        .expect("the window");
+    asked(&cx, &book, |dialog| matches!(dialog, Dialog::Export { .. }));
+    update(&mut cx, &book, |book, cx| {
+        book.dialog = None;
+        cx.notify();
+    });
+    asked(&cx, &book, |dialog| matches!(dialog, Dialog::Import(pending) if pending.path.ends_with("wait.csv")));
+    cx.run_until_parked();
+    update(&mut cx, &book, |book, cx| book.import_asked(cx));
+    settle(&cx, |app| book.read(app).active_tab().is_some_and(|tab| tab.name == "wait.csv"));
+    // Text keeps `1E3`; the skipped column stays empty.
+    assert_eq!(cells(&mut cx, &book, "A2:B2").trim_end(), "1E3");
+}
+
+#[test]
+fn closing_a_tab_takes_its_dialog_and_frees_the_import() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let mut cx = TestAppContext::single();
+    let Some((window, book)) = book(&mut cx, dir.path()) else {
+        eprintln!("SKIP: no LOK build");
+        return;
+    };
+    blank(&mut cx, &book);
+    window
+        .update(&mut cx, |_, window, cx| {
+            book.update(cx, |book, cx| book.on_export(&ely_ui::commands::Export, window, cx))
+        })
+        .expect("the window");
+    asked(&cx, &book, |dialog| matches!(dialog, Dialog::Export { .. }));
+    let id = cx.update(|app| book.read(app).core.tabs[0].id);
+    update(&mut cx, &book, |book, cx| book.close_tab(id, cx));
+    let path = dir.path().join("after.csv");
+    std::fs::write(&path, "Name\nx\n").expect("writes");
+    update(&mut cx, &book, |book, cx| book.ask_import(path.clone(), cx));
+    asked(&cx, &book, |dialog| matches!(dialog, Dialog::Import(_)));
+}
+
+#[test]
+fn a_whole_column_print_area_still_applies() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let mut cx = TestAppContext::single();
+    let Some((_window, book)) = book(&mut cx, dir.path()) else {
+        eprintln!("SKIP: no LOK build");
+        return;
+    };
+    blank(&mut cx, &book);
+    update(&mut cx, &book, |book, cx| book.ask_page(cx));
+    asked(&cx, &book, |dialog| matches!(dialog, Dialog::Page { .. }));
+    type_in(&mut cx, &book, area, "A:D");
+    update(&mut cx, &book, |book, cx| book.page_asked(cx));
+    let layout = read(&mut cx, &book, sheet::print_layout, sheet::LAYOUT);
+    assert_eq!(layout.areas.len(), 1, "set: {:?}", layout.areas);
+    // The kernel's own text comes back into the dialog.
+    update(&mut cx, &book, |book, cx| book.ask_page(cx));
+    asked(&cx, &book, |dialog| matches!(dialog, Dialog::Page { .. }));
+    let shown = cx.update(|app| match book.read(app).dialog.as_ref() {
+        Some(dialog) => area(dialog).read(app).text().to_string(),
+        None => unreachable!("a page dialog"),
+    });
+    assert_eq!(shown, layout.areas[0]);
+    update(&mut cx, &book, |book, cx| {
+        if let Some(Dialog::Page { landscape, .. }) = &mut book.dialog {
+            *landscape = true;
+        }
+        book.page_asked(cx)
+    });
+    let layout = read(&mut cx, &book, sheet::print_layout, sheet::LAYOUT);
+    assert!(layout.landscape, "applied with {shown}");
+}
+
+#[test]
+fn the_default_encoding_follows_the_apps_language() {
+    use ely_gpui_component::i18n::I18n;
+    use ely_lok::sheet::csv::Encoding;
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let mut cx = TestAppContext::single();
+    let Some((_window, book)) = book(&mut cx, dir.path()) else {
+        eprintln!("SKIP: no LOK build");
+        return;
+    };
+    let path = dir.path().join("gb.csv");
+    // 你好 in GB18030: not UTF-8.
+    std::fs::write(&path, [0xC4, 0xE3, 0xBA, 0xC3, b'\n']).expect("writes");
+    for (tag, expected) in [("zh-CN", Encoding::Gb18030), ("en-US", Encoding::Windows1252)] {
+        cx.update(|app| I18n::set_locale(tag, app));
+        update(&mut cx, &book, |book, cx| book.ask_import(path.clone(), cx));
+        asked(&cx, &book, |dialog| matches!(dialog, Dialog::Import(_)));
+        let found = cx.update(|app| match book.read(app).dialog.as_ref() {
+            Some(Dialog::Import(pending)) => pending.how.encoding,
+            _ => unreachable!("an import dialog"),
+        });
+        assert_eq!(found, expected, "{tag}");
+        update(&mut cx, &book, |book, cx| {
+            book.dialog = None;
+            cx.notify();
+        });
+    }
+}

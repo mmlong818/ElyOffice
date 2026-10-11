@@ -1,3 +1,4 @@
+// Release builds open no console on Windows.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod chart;
@@ -5,6 +6,7 @@ mod check;
 mod deck;
 mod design;
 mod dialog;
+mod extra;
 mod guides;
 mod insert;
 mod list;

@@ -1,0 +1,67 @@
+LOK Calc: an AutoFilter range keeps its rows
+
+Calc regrows an unnamed AutoFilter range from the data around it: each
+time the filter list opens (ExtendDataArea, ExtendBackColorArea, so
+appended rows join) and whenever a command finds it from a single cell
+(ScDocShell::GetDBData, so applying a condition, toggling it off, and
+its undo). A totals row right under a marked block joined the filter,
+showed in its list and hid with the data; a saved range reopened grew
+the same way. Under LOK the range keeps the rows it was set on, as in
+Excel, while the cursor is inside it; a cell in another block finds
+that block. A single cell still takes the data area when the filter is set.
+
+diff --git a/sc/source/core/tool/dbdata.cxx b/sc/source/core/tool/dbdata.cxx
+index b1d714c55..9a01847ee 100644
+--- a/sc/source/core/tool/dbdata.cxx
++++ b/sc/source/core/tool/dbdata.cxx
+@@ -19,6 +19,7 @@
+ 
+ #include <sal/config.h>
+ #include <sal/log.hxx>
++#include <comphelper/lok.hxx>
+ 
+ #include <o3tl/safeint.hxx>
+ #include <unotools/transliterationwrapper.hxx>
+@@ -646,6 +647,9 @@ bool ScDBData::UpdateReference(const ScDocument& rDoc, UpdateRefMode eUpdateRefM
+ 
+ void ScDBData::ExtendDataArea(const ScDocument& rDoc)
+ {
++    // LOK: an AutoFilter range keeps its rows, as in Excel.
++    if (comphelper::LibreOfficeKit::isActive() && bAutoFilter)
++        return;
+     // Extend the DB area to include data rows immediately below.
+     SCCOL nOldCol1 = nStartCol, nOldCol2 = nEndCol;
+     SCROW nOldEndRow = nEndRow;
+@@ -665,6 +669,8 @@ void ScDBData::ExtendDataArea(const ScDocument& rDoc)
+ 
+ void ScDBData::ExtendBackColorArea(const ScDocument& rDoc)
+ {
++    if (comphelper::LibreOfficeKit::isActive() && bAutoFilter)
++        return;
+     // Extend the DB area to include data rows immediately below.
+     SCCOL nOldCol1 = nStartCol, nOldCol2 = nEndCol;
+     SCROW nOldEndRow = nEndRow;
+diff --git a/sc/source/ui/docshell/docsh5.cxx b/sc/source/ui/docshell/docsh5.cxx
+index d154597c3..5099dbe6f 100644
+--- a/sc/source/ui/docshell/docsh5.cxx
++++ b/sc/source/ui/docshell/docsh5.cxx
+@@ -19,6 +19,7 @@
+ 
+ #include <memory>
+ #include <sal/config.h>
++#include <comphelper/lok.hxx>
+ 
+ #include <cassert>
+ 
+@@ -147,7 +148,10 @@ ScDBData* ScDocShell::GetDBData( const ScRange& rMarked, ScGetDBMode eMode, ScGe
+         if (!bSelected)
+         {
+             bUseThis = true;
+-            if ( bIsNoName && (eMode == SC_DB_MAKE || eMode == SC_DB_AUTOFILTER) )
++            // LOK: an AutoFilter range keeps its rows, as in Excel.
++            const bool bKeep = comphelper::LibreOfficeKit::isActive() && pData->HasAutoFilter()
++                && nCol >= nOldCol1 && nCol <= nOldCol2 && nRow >= nOldRow1 && nRow <= nOldRow2;
++            if ( bIsNoName && !bKeep && (eMode == SC_DB_MAKE || eMode == SC_DB_AUTOFILTER) )
+             {
+                 // If nothing marked or only one row marked, adapt
+                 // "unnamed" to contiguous area.

@@ -64,6 +64,14 @@ pub fn worktrees(git: &Git, root: &Path) -> io::Result<Vec<Worktree>> {
         }
     }
     found.extend(now);
+    // Real paths, as the open repository's root is.
+    for tree in &mut found {
+        match dunce::canonicalize(&tree.path) {
+            Ok(real) => tree.path = real,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+    }
     Ok(found)
 }
 
@@ -135,6 +143,10 @@ pub struct LfsFile {
 
 /// `git lfs ls-files` as JSON; `files` is null with none.
 pub fn lfs(git: &Git, root: &Path) -> io::Result<Vec<LfsFile>> {
+    // LFS reads HEAD first; before a commit there is nothing.
+    if !git.born(root)? {
+        return Ok(Vec::new());
+    }
     let out = git.run(root, &["lfs", "ls-files", "--long", "--json"])?;
     let read: serde_json::Value = serde_json::from_slice(&out).map_err(io::Error::other)?;
     let files = match &read["files"] {

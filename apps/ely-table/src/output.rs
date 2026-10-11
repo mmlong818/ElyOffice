@@ -49,7 +49,7 @@ impl Book {
         let Some(tab) = self.core.active else {
             return self.warn_key("command.blocked.no_document", cx);
         };
-        self.dialog = Some(Dialog::Export {
+        self.open_dialog(Dialog::Export {
             tab,
             format: Format::Pdf,
         });
@@ -144,10 +144,8 @@ impl Book {
             tab,
             move |worker, doc| doc.export_pdf(worker, &url, &WHOLE),
             move |book, written, _, cx| match written {
-                Ok(()) => ely_office::print_later(path, cx, |book, error, cx| {
-                    book.output_failed(&error, cx)
-                }),
-                Err(error) => book.output_failed(&error.to_string(), cx),
+                Ok(()) => ely_office::print_later(path, cx),
+                Err(error) => book.print_failed(&error.to_string(), cx),
             },
             cx,
         );

@@ -17,6 +17,8 @@ pub fn start(id: u64, repo: &Repo, cx: &mut Context<Tree>) -> notify::Result<Rec
     let root = repo.root.display().to_string();
     let mut watcher =
         notify::recommended_watcher(move |event: notify::Result<notify::Event>| match event {
+            // Git's reads, ours included, are no change.
+            Ok(event) if ely_ui::watching::only_read(&event.kind) => {}
             Ok(_) => {
                 let _ = sender.unbounded_send(());
             }

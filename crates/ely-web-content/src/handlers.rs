@@ -264,15 +264,13 @@ wrap_display_handler! {
             &self,
             _browser: Option<&mut Browser>,
             level: LogSeverity,
-            message: Option<&CefString>,
-            source: Option<&CefString>,
+            _message: Option<&CefString>,
+            _source: Option<&CefString>,
             line: ::std::os::raw::c_int,
         ) -> ::std::os::raw::c_int {
-            // A page's warnings and errors, never its other chatter.
+            // Words and sources a document may forge stay out.
             if level.get_raw() >= LogSeverity::WARNING.get_raw() {
-                let said = message.map(CefString::to_string).unwrap_or_default();
-                let at = source.map(CefString::to_string).unwrap_or_default();
-                log::warn!("web: page says {said} at {at}:{line}");
+                log::warn!("web: the page warned at line {line}");
             }
             0
         }
@@ -316,7 +314,7 @@ wrap_load_handler! {
             failed_url: Option<&CefString>,
         ) {
             // A stopped load is no failure; a fenced one is.
-            if !frame.is_some_and(|frame| frame.is_main() == 1) || error_code == Errorcode::ABORTED {
+            if frame.is_none_or(|frame| frame.is_main() != 1) || error_code == Errorcode::ABORTED {
                 return;
             }
             let text = error_text.map(CefString::to_string).unwrap_or_default();
@@ -347,10 +345,9 @@ wrap_life_span_handler! {
 
     impl LifeSpanHandler {
         fn on_after_created(&self, browser: Option<&mut Browser>) {
-            let Some(browser) = browser.map(|b| b.clone()) else { return };
-            log::info!("web: browser {} made", browser.identifier());
-            adopt(&browser, self.surface.clone());
-            self.surface.lock().expect("the surface lock").browser = Some(browser);
+            if let Some(browser) = browser {
+                log::info!("web: browser {} made", browser.identifier());
+            }
         }
 
         fn on_before_close(&self, browser: Option<&mut Browser>) {
@@ -438,4 +435,48 @@ fn keys() -> Option<KeyboardHandler> {
 #[cfg(not(target_os = "macos"))]
 fn keys() -> Option<KeyboardHandler> {
     None
+}
+
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, Mutex, OnceLock};
+
+    use cef::{CefString, ImplDisplayHandler, LogSeverity};
+
+    struct Kept;
+
+    fn kept() -> &'static Mutex<Vec<String>> {
+        static KEPT: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
+        KEPT.get_or_init(Mutex::default)
+    }
+
+    impl log::Log for Kept {
+        fn enabled(&self, _: &log::Metadata) -> bool {
+            true
+        }
+
+        fn log(&self, record: &log::Record) {
+            kept().lock().expect("the kept lock").push(record.args().to_string());
+        }
+
+        fn flush(&self) {}
+    }
+
+    #[test]
+    fn a_pages_words_and_sources_never_reach_the_log() {
+        log::set_boxed_logger(Box::new(Kept)).expect("the only logger");
+        log::set_max_level(log::LevelFilter::Trace);
+        let surface = crate::surface::Surface::new(std::env::temp_dir(), 1.0);
+        let display = super::Display::new(Arc::new(Mutex::new(surface)));
+        let said = CefString::from("ely: M11_SECRET");
+        let at = CefString::from("file:///content/M11_SECRET.js");
+        for level in [LogSeverity::WARNING, LogSeverity::ERROR, LogSeverity::INFO] {
+            display.on_console_message(None, level, Some(&said), Some(&at), 7);
+        }
+        let records = kept().lock().expect("the kept lock").clone();
+        let warned = records.iter().filter(|said| *said == "web: the page warned at line 7");
+        assert_eq!(warned.count(), 2, "warnings and errors stay seen: {records:#?}");
+        assert!(!records.iter().any(|said| said.contains("M11_SECRET")), "{records:#?}");
+    }
 }

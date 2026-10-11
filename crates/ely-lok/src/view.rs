@@ -28,14 +28,12 @@ mod render;
 mod zoom;
 pub use zoom::{ZOOM_STEPS, Zoomed};
 mod scroll;
+mod sheet;
 pub use input::{CONTEXT, Copy, Cut, Paste, init};
 pub use off::read_off;
 pub use render::scheme;
 
-/// One tile edge in twips.
-pub const TILE_TWIPS: i32 = 3840;
-/// Twips per pixel at zoom 1.0 and DPI 1.0.
-pub(crate) const TWIPS_PER_PIXEL: f32 = 15.0;
+pub(crate) use crate::{TILE_TWIPS, TWIPS_PER_PIXEL};
 
 /// Document/view conversion under one zoom and DPI (LOK-04).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -89,13 +87,15 @@ pub struct LokView {
     fetching: HashSet<(i32, i32)>,
     failed: HashSet<((i32, i32), u64)>,
     /// The area last told to the kernel.
-    shown: Option<Rect>,
+    shown: Option<(Rect, (u32, i32))>,
     viewport: (f32, f32),
     origin: Point<Pixels>,
     /// Pixels a small document sits in: left, top.
     spare: (f32, f32),
     /// Frozen columns and rows, in twips from the top left.
     frozen: (i32, i32),
+    /// A spreadsheet's rows and columns, in print twips.
+    sheet: Option<crate::sheet::Geometry>,
     /// The farthest point a jump needed; Calc grows to it.
     reach: (i32, i32),
     pages: Vec<Rect>,
@@ -144,7 +144,7 @@ pub struct LokView {
 /// A document's size and page frames, in twips.
 pub type Layout = ((i64, i64), Vec<Rect>);
 
-type Measured = io::Result<Layout>;
+use sheet::{Measured, measure};
 
 /// A page's colour; the kernel's Ely schemes share it.
 pub fn paper(cx: &gpui::App) -> gpui::Hsla {
@@ -162,10 +162,6 @@ pub fn layout(worker: &mut Worker, doc: &Doc) -> io::Result<Layout> {
     Ok((doc.size(worker)?, doc.pages(worker)?))
 }
 
-/// Reads the layout under the worker lock.
-fn measure(worker: &Mutex<Worker>, doc: &Doc) -> Measured {
-    layout(&mut worker.lock().expect("the worker lock"), doc)
-}
 
 impl EventEmitter<LokError> for LokView {}
 
@@ -210,6 +206,7 @@ impl LokView {
             origin: Point::default(),
             spare: (0.0, 0.0),
             frozen: (0, 0),
+            sheet: None,
             reach: (0, 0),
             pages,
             focus: cx.focus_handle().tab_stop(true),
@@ -358,8 +355,8 @@ impl LokView {
         // What the view shows is the document at this revision.
         self.seen_revision(batch.revision);
         match measured {
-            Some(Ok(((width, height), pages))) => {
-                self.doc_size = (width as i32, height as i32);
+            Some(Ok((((width, height), pages), zoom))) => {
+                self.doc_size = self.at_scale((width as i32, height as i32), zoom);
                 if pages.len() != self.pages.len() {
                     log::info!("lok: {} pages", pages.len());
                 }
@@ -371,8 +368,9 @@ impl LokView {
         }
         if batch.cursor != self.cursor {
             self.moves += 1;
-            // A moved cursor stays in view.
+            // A moved cursor stays in view, but not mid-drag.
             if self.viewport.1 > 0.0
+                && !self.dragging
                 && let Some(cursor) = batch.cursor
             {
                 self.show(cursor, cx);
@@ -381,10 +379,12 @@ impl LokView {
         // A moved cell cursor stays in view too.
         if batch.cell.cursor != self.cell.cursor
             && self.viewport.1 > 0.0
+            && !self.dragging
             && let Some(cell) = batch.cell.cursor
         {
             self.show(cell, cx);
         }
+        self.follow_graphic(batch.graphic, cx);
         self.cursor = batch.cursor;
         self.cursor_visible = batch.cursor_visible;
         self.selection = batch.selection;

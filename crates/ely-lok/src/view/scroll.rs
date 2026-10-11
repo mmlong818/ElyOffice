@@ -41,29 +41,37 @@ impl LokView {
         self.scroll_by(dx, dy, cx);
     }
 
-    /// Scrolls `rect` into view; frozen parts always show.
-    pub fn show(&mut self, (x, y, w, h): Rect, cx: &mut Context<Self>) {
-        let (fx, fy) = self.frozen;
+    /// A newly selected object, such as a chart, shows.
+    pub(super) fn follow_graphic(&mut self, frame: Option<Rect>, cx: &mut Context<Self>) {
+        if let (None, Some(frame), true) = (self.graphic, frame, self.viewport.1 > 0.0) {
+            self.show(frame, cx);
+        }
+    }
+
+    /// Scrolls print-twips `rect` into view; frozen parts always show.
+    pub fn show(&mut self, rect: Rect, cx: &mut Context<Self>) {
+        let (x, y, w, h) = self.tile_rect(rect);
+        let (fx, fy) = self.frozen_tiles();
         let (vw, vh) = (
             self.geom.twips_of(self.viewport.0) - fx,
             self.geom.twips_of(self.viewport.1) - fy,
         );
-        // Room past the target, so the clamp lets it show.
-        self.reach = (
-            self.reach.0.max(x + w + vw + fx),
-            self.reach.1.max(y + h + vh + fy),
-        );
-        if x >= fx && (x < fx + self.scroll.0 || x + w > fx + self.scroll.0 + vw) {
-            self.scroll.0 = x - fx - vw / 2;
+        // Only a sheet grows where it jumps.
+        if self.sheet.is_some() {
+            let need = self.print_of((x + w + vw + fx, y + h + vh + fy));
+            self.reach = (self.reach.0.max(need.0), self.reach.1.max(need.1));
         }
-        if y >= fy && (y < fy + self.scroll.1 || y + h > fy + self.scroll.1 + vh) {
-            self.scroll.1 = y - fy - vh / 3;
+        if x >= fx {
+            self.scroll.0 = least(x - fx, w, self.scroll.0, vw);
+        }
+        if y >= fy {
+            self.scroll.1 = least(y - fy, h, self.scroll.1, vh);
         }
         self.clamp_scroll();
         cx.notify();
     }
 
-    /// Freezes what lies before `frozen`, in twips.
+    /// Freezes what lies before `frozen`, in print twips.
     pub fn set_frozen(&mut self, frozen: (i32, i32), cx: &mut Context<Self>) {
         if self.frozen != frozen {
             log::info!("lok: frozen at {frozen:?}");
@@ -75,7 +83,8 @@ impl LokView {
     /// Scrolls `rect` into view and puts the cursor there.
     pub fn reveal(&mut self, rect: Rect, cx: &mut Context<Self>) {
         self.show(rect, cx);
-        let (x, y, _, h) = rect;
+        // Clicks land in tile twips.
+        let (x, y, _, h) = self.tile_rect(rect);
         log::info!("lok: reveal at {x},{y}");
         for kind in [0, 1] {
             let (count, buttons, modifiers) = (1, 1, 0);
@@ -102,14 +111,29 @@ impl LokView {
         if self.fit {
             return self.doc_size;
         }
-        (
-            self.doc_size.0.max(self.reach.0),
-            self.doc_size.1.max(self.reach.1),
-        )
+        // The kernel sizes a sheet in tile twips already.
+        let reach = self.tile_of(self.reach);
+        let (w, h) = (self.doc_size.0.max(reach.0), self.doc_size.1.max(reach.1));
+        let Some(sheet) = &self.sheet else {
+            return (w, h);
+        };
+        // Sheets scroll ahead of the kernel, to their end.
+        let end = self.tile_of((sheet.columns.start(sheet.columns.count()), sheet.rows.start(sheet.rows.count())));
+        let (fx, fy) = self.frozen_tiles();
+        let ahead = (
+            fx + self.scroll.0 + 2 * self.geom.twips_of(self.viewport.0),
+            fy + self.scroll.1 + 2 * self.geom.twips_of(self.viewport.1),
+        );
+        (w.max(ahead.0.min(end.0)), h.max(ahead.1.min(end.1)))
     }
 
-    /// The document point under a view position (LOK-04).
+    /// The print-twips document point under a view position (LOK-04).
     pub fn doc_point(&self, position: Point<Pixels>) -> (i32, i32) {
+        self.print_of(self.tile_point(position))
+    }
+
+    /// The tile-twips point under a view position.
+    pub(super) fn tile_point(&self, position: Point<Pixels>) -> (i32, i32) {
         let local = position - self.origin;
         let (ax, ay) = self.axes();
         (
@@ -121,14 +145,17 @@ impl LokView {
     /// The panes of each axis.
     pub(super) fn axes(&self) -> (super::panes::Axis, super::panes::Axis) {
         let axis = |frozen, scroll| super::panes::Axis { frozen, scroll };
-        (
-            axis(self.frozen.0, self.scroll.0),
-            axis(self.frozen.1, self.scroll.1),
-        )
+        let (fx, fy) = self.frozen_tiles();
+        (axis(fx, self.scroll.0), axis(fy, self.scroll.1))
     }
 
-    /// The window point of a document point in twips (LOK-04).
-    pub fn window_point(&self, (x, y): (i32, i32)) -> gpui::Point<Pixels> {
+    /// The window point of a print-twips document point (LOK-04).
+    pub fn window_point(&self, at: (i32, i32)) -> gpui::Point<Pixels> {
+        self.tile_window_point(self.tile_of(at))
+    }
+
+    /// The window point of a tile-twips point.
+    pub(super) fn tile_window_point(&self, (x, y): (i32, i32)) -> gpui::Point<Pixels> {
         let (ax, ay) = self.axes();
         let (x, y) = (self.geom.px_of(ax.show(x)), self.geom.px_of(ay.show(y)));
         self.origin + point(px(self.spare.0 + x), px(self.spare.1 + y))
@@ -139,12 +166,26 @@ impl LokView {
         Bounds::from_corners(self.window_point((x, y)), self.window_point((x + w, y + h)))
     }
 
+    /// A tile-twips rect in window pixels.
+    pub(super) fn tile_screen_rect(&self, (x, y, w, h): crate::Rect) -> Bounds<Pixels> {
+        Bounds::from_corners(self.tile_window_point((x, y)), self.tile_window_point((x + w, y + h)))
+    }
+
     /// The cursor rect in window pixels.
     pub fn cursor_bounds(&self) -> Option<Bounds<Pixels>> {
         let (x, y, w, h) = self.cursor?;
+        let origin = self.window_point((x, y));
+        let end = self.window_point((x + w, y + h));
         Some(Bounds {
-            origin: self.window_point((x, y)),
-            size: size(px(self.geom.px_of(w.max(1))), px(self.geom.px_of(h))),
+            origin,
+            size: size((end.x - origin.x).max(px(self.geom.px_of(1))), end.y - origin.y),
         })
     }
+}
+
+/// The scroll nearest `scroll` that shows `start..start + len`.
+fn least(start: i32, len: i32, scroll: i32, view: i32) -> i32 {
+    // A span wider than the view keeps covering it.
+    let end = start + len - view;
+    scroll.clamp(start.min(end), start.max(end))
 }

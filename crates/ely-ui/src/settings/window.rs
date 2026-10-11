@@ -9,7 +9,7 @@ use ely_gpui_component::{
 };
 use ely_platform::{
     AppId,
-    settings::{APPEARANCE, AUTHOR, Appearance, LANGUAGE, Language, MOTION, Motion, OMARCHY_SYNC, Store, word},
+    settings::{APPEARANCE, AUTHOR, Appearance, CHECK_UPDATES, LANGUAGE, Language, MOTION, Motion, OMARCHY_SYNC, Store, word},
 };
 use gpui::{
     AppContext as _, Context, Entity, FocusHandle, Global, IntoElement, ParentElement, Render, SharedString, Styled,
@@ -222,7 +222,7 @@ impl SettingsView {
             Motion::Reduced => text(cx, "settings.motion.reduce", &[]),
             Motion::Full => text(cx, "settings.motion.full", &[]),
         }, MOTION, cx);
-        let mut section = SettingsSection::new(text(cx, "settings.general", &[]))
+        let section = SettingsSection::new(text(cx, "settings.general", &[]))
             .row(SettingsRow::new(text(cx, "settings.appearance", &[])).control(theme))
             .row(
                 SettingsRow::new(text(cx, "settings.language", &[]))
@@ -230,6 +230,14 @@ impl SettingsView {
                     .control(language),
             )
             .row(SettingsRow::new(text(cx, "settings.motion", &[])).control(motion));
+        let updates = Switch::new("settings-updates", shared.check_updates)
+            .name(text(cx, "settings.updates", &[]))
+            .on_change(|on, _, cx| set(CHECK_UPDATES, Value::Bool(on), cx));
+        let mut section = section.row(
+            SettingsRow::new(text(cx, "settings.updates", &[]))
+                .description(text(cx, "settings.updates.hint", &[]))
+                .control(updates),
+        );
         // Only where Omarchy is installed.
         if ely_platform::omarchy_current_dir().is_some() {
             let follow = Switch::new("settings-omarchy", shared.omarchy_sync)

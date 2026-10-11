@@ -128,29 +128,28 @@ impl Docs {
             let text = Docs::text(cx, "command.blocked.no_document", &[]);
             return self.toast(text, Severity::Warning, cx);
         };
-        let listed = self
-            .core
-            .worker
-            .lock()
-            .expect("the worker lock")
-            .values(&tab.doc, ".uno:StyleApply")
-            .and_then(|json| ely_lok::commands::styles(&json, "8"));
-        let names = match listed {
-            Ok(names) => names,
-            Err(error) => {
-                let text = Docs::text(cx, "office.error.engine", &[("error", &error.to_string())]);
-                return self.toast(text, Severity::Danger, cx);
-            }
-        };
-        let name = (2..)
-            .map(|n| Docs::text(cx, "doc.section.name", &[("n", &n.to_string())]).to_string())
-            .find(|name| !names.contains(name))
-            .expect("a free section name");
-        log::info!("doc: a new section");
-        self.run_active("style.new", &[&name, "8"], cx);
-        self.run_active("page.section", &["3", &name], cx);
-        self.props.update(cx, |props, _| props.refresh_lists());
-        cx.notify();
+        let id = tab.id;
+        // Page style names are read off the window thread.
+        self.ask_in(
+            id,
+            |worker, doc| ely_lok::commands::styles(&worker.values(doc, ".uno:StyleApply")?, "8"),
+            move |docs, listed, _, cx| {
+                let names = match listed {
+                    Ok(names) => names,
+                    Err(error) => return docs.engine_failed(&error.to_string(), cx),
+                };
+                let name = (2..)
+                    .map(|n| Docs::text(cx, "doc.section.name", &[("n", &n.to_string())]).to_string())
+                    .find(|name| !names.contains(name))
+                    .expect("a free section name");
+                log::info!("doc: a new section");
+                docs.run_in(Some(id), "style.new", &[&name, "8"], cx);
+                docs.run_in(Some(id), "page.section", &["3", &name], cx);
+                docs.props.update(cx, |props, _| props.refresh_lists());
+                cx.notify();
+            },
+            cx,
+        );
     }
 
     pub fn on_page_number(&mut self, _: &InsertPageNumber, _: &mut Window, cx: &mut Context<Self>) {

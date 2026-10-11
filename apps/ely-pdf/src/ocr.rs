@@ -161,14 +161,16 @@ impl Viewer {
         cx.notify();
         let pages: Vec<(usize, Vec<OcrLine>)> = run.read.into_iter().filter(|(_, lines)| replace || !lines.is_empty()).collect();
         let (read, skipped) = (pages.len().to_string(), run.skipped.to_string());
-        let summary = Self::text(cx, "pdf.ocr.done", &[("read", &read), ("skipped", &skipped)]);
+        let summary = ely_ui::i18n::counted(cx, "pdf.ocr.done", pages.len() as u64, &[("read", &read), ("skipped", &skipped)]);
         let Some(view) = self.tab(tab).map(|tab| tab.view.clone()).filter(|_| !pages.is_empty()) else {
             return self.toast(summary, Severity::Info, cx);
         };
-        self.on_same(&view, run.version, cx, |view, cx| {
+        let laid = self.on_same(&view, run.version, cx, |view, cx| {
             view.edit("adding recognised text", move |worker, doc| worker.text_layer(doc, &pages, replace), cx)
         });
-        self.toast(summary, Severity::Success, cx);
+        if laid {
+            self.toast(summary, Severity::Success, cx);
+        }
     }
 
     /// The OCR dialog: the ask, then the progress.

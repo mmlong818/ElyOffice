@@ -17,7 +17,7 @@ fn invalid(what: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, what.to_string())
 }
 
-/// Paints one tile after checking the geometry (LOK-03).
+/// One tile and the generation it was painted at (LOK-03).
 fn paint(unpack: &mut Unpack) -> io::Result<(u64, Vec<u8>)> {
     let id = unpack.u64()?;
     let (x, y, w, h) = (unpack.i64()?, unpack.i64()?, unpack.i64()?, unpack.i64()?);
@@ -36,6 +36,8 @@ fn paint(unpack: &mut Unpack) -> io::Result<(u64, Vec<u8>)> {
             "bad tile geometry",
         ));
     };
+    // Read first: an invalidation mid-paint must outdate it.
+    let generation = crate::events::generation(id);
     let tile = with_doc(id, |doc| {
         let mut tile = vec![0u8; len as usize];
         doc.paint_rect(
@@ -45,7 +47,7 @@ fn paint(unpack: &mut Unpack) -> io::Result<(u64, Vec<u8>)> {
         );
         tile
     })?;
-    Ok((id, tile))
+    Ok((generation, tile))
 }
 
 /// One slide's whole picture at the asked pixels.
@@ -74,8 +76,8 @@ pub(super) fn part_painted(unpack: &mut Unpack) -> io::Result<Vec<u8>> {
 
 /// A painted tile behind its generation.
 pub(super) fn painted(unpack: &mut Unpack) -> io::Result<Vec<u8>> {
-    let (id, tile) = paint(unpack)?;
-    let mut body = Pack::new().u64(crate::events::generation(id)).bytes();
+    let (generation, tile) = paint(unpack)?;
+    let mut body = Pack::new().u64(generation).bytes();
     body.extend_from_slice(&tile);
     Ok(body)
 }

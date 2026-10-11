@@ -195,10 +195,8 @@ impl Tree {
     /// Pick, revert, or branch or tag at this commit.
     fn commit_actions(&self, detail: &Detail, cx: &mut Context<Self>) -> AnyElement {
         let (id, parents) = (detail.id.clone(), detail.parents.len());
-        let acts: [(
-            &str,
-            Box<dyn Fn(&mut Tree, &mut gpui::Window, &mut Context<Tree>)>,
-        ); 4] = [
+        type Act = Box<dyn Fn(&mut Tree, &mut gpui::Window, &mut Context<Tree>)>;
+        let acts: [(&str, Act); 4] = [
             ("tree.commit.pick_it", {
                 let id = id.clone();
                 Box::new(move |tree, _, cx| tree.cherry_pick(&id, parents, cx))

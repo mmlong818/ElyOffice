@@ -16,7 +16,7 @@ fn a_tile_paints_real_pixels() {
     let source = dir.path().join("note.fodt");
     write(&source, FODT);
     let doc = worker
-        .load(&format!("file://{}", source.display()))
+        .load(&crate::file_url(&source))
         .expect("the document loads");
     let tile = doc
         .paint_tile(&mut worker, (0, 0, 960, 960), (64, 64))
@@ -51,7 +51,7 @@ fn an_edit_bumps_the_generation_and_invalidates() {
     let source = dir.path().join("note.fodt");
     write(&source, FODT);
     let doc = worker
-        .load(&format!("file://{}", source.display()))
+        .load(&crate::file_url(&source))
         .expect("the document loads");
     let base = poll_until(&mut worker, &doc, &Events::default(), QUIET, |_| false);
     let before = doc
@@ -95,7 +95,7 @@ fn uno_commands_invalidate_and_repaint() {
     let source = dir.path().join("note.fodt");
     write(&source, FODT);
     let doc = worker
-        .load(&format!("file://{}", source.display()))
+        .load(&crate::file_url(&source))
         .expect("the document loads");
     let base = poll_until(&mut worker, &doc, &Events::default(), QUIET, |_| false);
     let before = doc
@@ -137,7 +137,7 @@ fn a_red_span_paints_red_bytes() {
     let source = dir.path().join("red.html");
     write(&source, RED_HTML);
     let doc = worker
-        .load(&format!("file://{}", source.display()))
+        .load(&crate::file_url(&source))
         .expect("the document loads");
     let tile = doc
         .paint_tile(&mut worker, (0, 0, 2000, 1000), (64, 64))
@@ -162,12 +162,12 @@ fn a_key_press_edits_the_document() {
     let source = dir.path().join("note.fodt");
     write(&source, FODT);
     let doc = worker
-        .load(&format!("file://{}", source.display()))
+        .load(&crate::file_url(&source))
         .expect("the document loads");
     click(&mut worker, &doc, 150, 150);
     worker.post_key(&doc, 0, 1280).expect("Return posts");
     let out = dir.path().join("after.fodt");
-    doc.save_as(&mut worker, &format!("file://{}", out.display()), "fodt")
+    doc.save_as(&mut worker, &crate::file_url(&out), "fodt")
         .expect("the save works");
     let before = std::fs::read_to_string(&source).expect("the source reads");
     let after = std::fs::read_to_string(&out).expect("the save reads");
@@ -187,7 +187,7 @@ fn selection_only_requests_keep_the_generation() {
     let source = dir.path().join("note.fodt");
     write(&source, FODT);
     let doc = worker
-        .load(&format!("file://{}", source.display()))
+        .load(&crate::file_url(&source))
         .expect("the document loads");
     let base = poll_until(&mut worker, &doc, &Events::default(), QUIET, |_| false);
     click(&mut worker, &doc, 150, 150);
@@ -211,7 +211,7 @@ fn bad_tile_geometry_is_an_error_and_the_worker_lives() {
     let source = dir.path().join("note.fodt");
     write(&source, FODT);
     let doc = worker
-        .load(&format!("file://{}", source.display()))
+        .load(&crate::file_url(&source))
         .expect("the document loads");
     for (x, y, w, h, pw, ph) in [
         (0, 0, 0, 960, 64, 64),
@@ -243,7 +243,7 @@ fn a_long_wait_is_clamped_and_requests_flow() {
     let source = dir.path().join("note.fodt");
     write(&source, FODT);
     let doc = worker
-        .load(&format!("file://{}", source.display()))
+        .load(&crate::file_url(&source))
         .expect("the document loads");
     let started = std::time::Instant::now();
     let batch = worker
@@ -270,7 +270,7 @@ fn polling_times_out_with_the_same_generation() {
     let source = dir.path().join("note.fodt");
     write(&source, FODT);
     let doc = worker
-        .load(&format!("file://{}", source.display()))
+        .load(&crate::file_url(&source))
         .expect("the document loads");
     let base = poll_until(&mut worker, &doc, &Events::default(), QUIET, |_| false);
     let again = poll_until(&mut worker, &doc, &base, QUIET, |_| false);
@@ -291,16 +291,16 @@ fn uno_commands_reach_their_own_document() {
     write(&first, FODT);
     write(&second, FODT);
     let a = worker
-        .load(&format!("file://{}", first.display()))
+        .load(&crate::file_url(&first))
         .expect("a loads");
     let b = worker
-        .load(&format!("file://{}", second.display()))
+        .load(&crate::file_url(&second))
         .expect("b loads");
     worker.run(&a, "edit.select_all", &[]).expect("select all");
     worker.cut(&a).expect("the cut runs");
     let saved = |doc: &Doc, worker: &mut Worker, name: &str| {
         let out = dir.path().join(name);
-        doc.save_as(worker, &format!("file://{}", out.display()), "fodt")
+        doc.save_as(worker, &crate::file_url(&out), "fodt")
             .expect("the save works");
         std::fs::read_to_string(&out).expect("the save reads")
     };
@@ -327,7 +327,7 @@ fn writer_reports_its_page_rects() {
     let source = dir.path().join("note.fodt");
     write(&source, FODT);
     let doc = worker
-        .load(&format!("file://{}", source.display()))
+        .load(&crate::file_url(&source))
         .expect("the document loads");
     let pages = doc.pages(&mut worker).expect("the page rects");
     let (width, height) = doc.size(&mut worker).expect("the size");
@@ -361,7 +361,7 @@ fn the_page_follows_a_dark_theme_and_back() {
         let source = dir.path().join(name);
         write(&source, text);
         let doc = worker
-            .load(&format!("file://{}", source.display()))
+            .load(&crate::file_url(&source))
             .expect("the document loads");
         let area = (1440, 1440, 3840, 3840);
         let seen = poll_until(&mut worker, &doc, &Events::default(), QUIET, |_| false);

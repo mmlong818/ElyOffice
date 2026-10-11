@@ -3,12 +3,10 @@
 use std::{io, path::Path};
 
 use crate::client::{BUILD_ID, Worker};
-#[cfg(target_os = "macos")]
 use crate::ipc::{self, Pack, Unpack, tag};
 
-/// A tiny flat-XML document for the tile self-check.
-#[cfg(target_os = "macos")]
-const VERIFY_DOC: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><office:document xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\" office:version=\"1.3\" office:mimetype=\"application/vnd.oasis.opendocument.text\"><office:body><office:text><text:p>verify</text:p></office:text></office:body></office:document>";
+/// Red text: a BGRA tile shows red in byte two.
+const VERIFY_DOC: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><office:document xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" xmlns:style=\"urn:oasis:names:tc:opendocument:xmlns:style:1.0\" xmlns:fo=\"urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0\" xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\" office:version=\"1.3\" office:mimetype=\"application/vnd.oasis.opendocument.text\"><office:automatic-styles><style:style style:name=\"T1\" style:family=\"text\"><style:text-properties fo:color=\"#ff0000\" fo:font-size=\"28pt\" fo:font-weight=\"bold\"/></style:style></office:automatic-styles><office:body><office:text><text:p><text:span text:style-name=\"T1\">verify</text:span></text:p></office:text></office:body></office:document>";
 
 impl Worker {
     /// Rejects builds that are not the pinned one (LOK-01).
@@ -16,13 +14,11 @@ impl Worker {
         if !build.contains(BUILD_ID) {
             return self.reject(format!("not the pinned build {BUILD_ID}: {build}"));
         }
-        #[cfg(target_os = "macos")]
         if !self.tile_self_check(profile_dir)? {
             return self.reject(format!(
-                "the pinned build {BUILD_ID} does not paint tiles (unpatched)"
+                "the pinned build {BUILD_ID} paints no BGRA red (unpatched, or another order)"
             ));
         }
-        let _ = profile_dir;
         Ok(())
     }
 
@@ -53,15 +49,14 @@ impl Worker {
         Ok(build)
     }
 
-    /// Paints one tile; the bytes it gained.
-    #[cfg(target_os = "macos")]
+    /// Paints the red text; whether BGRA red came out.
     pub(crate) fn tile_self_check(&mut self, profile_dir: &Path) -> io::Result<bool> {
         let doc = profile_dir.join("lok-verify.fodt");
         std::fs::write(&doc, VERIFY_DOC)?;
         let url = ipc::file_url_of(&doc.canonicalize()?);
         let payload = self.request(tag::VERIFY, &Pack::new().str(&url).bytes())?;
-        let gained = Unpack::new(&payload).u64()?;
-        Ok(gained > 0)
+        let red = Unpack::new(&payload).u64()?;
+        Ok(red > 0)
     }
 }
 

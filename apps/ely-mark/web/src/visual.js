@@ -19,7 +19,7 @@ import { keymap } from '@milkdown/kit/prose/keymap'
 import { liftListItem, sinkListItem } from '@milkdown/kit/prose/schema-list'
 import { redo, redoDepth, undoDepth } from '@milkdown/kit/prose/history'
 import { $prose, callCommand } from '@milkdown/kit/utils'
-import { insertTableCommand } from '@milkdown/kit/preset/gfm'
+import { insertTableCommand, remarkGFMPlugin } from '@milkdown/kit/preset/gfm'
 import {
   addColumnAfter,
   addColumnBefore,
@@ -39,7 +39,7 @@ import { search } from 'prosemirror-search'
 import { style } from './style.js'
 
 /** An editor over `markdown`; null when blocks cannot map. */
-export async function visual(root, markdown, editable, texts, changed, edge) {
+export async function visual(root, markdown, editable, texts, changed, edge, linked) {
   const owner = diagrams()
   let write = () => ({ text: markdown, spans: [] })
   // Setting up raw blocks is no edit.
@@ -71,6 +71,29 @@ export async function visual(root, markdown, editable, texts, changed, edge) {
         },
       }),
   )
+  // Preview: a click opens. Editor: Cmd (Ctrl elsewhere).
+  const mac = navigator.platform.startsWith('Mac')
+  const links = $prose(
+    () =>
+      new Plugin({
+        props: {
+          handleDOMEvents: {
+            click: (view, event) => {
+              const anchor = event.target.closest?.('a')
+              if (!anchor || !view.dom.contains(anchor)) return false
+              event.preventDefault()
+              if (editable && !(mac ? event.metaKey : event.ctrlKey)) return true
+              // The DOM href is sanitized; the mark is not.
+              const node = view.state.doc.nodeAt(view.posAtDOM(anchor, 0))
+              const mark = node?.marks.find((mark) => mark.type.name === 'link')
+              if (!mark) throw new Error('ely: a link without its mark')
+              linked(mark.attrs.href)
+              return true
+            },
+          },
+        },
+      }),
+  )
   // Past their history, undo and redo reach the page.
   const ends = $prose(() =>
     keymap({
@@ -87,7 +110,9 @@ export async function visual(root, markdown, editable, texts, changed, edge) {
     .config((ctx) => {
       ctx.set(rootCtx, root)
       ctx.set(defaultValueCtx, markdown)
-      ctx.update(remarkStringifyOptionsCtx, (prev) => ({ ...prev, ...style(markdown) }))
+      const { tableCellPadding, tablePipeAlign, ...marks } = style(markdown)
+      ctx.update(remarkStringifyOptionsCtx, (prev) => ({ ...prev, ...marks }))
+      ctx.set(remarkGFMPlugin.options.key, { tableCellPadding, tablePipeAlign })
       ctx.update(editorViewOptionsCtx, (prev) => ({ ...prev, editable: () => editable }))
     })
     .use(commonmark)
@@ -101,6 +126,7 @@ export async function visual(root, markdown, editable, texts, changed, edge) {
     .use(watch)
     .use(current)
     .use(ends)
+    .use(links)
     .use($prose(() => search()))
     .create()
   const editor = await made.catch((error) => {

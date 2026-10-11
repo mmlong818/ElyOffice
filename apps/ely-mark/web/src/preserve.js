@@ -1,5 +1,6 @@
 // Blocks Milkdown cannot write back stay raw text (§14.3).
 import { editorViewCtx, remarkCtx, schemaCtx, serializerCtx } from '@milkdown/kit/core'
+import { canon } from './tables.js'
 import { Fragment } from '@milkdown/kit/prose/model'
 import { Selection } from '@milkdown/kit/prose/state'
 import { $nodeSchema } from '@milkdown/kit/utils'
@@ -51,6 +52,11 @@ export function faithful(ctx, original) {
   const schema = ctx.get(schemaCtx)
   const serializer = ctx.get(serializerCtx)
   const written = (nodes) => serializer(schema.topNodeType.create(null, nodes)).replace(/\n+$/, '')
+  // Table spacing is free; every cell's source must match.
+  const kept = (node, text) => {
+    const own = written([node])
+    return own === text || canon(own) === canon(text)
+  }
   const rawOf = ([from, to]) => {
     const text = original.slice(from, to)
     return schema.nodes.ely_raw.create(null, text ? schema.text(text) : null)
@@ -68,8 +74,7 @@ export function faithful(ctx, original) {
   if (!blank)
     parsed.forEach((node, _, index) => {
       gap(last, at[index][0])
-      const exact = written([node]) === original.slice(...at[index])
-      nodes.push(exact ? node : rawOf(at[index]))
+      nodes.push(kept(node, original.slice(...at[index])) ? node : rawOf(at[index]))
       places.push(at[index])
       last = at[index][1]
     })

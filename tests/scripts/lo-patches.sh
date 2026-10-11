@@ -14,6 +14,8 @@ trap 'rm -rf "$work"' EXIT
 tree=$work/tree
 mkdir -p "$tree"
 git -C "$tree" init -q
+# LF, as every tree here; Windows defaults convert.
+git -C "$tree" config core.autocrlf false
 for f in $files; do
   if git -C "$src" cat-file -e "HEAD:$f" 2>/dev/null; then
     mkdir -p "$tree/$(dirname "$f")"

@@ -125,7 +125,7 @@ impl Tree {
         // The picked entry itself, while it still names this commit.
         let moved = match (
             self.active().and_then(|o| o.places.read.as_ref()),
-            &self.picked_place,
+            self.active().and_then(|o| o.picked_place.as_ref()),
         ) {
             (
                 Some(Read {
@@ -187,7 +187,7 @@ impl Tree {
         let Some(opened) = self.active() else {
             return none();
         };
-        let (Some(read), Some(place)) = (&opened.places.read, &self.picked_place) else {
+        let (Some(read), Some(place)) = (&opened.places.read, &opened.picked_place) else {
             return none();
         };
         let label = |key: &str| text(cx, key, &[]);

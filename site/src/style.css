@@ -60,6 +60,11 @@ button:focus-visible {
   font-size: 1.0625rem;
 }
 
+.hero .links {
+  display: flex;
+  gap: 1.5rem;
+}
+
 .stage {
   display: block;
   max-width: 100%;

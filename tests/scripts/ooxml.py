@@ -4,6 +4,7 @@
 import datetime
 import math
 import posixpath
+import os
 import re
 import shutil
 import subprocess
@@ -255,12 +256,14 @@ def selftest(case, path):
             missed.append(f"{part}: {pattern} found nothing to change")
             continue
         entries[part] = changed.encode()
-        with tempfile.NamedTemporaryFile(suffix=path[-5:]) as copy:
-            with zipfile.ZipFile(copy.name, "w") as archive:
+        # A folder, not an open file: Windows cannot reopen those.
+        with tempfile.TemporaryDirectory() as folder:
+            copy = os.path.join(folder, "mutated" + path[-5:])
+            with zipfile.ZipFile(copy, "w") as archive:
                 for name, body in entries.items():
                     archive.writestr(name, body)
             failures = []
-            CASES[case](copy.name)
+            CASES[case](copy)
             if not failures:
                 missed.append(f"{part}: {pattern} passed")
     failures = [f"a mutation went unnoticed: {what}" for what in missed]

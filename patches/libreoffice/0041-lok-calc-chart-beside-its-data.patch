@@ -1,0 +1,139 @@
+LOK Calc: a new chart lands beside its data
+
+FuInsertChart placed a chart away from aPositionRange, which for
+request arguments (a kit client gives the range in FN_PARAM_5) was the
+cursor cell alone; GetChartInsertPos then pulled the chart back into
+the visible area. The chart covered the data it charts, or a block
+next to it. Under LOK, with a requested range, the chart goes in the
+first empty, unmerged cells of its own sheet right of its data large
+enough for it, else below, left or above, else the first such block
+anywhere, whatever the visible area. Data on another sheet starts the
+search at the cursor. With no room on the sheet the insert fails and
+nothing lands. Sizes are summed from each candidate cell.
+
+diff --git a/sc/source/ui/drawfunc/fuins2.cxx b/sc/source/ui/drawfunc/fuins2.cxx
+index b0169d0..121500d 100644
+--- a/sc/source/ui/drawfunc/fuins2.cxx
++++ b/sc/source/ui/drawfunc/fuins2.cxx
+@@ -47,6 +47,8 @@
+ #include <vcl/weldutils.hxx>
+ 
+ #include <comphelper/lok.hxx>
++#include <o3tl/unit_conversion.hxx>
++#include <optional>
+ #include <comphelper/storagehelper.hxx>
+ #include <comphelper/propertysequence.hxx>
+ #include <com/sun/star/embed/EmbedVerbs.hpp>
+@@ -215,6 +217,69 @@ void lcl_ChartInit(const uno::Reference <embed::XEmbeddedObject>& xObj, ScViewDa
+     // don't create chart listener here (range may be modified in chart dialog)
+ }
+ 
++
++/// The last column from nCol spanning nWidth twips, if any.
++std::optional<SCCOL> lcl_Across(const ScDocument& rDoc, SCTAB nTab, SCCOL nCol, tools::Long nWidth)
++{
++    tools::Long nSum = 0;
++    for (SCCOL n = nCol; n <= rDoc.MaxCol(); ++n)
++        if ((nSum += rDoc.GetColWidth(n, nTab)) >= nWidth)
++            return n;
++    return std::nullopt;
++}
++
++/// The last row from nRow spanning nHeight twips, if any.
++std::optional<SCROW> lcl_Down(const ScDocument& rDoc, SCTAB nTab, SCROW nRow, tools::Long nHeight)
++{
++    tools::Long nSum = 0;
++    for (SCROW n = nRow; n <= rDoc.MaxRow(); ++n)
++        if ((nSum += rDoc.GetRowHeight(n, nTab)) >= nHeight)
++            return n;
++    return std::nullopt;
++}
++
++/// LOK: empty cells right of rData, else below, left, above.
++std::optional<Point> lcl_EmptyBeside(const ScDocument& rDoc, const ScRange& rData, const Size& rSize)
++{
++    const SCTAB nTab = rData.aStart.Tab();
++    const tools::Long nWidth = o3tl::convert(rSize.Width(), o3tl::Length::mm100, o3tl::Length::twip);
++    const tools::Long nHeight = o3tl::convert(rSize.Height(), o3tl::Length::mm100, o3tl::Length::twip);
++    // Merged cells take their whole area, anchor or not.
++    const auto free = [&](SCCOL nCol1, SCROW nRow1, SCCOL nCol2, SCROW nRow2) {
++        return rDoc.IsBlockEmpty(nCol1, nRow1, nCol2, nRow2, nTab)
++            && !rDoc.HasAttrib(nCol1, nRow1, nTab, nCol2, nRow2, nTab, HasAttrFlags::Merged | HasAttrFlags::Overlapped);
++    };
++    const auto at = [&](SCCOL nCol, SCROW nRow) { return rDoc.GetMMRect(nCol, nRow, nCol, nRow, nTab).TopLeft(); };
++    const SCROW nTop = rData.aStart.Row();
++    const SCCOL nLeft = rData.aStart.Col();
++    // Sideways scans share rows; vertical scans share columns.
++    if (const auto oBottom = lcl_Down(rDoc, nTab, nTop, nHeight))
++    {
++        for (SCCOL nCol = rData.aEnd.Col() + 2; nCol <= rDoc.MaxCol(); ++nCol)
++            if (const auto oRight = lcl_Across(rDoc, nTab, nCol, nWidth); oRight && free(nCol, nTop, *oRight, *oBottom))
++                return at(nCol, nTop);
++    }
++    const auto oRight = lcl_Across(rDoc, nTab, nLeft, nWidth);
++    for (SCROW nRow = rData.aEnd.Row() + 2; oRight && nRow <= rDoc.MaxRow(); ++nRow)
++        if (const auto oBottom = lcl_Down(rDoc, nTab, nRow, nHeight); oBottom && free(nLeft, nRow, *oRight, *oBottom))
++            return at(nLeft, nRow);
++    if (const auto oBottom = lcl_Down(rDoc, nTab, nTop, nHeight))
++    {
++        for (SCCOL nCol = nLeft - 2; nCol >= 0; --nCol)
++            if (const auto oEnd = lcl_Across(rDoc, nTab, nCol, nWidth); oEnd && *oEnd < nLeft - 1 && free(nCol, nTop, *oEnd, *oBottom))
++                return at(nCol, nTop);
++    }
++    for (SCROW nRow = nTop - 2; oRight && nRow >= 0; --nRow)
++        if (const auto oEnd = lcl_Down(rDoc, nTab, nRow, nHeight); oEnd && *oEnd < nTop - 1 && free(nLeft, nRow, *oRight, *oEnd))
++            return at(nLeft, nRow);
++    // Last, any chart-sized empty block, row bands first.
++    for (SCROW nRow = 0; const auto oBottom = lcl_Down(rDoc, nTab, nRow, nHeight); nRow = *oBottom + 1)
++        for (SCCOL nCol = 0; const auto oEnd = lcl_Across(rDoc, nTab, nCol, nWidth); nCol = *oEnd + 1)
++            if (free(nCol, nRow, *oEnd, *oBottom))
++                return at(nCol, nRow);
++    return std::nullopt;
++}
++
+ }
+ 
+ FuInsertOLE::FuInsertOLE(ScTabViewShell& rViewSh, vcl::Window* pWin, ScDrawView* pViewP,
+@@ -452,6 +517,14 @@ FuInsertChart::FuInsertChart(ScTabViewShell& rViewSh, vcl::Window* pWin, ScDrawV
+             aRangeString = static_cast<const SfxStringItem*>(pItem)->GetValue();
+ 
+         aPositionRange = rViewSh.GetViewData().GetCurPos();
++        // The chart goes beside its data, not over it.
++        if (pRange)
++        {
++            const ScRangeList aData = *sctools::chartRanges(rViewSh.GetViewData().GetDocument(), pRange->GetValue());
++            aPositionRange = aData[0];
++            for (size_t i = 1; i < aData.size(); ++i)
++                aPositionRange.ExtendTo(aData[i]);
++        }
+     }
+     else
+     {
+@@ -612,7 +685,26 @@ FuInsertChart::FuInsertChart(ScTabViewShell& rViewSh, vcl::Window* pWin, ScDrawV
+     //  object position
+ 
+     // get chart position (from window size and data range)
+-    Point aStart = rViewSh.GetChartInsertPos( aSize, aPositionRange );
++    // LOK: beside the data, never over it, view or not.
++    std::optional<Point> oBeside;
++    if (pRange && comphelper::LibreOfficeKit::isActive())
++    {
++        // The chart's own sheet; data elsewhere starts at the cursor.
++        const SCTAB nTab = rData.CurrentTabForData();
++        ScRange aNear = aPositionRange.aStart.Tab() == nTab ? aPositionRange : ScRange(rData.GetCurPos());
++        aNear.aStart.SetTab(nTab);
++        aNear.aEnd.SetTab(nTab);
++        oBeside = lcl_EmptyBeside(rData.GetDocument(), aNear, aSize);
++        if (!oBeside)
++        {
++            SAL_WARN("sc.lok", "no empty cells hold the chart");
++            if (xChartModel.is())
++                xChartModel->unlockControllers();
++            rViewSh.GetObjectShell()->GetEmbeddedObjectContainer().RemoveEmbeddedObject(aName);
++            return;
++        }
++    }
++    Point aStart = oBeside ? *oBeside : rViewSh.GetChartInsertPos( aSize, aPositionRange );
+ 
+     tools::Rectangle aRect (aStart, aSize);
+     rtl::Reference<SdrOle2Obj> pObj = new SdrOle2Obj(

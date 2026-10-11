@@ -252,10 +252,10 @@ fn worktrees_list_branches_and_prunable_folders() {
     .expect("adds");
     let list = structure::worktrees(&git(), &root).expect("reads");
     assert_eq!(list.len(), 2);
-    assert_eq!(list[0].path, std::fs::canonicalize(&root).expect("real"));
+    assert_eq!(list[0].path, dunce::canonicalize(&root).expect("real"));
     assert_eq!(
         (list[1].path.clone(), list[1].branch.as_deref()),
-        (std::fs::canonicalize(&other).expect("real"), Some("side"))
+        (dunce::canonicalize(&other).expect("real"), Some("side"))
     );
     std::fs::remove_dir_all(&other).expect("removes");
     let list = structure::worktrees(&git(), &root).expect("reads");
@@ -432,4 +432,70 @@ fn a_stash_with_an_empty_message_still_lists() {
     let shown: Vec<&str> = list.iter().map(|s| s.message.as_str()).collect();
     assert_eq!(shown, ["", "named"]);
     assert_eq!(list[0].oid, oid);
+}
+
+#[test]
+fn a_new_repository_lists_no_moves_and_no_lfs_files() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let root = dir.path().join("new");
+    crate::repo::init(&git(), &root).expect("init");
+    assert_eq!(
+        crate::recover::reflog(&git(), &root).expect("no reflog error"),
+        Vec::new()
+    );
+    assert_eq!(
+        crate::structure::lfs(&git(), &root).expect("no LFS error"),
+        Vec::new()
+    );
+    // A new branch whose name ends in a no-break space.
+    let named = committed(&dir.path().join("named"));
+    sh(&named, &["branch", "topic"]);
+    sh(&named, &["checkout", "-q", "--orphan", "topic\u{a0}"]);
+    assert_eq!(crate::recover::reflog(&git(), &named).expect("no reflog error"), Vec::new());
+}
+
+#[test]
+fn a_broken_head_is_an_error_not_an_empty_repository() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let root = committed(dir.path());
+    let branch = sh(&root, &["symbolic-ref", "--short", "HEAD"]).trim().to_owned();
+    std::fs::write(root.join(".git/refs/heads").join(branch), "not-an-object-id
+").expect("breaks");
+    assert!(crate::recover::reflog(&git(), &root).is_err(), "the reflog says why");
+    assert!(crate::structure::lfs(&git(), &root).is_err(), "LFS says why");
+    // HEAD at a missing tag is no new branch either.
+    let other = dir.path().join("other");
+    crate::repo::init(&git(), &other).expect("init");
+    sh(&other, &["symbolic-ref", "HEAD", "refs/tags/missing"]);
+    assert!(crate::recover::reflog(&git(), &other).is_err(), "a tag HEAD says why");
+}
+
+#[test]
+fn a_worktree_registered_through_a_link_lists_its_real_path() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let root = committed(dir.path());
+    let other = dir.path().join("tree");
+    let path = other.to_str().expect("utf-8");
+    run(
+        &root,
+        Write::Git(words(&["worktree", "add", "-b", "side", "--", path])),
+    )
+    .expect("adds");
+    // Other tools may write the path through a link.
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(dir.path(), dir.path().join("link")).expect("links");
+    #[cfg(windows)]
+    {
+        let link = dir.path().join("link");
+        let made = std::process::Command::new("cmd").arg("/C").arg("mklink").arg("/J").arg(&link).arg(dir.path()).output().expect("cmd");
+        assert!(made.status.success(), "a junction: {}", String::from_utf8_lossy(&made.stderr));
+    }
+    let gitdir = root.join(".git/worktrees/tree/gitdir");
+    std::fs::write(
+        &gitdir,
+        format!("{}\n", dir.path().join("link/tree/.git").display()),
+    )
+    .expect("writes");
+    let list = structure::worktrees(&git(), &root).expect("reads");
+    assert_eq!(list[1].path, dunce::canonicalize(&other).expect("real"));
 }

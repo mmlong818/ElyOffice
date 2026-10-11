@@ -16,6 +16,30 @@ mod revision;
 mod slides;
 mod teardown;
 mod text;
+#[cfg(windows)]
+mod messages;
+#[cfg(windows)]
+use messages::serve;
+#[cfg(target_os = "linux")]
+mod unipoll;
+#[cfg(target_os = "linux")]
+use unipoll::serve;
+
+#[cfg(windows)]
+static TEARDOWN_STARTED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+#[cfg(windows)]
+fn claim_teardown() -> bool {
+    TEARDOWN_STARTED
+        .compare_exchange(
+            false,
+            true,
+            std::sync::atomic::Ordering::SeqCst,
+            std::sync::atomic::Ordering::SeqCst,
+        )
+        .is_ok()
+}
 
 /// English kernel, desktop hints; macros stay off (LOK-11).
 const LOAD_OPTIONS: &str = "Language=en-US,DeviceFormFactor=desktop";
@@ -49,7 +73,12 @@ fn serve(lok: Lok, input: impl io::Read + Send + 'static) -> io::Result<()> {
     }
     std::thread::spawn(move || reader(input));
     events::start();
-    lok.run_loop();
+    // Aqua never polls: GCD brings the requests.
+    extern "C" fn poll(_: *mut std::ffi::c_void, _: i32) -> i32 {
+        0
+    }
+    extern "C" fn wake(_: *mut std::ffi::c_void) {}
+    lok.run_loop(Some(poll), Some(wake));
     Ok(())
 }
 
@@ -146,30 +175,13 @@ mod gcd {
     use _dispatch_main_q as _raw;
 }
 
-#[cfg(not(target_os = "macos"))]
-fn serve(lok: Lok, mut input: impl io::Read) -> io::Result<()> {
-    let lok = Box::leak(Box::new(lok));
-    pin(lok);
-    if let Err(error) = lok.register_callback(password::on_kit) {
-        #[cfg(windows)]
-        lok.quarantine();
-        return Err(error);
-    }
-    events::start();
-    loop {
-        match ipc::read_frame(&mut input)? {
-            Some((tag, id, payload)) => answer(lok, tag, id, &payload),
-            None => {
-                log::info!("lok-worker: stdin closed");
-                teardown::teardown(0);
-            }
-        }
-    }
-}
-
 /// Handles one frame and writes its answer.
 fn answer(lok: &Lok, tag: u8, id: u64, payload: &[u8]) {
     if tag == tag::SHUTDOWN {
+        #[cfg(windows)]
+        if !claim_teardown() {
+            return;
+        }
         let outcome = teardown::teardown_work();
         #[cfg(windows)]
         terminate_if_owner_failed(lok.owner_failed_closed());
@@ -197,13 +209,17 @@ fn answer(lok: &Lok, tag: u8, id: u64, payload: &[u8]) {
             .str()
             .and_then(|url| Ok((url, unpack.str()?)))
             .and_then(|(url, password)| load(lok, &url, password, ""))
-            .map(|id| Pack::new().u64(id).bytes()),
-        tag::IMPORT => text::import(lok, unpack).map(|id| Pack::new().u64(id).bytes()),
+            .and_then(loaded),
+        tag::IMPORT => text::import(lok, unpack).and_then(loaded),
         tag::EXPORT_TEXT => text::export(unpack).map(|()| Vec::new()),
         tag::DOC_SIZE => unpack
             .u64()
-            .and_then(|id| with_doc(id, |doc| doc.size()))
-            .map(|(width, height)| Pack::new().i64(width).i64(height).bytes()),
+            .and_then(|id| Ok((with_doc(id, |doc| doc.size())?, crate::events::zoom(id))))
+            .map(|((width, height), (pixels, twips))| {
+                // The scale the kernel measured at; 0 if never set.
+                let pack = Pack::new().i64(width).i64(height);
+                pack.i64(i64::from(pixels)).i64(i64::from(twips)).bytes()
+            }),
         tag::SAVE_AS => save(unpack).map(|()| Vec::new()),
         tag::EXPORT_PDF => export_pdf(unpack).map(|()| Vec::new()),
         tag::CLOSE_DOC => unpack
@@ -215,6 +231,7 @@ fn answer(lok: &Lok, tag: u8, id: u64, payload: &[u8]) {
         tag::PAINT_TILE => input::painted(unpack),
         tag::PAINT_PART => input::part_painted(unpack),
         tag::SLIDE_LAYERS => slides::slide_layers(unpack),
+        tag::SLIDE_LAYER => slides::slide_layer(unpack),
         tag::VERIFY => unpack
             .str()
             .and_then(|url| verify(lok, &url))
@@ -256,9 +273,16 @@ fn answer(lok: &Lok, tag: u8, id: u64, payload: &[u8]) {
             .u64()
             .and_then(|id| {
                 let mut number = || i32::try_from(unpack.i64()?).map_err(io::Error::other);
-                Ok((id, (number()?, number()?, number()?, number()?)))
+                Ok((id, (number()?, number()?, number()?, number()?), (number()?, number()?)))
             })
-            .and_then(|(id, (x, y, w, h))| with_doc(id, |doc| doc.set_visible_area(x, y, w, h)))
+            .and_then(|(id, (x, y, w, h), (pixels, twips))| {
+                // Calc reads clicks at this scale, not the last tile's.
+                with_doc(id, |doc| {
+                    doc.set_client_zoom(pixels, twips);
+                    doc.set_visible_area(x, y, w, h)
+                })
+                .inspect(|_| crate::events::rescaled(id, (pixels, twips)))
+            })
             .map(|()| Vec::new()),
         tag::SELECTION_TEXT => unpack
             .u64()
@@ -353,6 +377,12 @@ fn load(lok: &Lok, url: &str, password: String, filter: &str) -> io::Result<u64>
         crate::events::seed_a11y(id, &doc.a11y_paragraph()?);
         // Settle the initial layout now; later paints see it (LOK-03).
         doc.post_uno(".uno:Repaginate", None)?;
+        // A sheet's size has a known scale from the start.
+        if doc.kind() == 1 {
+            let zoom = (crate::TILE_TWIPS / crate::TWIPS_PER_PIXEL as i32, crate::TILE_TWIPS);
+            doc.set_client_zoom(zoom.0, zoom.1);
+            crate::events::rescaled(id, zoom);
+        }
         Ok::<(), io::Error>(())
     })();
     if let Err(error) = setup {
@@ -369,10 +399,17 @@ fn load(lok: &Lok, url: &str, password: String, filter: &str) -> io::Result<u64>
     Ok(id)
 }
 
+/// The reply to a load: the number and LOK_DOCTYPE.
+fn loaded(id: u64) -> io::Result<Vec<u8>> {
+    let kind = with_doc(id, |doc| doc.kind())?;
+    Ok(Pack::new().u64(id).u64(kind as u64).bytes())
+}
+
 /// Stops watching and frees document `id`.
 fn close(id: u64) -> io::Result<()> {
     let doc = docs().lock().unwrap_or_else(|p| p.into_inner()).remove(&id);
     revision::forget(id);
+    slides::forget(id);
     if let Some(doc) = doc {
         crate::events::unwatch(id, &doc)?;
         #[cfg(windows)]
@@ -390,17 +427,18 @@ fn docs() -> &'static Mutex<std::collections::HashMap<u64, Document>> {
     DOCS.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
 }
 
-/// Loads and paints; the bytes gained (R-01).
+/// Loads and paints red text; its BGRA red pixels (R-01).
 fn verify(lok: &Lok, url: &str) -> io::Result<u64> {
     let doc = lok.load(url, LOAD_OPTIONS)?;
     let mut tile = vec![0xABu8; 64 * 64 * 4];
-    doc.paint_tile(&mut tile, 64, 64);
+    // Past the 2 cm margin, where the text sits.
+    doc.paint_rect(&mut tile, (64, 64), (0, 0, 3000, 3000));
     #[cfg(windows)]
     doc.dispose_on_owner()?;
     drop(doc);
-    let gained = tile.iter().filter(|byte| **byte != 0xAB).count() as u64;
-    log::info!("lok-worker: tile self-check gained {gained} bytes");
-    Ok(gained)
+    let red = tile.chunks_exact(4).filter(|px| px[2] > 200 && px[0] < 80 && px[1] < 80).count();
+    log::info!("lok-worker: tile self-check found {red} red pixels");
+    Ok(red as u64)
 }
 
 /// Borrows a live document for a read call.
@@ -426,7 +464,12 @@ fn with_doc<T>(id: u64, call: impl FnOnce(&Document) -> T) -> io::Result<T> {
 /// The shown part, then each part's name and info.
 fn sheets(doc: &Document) -> io::Result<Vec<u8>> {
     let count = doc.parts();
-    let mut pack = Pack::new().u64(doc.part() as u64).u64(count as u64);
+    // -1 means no view shell: no list.
+    let unread = |what| io::Error::other(format!("the kernel gives no {what}"));
+    let current = u64::try_from(doc.part()).map_err(|_| unread("current part"))?;
+    let mut pack = Pack::new()
+        .u64(current)
+        .u64(u64::try_from(count).map_err(|_| unread("part count"))?);
     for part in 0..count {
         pack = pack.str(&doc.part_name(part)?).str(&doc.part_info(part)?);
     }

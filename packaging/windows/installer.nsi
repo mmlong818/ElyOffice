@@ -1,4 +1,4 @@
-; Per-user installer; pass APP_NAME, APP_SLUG, VERSION, EXE, ICON, TYPES.
+; Per-user installer; pass APP_NAME, APP_SLUG, VERSION, STAGE, ICON, TYPES.
 Unicode true
 !include "MUI2.nsh"
 
@@ -11,8 +11,8 @@ Unicode true
 !ifndef VERSION
   !error "pass -DVERSION"
 !endif
-!ifndef EXE
-  !error "pass -DEXE"
+!ifndef STAGE
+  !error "pass -DSTAGE, a folder from packaging/stage.sh"
 !endif
 !ifndef ICON
   !error "pass -DICON"
@@ -47,7 +47,7 @@ LangString DeleteData ${LANG_ENGLISH} "Also delete the cache, accounts and local
 
 Section "Install"
   SetOutPath "$INSTDIR"
-  File "/oname=${APP_SLUG}.exe" "${EXE}"
+  File /r "${STAGE}\*.*"
   File "/oname=${APP_SLUG}.ico" "${ICON}"
 !ifdef GIT_DIR
   SetOutPath "$INSTDIR\git"
@@ -67,12 +67,21 @@ Section "Install"
 SectionEnd
 
 Section "Uninstall"
-  Delete "$INSTDIR\${APP_SLUG}.exe"
+  ; What stage.sh lays out, and nothing else.
+  RMDir /r "$INSTDIR\libreoffice"
+  RMDir /r "$INSTDIR\tessdata"
+  RMDir /r "$INSTDIR\git"
+  RMDir /r "$INSTDIR\content"
+  RMDir /r "$INSTDIR\locales"
+  RMDir /r "$INSTDIR\licenses"
+  Delete "$INSTDIR\*.exe"
+  Delete "$INSTDIR\*.dll"
+  Delete "$INSTDIR\*.pak"
+  Delete "$INSTDIR\*.bin"
+  Delete "$INSTDIR\*.dat"
+  Delete "$INSTDIR\*.json"
   Delete "$INSTDIR\${APP_SLUG}.ico"
   Delete "$INSTDIR\uninstall.exe"
-!ifdef GIT_DIR
-  RMDir /r "$INSTDIR\git"
-!endif
   RMDir "$INSTDIR"
   Delete "$SMPROGRAMS\${APP_NAME}.lnk"
   DeleteRegKey HKCU "Software\Ely Office\${APP_NAME}"

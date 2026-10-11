@@ -22,6 +22,12 @@ pub fn templates(kind: &str) -> io::Result<Vec<PathBuf>> {
     Ok(found)
 }
 
+/// The kernel's folder beside the app, and in this build.
+#[cfg(target_os = "macos")]
+const LAYOUT: (&str, &str) = ("../Frameworks", "instdir/LibreOffice.app/Contents/Frameworks");
+#[cfg(not(target_os = "macos"))]
+const LAYOUT: (&str, &str) = ("libreoffice/program", "instdir/program");
+
 /// The LOK build: `ELY_LOK_DIR`, the app bundle's, or engines/.
 pub fn install_dir() -> io::Result<PathBuf> {
     if let Ok(dir) = std::env::var("ELY_LOK_DIR") {
@@ -35,30 +41,29 @@ pub fn install_dir() -> io::Result<PathBuf> {
             ))
         };
     }
+    let (beside, built) = LAYOUT;
+    let library = crate::ffi::KERNEL;
     let exe = std::env::current_exe()?;
     let app_dir = exe.parent().unwrap_or(Path::new("."));
-    #[cfg(target_os = "macos")]
-    {
-        let bundled = app_dir.join("../Frameworks");
-        if bundled.join("libmergedlo.dylib").try_exists()? {
-            return Ok(bundled);
-        }
-    }
+    let mut bundled = vec![app_dir.join(beside)];
     #[cfg(windows)]
+    bundled.insert(0, app_dir.join("engines/libreoffice/program"));
+    if let Some(found) = bundled
+        .into_iter()
+        .find(|dir| dir.join(library).is_file())
     {
-        let bundled = app_dir.join("engines/libreoffice/program");
-        if bundled.join("mergedlo.dll").try_exists()? {
-            return Ok(bundled);
-        }
+        return Ok(found);
     }
 
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let mut development = vec![manifest.join("../../engines/lo-src").join(built)];
     #[cfg(windows)]
-    let dev = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../engines/libreoffice/program");
-    #[cfg(not(windows))]
-    let dev = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../engines/lo-src/instdir/LibreOffice.app/Contents/Frameworks");
-    if dev.try_exists()? {
-        return Ok(dev);
+    development.insert(0, manifest.join("../../engines/libreoffice/program"));
+    if let Some(found) = development
+        .into_iter()
+        .find(|dir| dir.join(library).is_file())
+    {
+        return Ok(found);
     }
     Err(io::Error::new(
         io::ErrorKind::NotFound,

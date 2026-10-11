@@ -428,3 +428,21 @@ fn marker_sizes_git_cannot_read_mean_seven() {
         );
     }
 }
+
+#[test]
+fn a_tag_on_a_blob_has_no_date_and_spoils_no_list() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let root = committed(dir.path());
+    sh(&root, &["tag", "blobtag", "HEAD:a.txt"]);
+    let refs = crate::branches::read(&git(), &root).expect("the list reads");
+    let tag = refs
+        .iter()
+        .find(|r| r.name == "blobtag")
+        .expect("the tag is listed");
+    assert_eq!(tag.at, None);
+    assert!(
+        refs.iter()
+            .filter(|r| r.name != "blobtag")
+            .all(|r| r.at.is_some())
+    );
+}

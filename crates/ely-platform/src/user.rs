@@ -2,11 +2,10 @@
 
 use std::io;
 
-/// The author name from settings, else the account's.
-pub fn name() -> io::Result<String> {
-    let set = crate::settings::Shared::load()?.author;
-    if !set.is_empty() {
-        return Ok(set);
+/// `author` as the settings give it, else the account's name.
+pub fn named(author: &str) -> io::Result<String> {
+    if !author.is_empty() {
+        return Ok(author.to_string());
     }
     account()
 }
@@ -61,8 +60,10 @@ fn full_name() -> io::Result<String> {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn the_account_has_a_name() {
-        let name = super::name().expect("a name");
-        assert!(!name.is_empty());
+    fn a_set_name_signs_else_the_account() {
+        assert_eq!(super::named("Ada").expect("a name"), "Ada");
+        let account = super::named("").expect("a name");
+        assert!(!account.is_empty());
+        assert_eq!(account, super::account().expect("the account"));
     }
 }

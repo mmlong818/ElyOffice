@@ -114,19 +114,15 @@ pub(crate) fn delete(
     let mut detail = if references.formulas + references.names == 0 {
         Book::text(cx, "table.delete.alone", &[])
     } else {
-        Book::text(
-            cx,
-            "table.delete.refs",
-            &[
-                ("formulas", &references.formulas.to_string()),
-                ("first", &references.first),
-                ("names", &references.names.to_string()),
-            ],
-        )
+        let count = |key, n: u64| ely_ui::i18n::counted(cx, key, n, &[("n", &n.to_string())]);
+        let formulas = count("table.delete.formulas", references.formulas);
+        let names = count("table.delete.names", references.names);
+        let args = [("formulas", formulas.as_ref()), ("first", &references.first), ("names", &names)];
+        Book::text(cx, "table.delete.refs", &args)
     };
     if references.dynamic > 0 {
         let count = references.dynamic.to_string();
-        let dynamic = Book::text(cx, "table.delete.dynamic", &[("count", &count)]);
+        let dynamic = ely_ui::i18n::counted(cx, "table.delete.dynamic", references.dynamic, &[("count", &count)]);
         detail = format!("{detail} {dynamic}").into();
     }
     let label = Book::text(cx, "table.delete.go", &[]);

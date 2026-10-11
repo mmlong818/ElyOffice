@@ -228,7 +228,7 @@ impl Book {
             return self.warn("table.show.none", cx);
         };
         let tab = tab.id;
-        self.dialog = Some(Dialog::Show {
+        self.open_dialog(Dialog::Show {
             tab,
             hidden,
             chosen,
@@ -246,7 +246,7 @@ impl Book {
         };
         let field = cx.new(|cx| TextInput::new(window, cx));
         field.update(cx, |field, cx| field.set_text(name, cx));
-        self.dialog = Some(Dialog::Rename { tab, at, index, field });
+        self.open_dialog(Dialog::Rename { tab, at, index, field });
         cx.notify();
     }
 
@@ -277,7 +277,7 @@ impl Book {
             },
             move |book, read, _, cx| match read {
                 Ok((references, at, name)) => {
-                    book.dialog = Some(Dialog::Delete {
+                    book.open_dialog(Dialog::Delete {
                         tab: id,
                         at,
                         index,

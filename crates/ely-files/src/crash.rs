@@ -21,7 +21,7 @@ impl Crash {
     pub fn open(dir: &Path, pid: u32) -> io::Result<Self> {
         std::fs::create_dir_all(dir)?;
         let file = dir.join("session.lock");
-        std::fs::write(&file, format!("open {pid}"))?;
+        write_whole(&file, &format!("open {pid}"))?;
         Ok(Self { file })
     }
 
@@ -34,28 +34,24 @@ impl Crash {
             Err(error) => return Err(error),
         };
         let mut parts = text.split_whitespace();
-        match (parts.next(), parts.next()) {
+        match (parts.next(), parts.next().map(str::parse::<u32>)) {
             (Some("discarded"), _) => Ok(Marker::Discarded),
-            (Some("open"), Some(pid)) => {
-                let pid: u32 = pid.parse().map_err(|_| {
-                    io::Error::new(io::ErrorKind::InvalidData, "bad pid in the session lock")
-                })?;
-                Ok(if alive(pid) {
-                    Marker::Clean
-                } else {
-                    Marker::Crashed
-                })
+            (Some("open"), Some(Ok(pid))) => Ok(if alive(pid) {
+                Marker::Clean
+            } else {
+                Marker::Crashed
+            }),
+            // A torn lock means no clean end: offer the points.
+            _ => {
+                log::warn!("recovery: the session lock is unreadable; treated as a crash");
+                Ok(Marker::Crashed)
             }
-            _ => Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "bad session lock",
-            )),
         }
     }
 
     /// An explicit discard: never a crash next launch (§6.2).
     pub fn discard(self) -> io::Result<()> {
-        std::fs::write(&self.file, "discarded 0")
+        write_whole(&self.file, "discarded 0")
     }
 
     /// A clean close removes the lock.
@@ -66,6 +62,15 @@ impl Crash {
             Err(error) => Err(error),
         }
     }
+}
+
+/// Replaces `file` whole: a power cut leaves old or new.
+fn write_whole(file: &Path, text: &str) -> io::Result<()> {
+    use std::io::Write as _;
+    let mut staging = tempfile::NamedTempFile::new_in(file.parent().unwrap_or(Path::new(".")))?;
+    staging.write_all(text.as_bytes())?;
+    staging.as_file().sync_all()?;
+    staging.persist(file).map(drop).map_err(|error| error.error)
 }
 
 /// Whether process `pid` still runs; a crash leaves none.

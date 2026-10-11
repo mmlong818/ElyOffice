@@ -154,6 +154,9 @@ impl Stop {
     }
 }
 
+/// Only Unix stops Git; elsewhere no stop shows.
+pub const STOPS: bool = cfg!(unix);
+
 /// Its own session: the group is Git and its helpers.
 #[cfg(unix)]
 fn terminate(pid: u32) -> io::Result<()> {

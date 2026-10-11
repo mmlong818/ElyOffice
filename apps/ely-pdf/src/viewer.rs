@@ -69,7 +69,7 @@ impl Host for Viewer {
     }
 
     fn read_at(&self, tab: u64, cx: &gpui::App) -> Option<ely_pdf_engine::Doc> {
-        self.tab(tab).map(|tab| tab.view.read(cx).doc.clone())
+        self.tab(tab).map(|tab| tab.view.read(cx).doc)
     }
 
     fn observed(&mut self, id: u64, view: &Entity<PdfView>, cx: &mut Context<Self>) {
@@ -115,7 +115,7 @@ pub fn open(app: AppId, window: &mut Window, cx: &mut App) -> Entity<Root> {
     let root = ely_ui::document_root(app, viewer.clone().into(), &commands::FILE, crate::keys::menus(cx), window, cx);
     viewer.update(cx, |viewer, cx| {
         viewer.core.root = root.downgrade();
-        viewer.core.window = Some(window.window_handle());
+        viewer.own_window(window, cx);
         window.focus(&viewer.core.focus, cx);
     });
     for path in ely_ui::launch_files(cx) {
@@ -247,7 +247,6 @@ impl Render for Viewer {
             .on_action(cx.listener(Self::on_save_as))
             .on_action(cx.listener(Self::on_export))
             .on_action(cx.listener(Self::on_print))
-            .on_action(cx.listener(Self::on_quit))
             .on_action(cx.listener(Self::on_close_tab))
             .child(shell)
             .children(self.core_dialog(cx))

@@ -163,6 +163,11 @@ impl Recovery {
 
     /// Every point on disk, newest first.
     pub fn points(&self) -> io::Result<Vec<RecoveryPoint>> {
+        self.stamps()?.into_iter().map(|stamp| self.point(stamp)).collect()
+    }
+
+    /// The points' stamps by name alone, newest first.
+    fn stamps(&self) -> io::Result<Vec<u128>> {
         let dir = self.dir.join("points");
         let mut stamps = Vec::new();
         let entries = match std::fs::read_dir(&dir) {
@@ -183,16 +188,13 @@ impl Recovery {
         }
         stamps.sort_unstable_by(|a, b| b.cmp(a));
         stamps.dedup();
-        stamps
-            .into_iter()
-            .map(|stamp| self.point(stamp))
-            .collect::<io::Result<_>>()
+        Ok(stamps)
     }
 
     /// The point one stamp names.
     fn point(&self, stamp: u128) -> io::Result<RecoveryPoint> {
         let dir = self.dir.join("points");
-        let at = SystemTime::UNIX_EPOCH + Duration::from_nanos(stamp as u64);
+        let at = at_of(stamp);
         let enc = dir.join(format!("{stamp}.enc"));
         if enc.try_exists()? {
             let cursor = match self.key {
@@ -223,26 +225,26 @@ impl Recovery {
 
     /// Drops the oldest points past age, count and byte limits.
     fn prune(&self, now: SystemTime) -> io::Result<()> {
-        let mut points = self.points()?;
-        while points.len() > self.keep
-            || points.last().is_some_and(|point| {
-                now.duration_since(point.at)
+        // Names only: a sealed point is never opened here.
+        let mut stamps = self.stamps()?;
+        while stamps.len() > self.keep
+            || stamps.last().is_some_and(|stamp| {
+                now.duration_since(at_of(*stamp))
                     .map(|age| age > self.max_age)
                     .unwrap_or(false)
             })
-            || self.bytes(&points)? > self.cap
+            || self.bytes(&stamps)? > self.cap
         {
-            let Some(oldest) = points.pop() else { break };
-            self.drop(oldest.at)?;
+            let Some(oldest) = stamps.pop() else { break };
+            self.drop(oldest)?;
         }
         Ok(())
     }
 
     /// The total size of every file of every live point.
-    fn bytes(&self, points: &[RecoveryPoint]) -> io::Result<u64> {
+    fn bytes(&self, stamps: &[u128]) -> io::Result<u64> {
         let mut total = 0;
-        for point in points {
-            let stamp = stamp_of(point.at)?;
+        for stamp in stamps {
             let dir = self.dir.join("points");
             for ext in ["bin", "cursor", "history", "enc"] {
                 let path = dir.join(format!("{stamp}.{ext}"));
@@ -257,8 +259,7 @@ impl Recovery {
     }
 
     /// Removes a point's files, its metadata first.
-    fn drop(&self, at: SystemTime) -> io::Result<()> {
-        let stamp = stamp_of(at)?;
+    fn drop(&self, stamp: u128) -> io::Result<()> {
         let dir = self.dir.join("points");
         for ext in ["cursor", "history", "bin", "enc"] {
             match std::fs::remove_file(dir.join(format!("{stamp}.{ext}"))) {
@@ -272,8 +273,8 @@ impl Recovery {
 
     /// An explicit discard: points go, the result stays recorded (§6.2).
     pub fn discard(&mut self) -> io::Result<()> {
-        for point in self.points()? {
-            self.drop(point.at)?;
+        for stamp in self.stamps()? {
+            self.drop(stamp)?;
         }
         std::fs::write(self.dir.join(".discarded"), "discarded")?;
         self.last_ok = None;
@@ -302,6 +303,11 @@ impl Recovery {
         log::info!("recovery: restored to {}", dest.display());
         Ok(())
     }
+}
+
+/// The time a stamp names.
+fn at_of(stamp: u128) -> SystemTime {
+    SystemTime::UNIX_EPOCH + Duration::from_nanos(stamp as u64)
 }
 
 /// The point's timestamp as its file stem.

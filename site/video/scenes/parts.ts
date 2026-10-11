@@ -163,3 +163,11 @@ export const props: Prop[] = [
     ]),
   },
 ];
+
+/** A screen grown about its base; Show stands apart. */
+export function grown(app: string): Box {
+  if (app === "ElyShow") return { x: 8.6, y: 2, z: model[0].blocks[0].h + 0.25, w: 4.8, d: 0.08, h: 2.7, tone: SCREEN };
+  const b = screens[app];
+  const w = b.w * 1.5;
+  return { ...b, x: b.x + (b.w - w) / 2, w, h: b.h * 1.5 };
+}

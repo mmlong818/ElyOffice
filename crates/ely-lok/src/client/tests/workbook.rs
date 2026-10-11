@@ -256,3 +256,21 @@ fn commands_from_one_read_run_together_and_hovering_changes_nothing() {
     assert!(crate::is_stale(&stale), "{stale}");
     assert_eq!(only(&mut worker), ["One", "Two", "U"], "nothing else was renamed");
 }
+
+#[test]
+fn a_header_act_after_a_click_is_not_stale() {
+    if install().is_none() {
+        eprintln!("SKIP: no pinned LOK build");
+        return;
+    }
+    let (_dir, mut worker, doc) = open_book(SHEETS);
+    let read = worker.now(&doc).expect("the state");
+    // A click moves the revision; rows and columns stay.
+    for kind in [0, 1] {
+        let click = crate::Mouse { kind, x: 500, y: 500, count: 1, buttons: 1, modifiers: 0 };
+        worker.post_mouse(&read, click).expect("clicks");
+    }
+    assert_ne!(worker.now(&doc).expect("the state"), read, "the click counts as a change");
+    worker.run(&read, "select.column", &["2", "0"]).expect("the column header still selects");
+    worker.run(&read, "columns.width", &["800", "3"]).expect("the column's width still sets");
+}

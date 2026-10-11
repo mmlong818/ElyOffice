@@ -72,7 +72,7 @@ impl Viewer {
         let turned = unturn(margins, view.read(cx).rotate);
         let points = turned.map(|side| side * MM);
         view.update(cx, |view, cx| {
-            view.edit("cropping pages", move |worker, doc| worker.crop_pages(doc, &pages, points), cx)
+            view.edit_pages("cropping pages", move |worker, doc| worker.crop_pages(doc, &pages, points), cx)
         });
         cx.notify();
     }
@@ -136,7 +136,7 @@ impl Viewer {
     }
 
     fn failed_write(&self, name: &str, error: &io::Error, cx: &mut App) {
-        if error.kind() == io::ErrorKind::PermissionDenied {
+        if ely_pdf_engine::refused(error).is_some() {
             return self.failed(error, cx);
         }
         let text = Self::text(cx, "office.error.save", &[("name", name), ("error", &error.to_string())]);
@@ -183,7 +183,7 @@ impl Viewer {
                 written.map(|()| targets.len())
             },
             move |viewer, done, _, cx| match done {
-                Ok(count) => viewer.toast_output(Self::text(cx, "pdf.split.done", &[("count", &count.to_string())]), opened.clone(), cx),
+                Ok(count) => viewer.toast_output(ely_ui::i18n::counted(cx, "pdf.split.done", count as u64, &[("count", &count.to_string())]), opened.clone(), cx),
                 Err(error) => viewer.failed_write(&stem, &error, cx),
             },
             cx,
@@ -205,8 +205,7 @@ impl Viewer {
         };
         let card = match self.ask.as_ref()? {
             Ask::Crop { pages, margins, .. } => {
-                let count = pages.len().to_string();
-                let title = Self::text(cx, "pdf.crop.title", &[("count", &count)]);
+                let title = ely_ui::i18n::counted(cx, "pdf.crop.title", pages.len() as u64, &[("count", &pages.len().to_string())]);
                 let sides = ["top", "right", "bottom", "left"];
                 let rows = sides.iter().enumerate().fold(DescriptionList::new(), |rows, (at, side)| {
                     let name = label(&format!("pdf.crop.{side}"));

@@ -458,6 +458,15 @@ impl Document {
         });
     }
 
+    /// Tells the kernel a tile's size in pixels and twips.
+    pub fn set_client_zoom(&self, pixels: i32, twips: i32) {
+        let _ = self.run(move |doc| {
+            let class = unsafe { (*doc).class };
+            type F = unsafe extern "C" fn(*mut Doc, i32, i32, i32, i32);
+            call!(class, 23, F, doc, pixels, pixels, twips, twips);
+        });
+    }
+
     /// Tells the kernel the area the client shows, in twips.
     pub fn set_visible_area(&self, x: i32, y: i32, width: i32, height: i32) {
         let _ = self.run(move |doc| {

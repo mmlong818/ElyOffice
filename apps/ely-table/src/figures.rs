@@ -58,8 +58,8 @@ pub fn label(status: &str, cx: &App) -> SharedString {
     if let Some((_, key)) = ERRORS.iter().find(|(known, _)| *known == status) {
         return Book::text(cx, key, &[]);
     }
-    let parts: Vec<String> = status
-        .split("; ")
+    let parts: Vec<String> = fields(status)
+        .into_iter()
         .map(|part| {
             let known = part.split_once(": ").and_then(|(name, value)| {
                 let (_, key) = FIGURES.iter().find(|(known, _)| *known == name)?;
@@ -72,6 +72,24 @@ pub fn label(status: &str, cx: &App) -> SharedString {
         })
         .collect();
     parts.join("  ").into()
+}
+
+/// The status split at each "Name: "; values keep semicolons.
+fn fields(status: &str) -> Vec<&str> {
+    let starts = |rest: &str| {
+        rest.split_once(": ")
+            .is_some_and(|(name, _)| !name.is_empty() && name.chars().all(|c| c.is_ascii_alphabetic() || c == ' '))
+    };
+    let mut out = Vec::new();
+    let mut from = 0;
+    for (at, _) in status.match_indices("; ") {
+        if starts(&status[at + 2..]) {
+            out.push(&status[from..at]);
+            from = at + 2;
+        }
+    }
+    out.push(&status[from..]);
+    out
 }
 
 #[cfg(test)]
@@ -89,6 +107,13 @@ mod tests {
                 super::Book::text(app, "table.figure.sum", &[("value", "42")])
             );
             assert_eq!(label.as_ref(), expect, "known names relabel, others stay");
+            // The kernel's formatted values pass through untouched.
+            ely_ui::i18n::install_as("en-US", app);
+            let custom = super::label("Average: 8128.00 kg; net; Sum: 16256.00 kg; net", app);
+            assert_eq!(custom.as_ref(), "Average 8128.00 kg; net  Sum 16256.00 kg; net", "a format's own semicolons stay");
+            for value in ["8128.00", "8128.33333333333", "0.0000000001", "1234567890.25", "$1,234.50"] {
+                assert_eq!(super::label(&format!("Sum: {value}"), app).as_ref(), format!("Sum {value}"));
+            }
             for (english, key) in super::ERRORS {
                 assert_eq!(super::label(english, app), super::Book::text(app, key, &[]));
             }

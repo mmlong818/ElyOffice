@@ -46,9 +46,9 @@ fn masked(window: &mut Window, cx: &mut Context<Viewer>) -> Entity<TextInput> {
 impl Viewer {
     /// A refusal names what is missing.
     pub(crate) fn failed(&self, error: &io::Error, cx: &mut App) {
-        match error.kind() {
-            io::ErrorKind::PermissionDenied => self.toast(crate::view::restricted(&error.to_string(), cx), Severity::Warning, cx),
-            _ => self.panel_failed(&error.to_string(), cx),
+        match ely_pdf_engine::refused(error) {
+            Some(needed) => self.toast(crate::view::restricted(needed, cx), Severity::Warning, cx),
+            None => self.panel_failed(&error.to_string(), cx),
         }
     }
 
@@ -236,7 +236,8 @@ impl Viewer {
     }
 
     fn protect_rows(&self, on: bool, user: &Entity<TextInput>, owner: &Entity<TextInput>, allow: u32, this: &Entity<Self>, cx: &mut Context<Self>) -> AnyElement {
-        let set = |change: Box<dyn Fn(&mut bool, &mut u32, bool)>| {
+        type Change = Box<dyn Fn(&mut bool, &mut u32, bool)>;
+        let set = |change: Change| {
             let this = this.clone();
             move |value: bool, _: &mut Window, cx: &mut App| {
                 this.update(cx, |viewer, cx| {

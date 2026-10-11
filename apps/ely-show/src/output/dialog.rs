@@ -13,6 +13,11 @@ use super::{Kind, Output, Range};
 use crate::deck::Deck;
 use crate::dialog::Dialog;
 
+/// A typed slide number on the deck; 0 means all.
+fn slide_number(value: f64, last: u32) -> u32 {
+    value.round().clamp(1.0, f64::from(last.max(1))) as u32
+}
+
 /// What goes out, which slides, how many a page.
 pub fn output_dialog(
     this: gpui::Entity<Deck>,
@@ -79,7 +84,7 @@ pub fn output_dialog(
     let bound = |id: &'static str, value: u32, first: bool| {
         // A typed number counts before blur commits it.
         let set = move |this: &gpui::Entity<Deck>, value: f64, cx: &mut gpui::App| {
-            let value = value.round() as u32;
+            let value = slide_number(value, last);
             change(this, cx, &|output| {
                 if let Range::Slides(from, to) = &mut output.range {
                     *(if first { from } else { to }) = value;
@@ -134,4 +139,17 @@ pub fn output_dialog(
                 .variant(ButtonVariant::Primary)
                 .on_click(move |_, _, cx| this.update(cx, |deck, cx| deck.output(cx)))
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::slide_number;
+
+    #[test]
+    fn a_typed_number_stays_on_the_deck() {
+        assert_eq!(slide_number(0.0, 5), 1, "0 would export every slide");
+        assert_eq!(slide_number(-3.0, 5), 1);
+        assert_eq!(slide_number(2.6, 5), 3);
+        assert_eq!(slide_number(9.0, 5), 5);
+    }
 }

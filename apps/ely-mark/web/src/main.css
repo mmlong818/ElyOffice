@@ -116,12 +116,22 @@ a {
   list-style: none;
 }
 
+/* A text-sized box, centred on the first line. */
 .milkdown li[data-item-type='task']::before {
-  content: '☐ ';
+  content: '';
+  flex: none;
+  box-sizing: border-box;
+  width: 1em;
+  height: 1em;
+  margin-top: calc(0.25em + (1lh - 1em) / 2);
+  border: 0.09em solid var(--ely-fg-muted);
+  border-radius: 0.2em;
 }
 
 .milkdown li[data-item-type='task'][data-checked='true']::before {
-  content: '☑ ';
+  border-color: var(--ely-link);
+  background: var(--ely-link);
+  box-shadow: inset 0 0 0 0.18em var(--ely-bg);
 }
 
 .milkdown hr {

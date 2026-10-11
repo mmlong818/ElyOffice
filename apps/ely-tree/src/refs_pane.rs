@@ -24,7 +24,7 @@ impl Tree {
     pub fn refs_pane(&self, cx: &mut Context<Self>) -> AnyElement {
         let found = self
             .active()
-            .and_then(|opened| match (&opened.refs, &self.picked_ref) {
+            .and_then(|opened| match (&opened.refs, &opened.picked_ref) {
                 (Some(Ok(refs)), Some((kind, name))) => refs
                     .iter()
                     .find(|r| r.kind == *kind && r.name == *name)
@@ -50,7 +50,10 @@ impl Tree {
                     found.subject
                 ),
             )
-            .text(label("tree.ref.when"), when(found.at));
+            .text(
+                label("tree.ref.when"),
+                found.at.map_or_else(|| "—".into(), when),
+            );
         if let Some(upstream) = &found.upstream {
             let track = match found.track {
                 Some((ahead, behind)) => format!("{upstream} ↑{ahead} ↓{behind}"),

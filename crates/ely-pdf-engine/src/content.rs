@@ -49,6 +49,8 @@ pub enum Wrote {
     Done(String),
     /// The font lacks this character; nothing changed.
     Missing(char),
+    /// The document's own font cannot write; nothing changed.
+    Unwritable,
     /// BGRA of the area, its size, whether text grew.
     Preview(Vec<u8>, (u32, u32), bool),
 }
@@ -113,11 +115,13 @@ impl Worker {
                 let code = u32::try_from(reply.u64()?).map_err(io::Error::other)?;
                 Ok(Wrote::Missing(char::from_u32(code).ok_or_else(|| io::Error::other("a bad missing glyph"))?))
             }
-            _ => {
+            1 => {
                 let size = (reply.u64()? as u32, reply.u64()? as u32);
                 let grew = reply.u64()? != 0;
                 Ok(Wrote::Preview(reply.blob()?, size, grew))
             }
+            3 => Ok(Wrote::Unwritable),
+            other => Err(io::Error::other(format!("a text reply of kind {other}"))),
         }
     }
 

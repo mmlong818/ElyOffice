@@ -272,15 +272,13 @@ impl Render for Navigator {
                 if let Some(at) = self.outline.iter().position(|heading| heading.current) {
                     outline = outline.current(at.to_string());
                 }
-                let this = this.clone();
+                // The places shown: a reread may change the list.
+                let places: Vec<_> = self.outline.iter().map(|heading| heading.rect).collect();
+                let docs = self.docs.clone();
                 outline
                     .on_select(move |key, _, cx| {
                         let at: usize = key.parse().expect("an outline index");
-                        let (to, docs) = {
-                            let navigator = this.read(cx);
-                            (navigator.outline[at].rect, navigator.docs.clone())
-                        };
-                        Navigator::jump(&docs, to, cx);
+                        Navigator::jump(&docs, places[at], cx);
                     })
                     .into_any_element()
             }

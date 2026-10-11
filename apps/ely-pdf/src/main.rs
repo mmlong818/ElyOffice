@@ -1,8 +1,10 @@
+// Release builds open no console on Windows.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod annotate;
 mod ask;
 mod attach;
+mod backdrop;
 mod content;
 mod document;
 mod editing;

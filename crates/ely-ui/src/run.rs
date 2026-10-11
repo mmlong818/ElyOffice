@@ -15,6 +15,14 @@ pub fn run<V: Render>(
     app: AppId,
     root: impl FnOnce(AppId, &mut Window, &mut App) -> Entity<V> + 'static,
 ) {
+    // As the installer after an update, nothing else runs.
+    if let Some(code) = crate::updates::installer(app) {
+        std::process::exit(code);
+    }
+    // Before the log: a second copy must not trim it.
+    if let Err(error) = ely_platform::instance::hold(app) {
+        startup::fail(app, &format!("{error}"));
+    }
     if let Err(error) = logging::init(app) {
         startup::fail(app, &format!("logging did not start: {error:#}"));
     }
@@ -73,8 +81,10 @@ fn open<V: Render>(
     }
     theme::install(cx);
     crate::i18n::install(cx);
+    crate::updates::install(app, cx);
+    cx.on_action(|_: &crate::commands::CheckForUpdates, cx| crate::updates::check_now(cx));
     crate::commands::bind_keys(cx);
-    cx.on_action(|_: &crate::commands::Quit, cx| cx.quit());
+    crate::commands::bind_quit(cx);
     cx.on_action(move |_: &crate::commands::OpenSettings, cx| crate::settings::open(app, cx));
     let mut options = WindowOptions {
         focus: smoke == Smoke::Off,

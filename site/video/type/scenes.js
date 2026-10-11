@@ -118,21 +118,25 @@ function title(ctx, t) {
   text(ctx, { s: "六个桌面应用", x: left, y: y + 46, size: 28, color: SOFT, a, align: "left", track: 2 });
 }
 
+/** App `name`'s letter cubes at `t` in its bar `b`. */
+export function nameCubes(name, b, t) {
+  const t0 = bar(b);
+  const list = word(name, () => INK);
+  const build = slots(list, 8);
+  const out = slots(list, 4, 0);
+  return list.flatMap((c, i) => {
+    const at = arrive(t, t0 + (build[i] + 1) * SIX);
+    if (!at) return [];
+    const gone = lift(t, t0 + (9 + out[i]) * SIX, LAND);
+    return [box(c, at.dz + gone.dz, at.a * gone.a)];
+  });
+}
+
 /** An app's first bar: its name builds at left. */
 function app(name, b) {
   return (ctx, t) => {
-    const t0 = bar(b);
-    const list = word(name, () => INK);
-    const build = slots(list, 8);
-    const out = slots(list, 4, 0);
-    const v = place(list, 16, { left: 112, cy: 800 });
-    const boxes = list.flatMap((c, i) => {
-      const at = arrive(t, t0 + (build[i] + 1) * SIX);
-      if (!at) return [];
-      const gone = lift(t, t0 + (13 + out[i]) * SIX, LAND);
-      return [box(c, at.dz + gone.dz, at.a * gone.a)];
-    });
-    cubes(ctx, v, boxes);
+    const v = place(word(name, () => INK), 16, { left: 112, cy: 800 });
+    cubes(ctx, v, nameCubes(name, b, t));
   };
 }
 
@@ -159,7 +163,7 @@ function end(ctx, t) {
   const line = { x: left, align: "left", a };
   text(ctx, { ...line, s: "macOS now · Windows and Linux soon", y, size: 34, color: "#c4c2c0" });
   text(ctx, { ...line, s: "macOS 现已推出 · Windows 与 Linux 即将推出", y: y + 46, size: 28, color: "#acaaa8" });
-  const url = "github.com/ZacharyZhang-NY/ElyOffice";
+  const url = "git.zacharyzhang.com/ZacharyZhang-NY/ElyOffice";
   text(ctx, { ...line, s: url, y: y + 122, size: 30, color: "#f5f5f7", a: fade(t0 + BAR), weight: 400 });
 }
 

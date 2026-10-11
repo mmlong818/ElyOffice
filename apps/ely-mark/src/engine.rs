@@ -132,7 +132,7 @@ impl Engine for Mark {
     }
 
     fn edited(view: &MarkView) -> u64 {
-        view.changed
+        view.changed()
     }
 
     fn edit_pending(view: &MarkView) -> bool {

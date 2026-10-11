@@ -17,7 +17,7 @@ use ely_platform::trust::{self, Trust};
 use gpui::{AnyElement, App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _, StatefulInteractiveElement as _, Styled as _, TaskExt as _, Window, div};
 
 use crate::redact::beside;
-use crate::view::PdfView;
+use crate::view::{PdfView, Unread};
 use crate::viewer::Viewer;
 
 /// A signature field and the system's word on its certificate.
@@ -47,26 +47,34 @@ pub struct Signer {
 impl PdfView {
     /// Reads and checks the signatures of the file at `path`.
     pub fn ask_signatures(&mut self, path: PathBuf, cx: &mut Context<Self>) {
-        if self.signatures.as_ref().is_some_and(|(read, _)| *read == path) || self.reading_signatures {
+        let failed = self.unread.contains(&Unread::Signatures(path.clone()));
+        if self.signatures.as_ref().is_some_and(|(read, _)| *read == path) || self.reading_signatures || failed {
             return;
         }
         self.reading_signatures = true;
-        let (doc, asked) = (self.doc, path.clone());
+        // A save in between makes this read stale: dropped.
+        let (doc, asked, saves) = (self.doc, path.clone(), self.saves);
         self.off(
             move |worker| {
                 let fields = worker.signatures(doc, &path)?;
-                Ok(fields.into_iter().map(|field| {
+                Ok(Iterator::collect::<Vec<_>>(fields.into_iter().map(|field| {
                     let chain = field.signed.as_ref().map(|signed| signed.certs.clone()).filter(|certs| !certs.is_empty());
                     let trust = chain.map(|chain| trust::check(&chain).map_err(|error| error.to_string()));
                     Checked { field, trust }
-                }))
-                .map(Iterator::collect::<Vec<_>>)
+                })))
             },
             move |view, read: io::Result<Vec<Checked>>, cx| {
                 view.reading_signatures = false;
+                if view.saves != saves {
+                    log::info!("pdf: a signature read from before a save is dropped");
+                    return cx.notify();
+                }
                 match read {
                     Ok(read) => view.signatures = Some((asked, read)),
-                    Err(error) => view.fail("reading signatures", &error, cx),
+                    Err(error) => {
+                        view.unread.insert(Unread::Signatures(asked));
+                        view.fail("reading signatures", &error, cx)
+                    }
                 }
                 cx.notify();
             },

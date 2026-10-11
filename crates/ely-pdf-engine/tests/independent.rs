@@ -61,3 +61,28 @@ fn text_a_field_and_page_order_read_back_elsewhere() {
     assert!(pages[1].0.contains("Changed words") && !pages[1].0.contains("First page"), "{pages:?}");
     assert_eq!(pages[1].1, vec!["Ada".to_string()]);
 }
+
+#[test]
+fn text_in_a_subset_font_reads_back_elsewhere() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/office/t.pdf");
+    let mut worker = worker();
+    let mut doc = worker.open(&path).expect("opens").doc;
+    let blocks = worker.text_blocks(doc, 0).expect("blocks");
+    let (block, read) = blocks.iter().enumerate().find(|(_, b)| b.text.contains("BUNDLE")).expect("the block");
+    let writing = Writing {
+        block: Some(block),
+        expected: read.text.clone(),
+        text: "TEXT BUNDLE".into(),
+        font: "original".into(),
+        size: read.size,
+        rgb: read.rgb,
+        bx: [read.rect[0], read.rect[1], (read.rect[2] - read.rect[0]) * 2.0],
+    };
+    assert!(matches!(worker.put_text(doc, 0, &writing, 0.0).expect("writes"), Wrote::Done(_)));
+    doc = worker.now(doc).expect("the state");
+    let out = dir.path().join("edited.pdf");
+    worker.save(doc, &out).expect("saves");
+    let pages = read_back(&out);
+    assert!(pages[0].0.contains("TEXT BUNDLE"), "{pages:?}");
+}

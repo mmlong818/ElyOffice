@@ -2,6 +2,7 @@
 
 pub(super) const EN: &[(&str, &str)] = &[
     ("menu.slide", "Slide"),
+    ("show.dialog.busy", "Finish or close the open dialog first"),
     ("show.slide.new", "New Slide"),
     ("show.slide.duplicate", "Duplicate Slide"),
     ("show.slide.delete", "Delete Slide"),
@@ -173,6 +174,7 @@ pub(super) const EN: &[(&str, &str)] = &[
         "These notes are formatted; Ely shows them read-only to keep it.",
     ),
     ("show.remark.slide", "Slide {n}"),
+    ("show.remark.bad", "Comments with unreadable times: {n}, first {at}"),
     ("show.remark.text", "Comment"),
     ("show.remark.new_title", "New Comment"),
     ("show.remark.edit_title", "Edit Comment"),
@@ -189,6 +191,7 @@ pub(super) const EN: &[(&str, &str)] = &[
 
 pub(super) const ZH_CN: &[(&str, &str)] = &[
     ("menu.slide", "幻灯片"),
+    ("show.dialog.busy", "请先完成或关闭已打开的对话框"),
     ("show.slide.new", "新建幻灯片"),
     ("show.slide.duplicate", "复制幻灯片"),
     ("show.slide.delete", "删除幻灯片"),
@@ -351,6 +354,7 @@ pub(super) const ZH_CN: &[(&str, &str)] = &[
     ("show.notes.none", "这张幻灯片没有备注框。"),
     ("show.notes.rich", "备注带格式，为保留格式在此只读。"),
     ("show.remark.slide", "第 {n} 张幻灯片"),
+    ("show.remark.bad", "时间读不出的批注：{n} 条，第一条为 {at}"),
     ("show.remark.text", "批注"),
     ("show.remark.new_title", "新建批注"),
     ("show.remark.edit_title", "编辑批注"),

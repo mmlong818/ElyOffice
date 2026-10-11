@@ -37,7 +37,7 @@ fn open_sheet() -> (tempfile::TempDir, Worker, Doc) {
     let source = dir.path().join("in.fods");
     write(&source, FODS);
     let doc = worker
-        .load(&format!("file://{}", source.display()))
+        .load(&crate::file_url(&source))
         .expect("the sheet loads");
     (dir, worker, doc)
 }
@@ -174,9 +174,24 @@ pub(super) fn open_book(text: &str) -> (tempfile::TempDir, Worker, Doc) {
     let source = dir.path().join("book.fods");
     write(&source, text);
     let doc = worker
-        .load(&format!("file://{}", source.display()))
+        .load(&crate::file_url(&source))
         .expect("the book loads");
-    doc.visible_area(&mut worker, (0, 0, 15000, 10000))
+    doc.visible_area(&mut worker, (0, 0, 15000, 10000), (256, 3840))
         .expect("the area");
     (dir, worker, doc)
+}
+
+#[test]
+fn a_theme_switch_is_no_edit() {
+    if install().is_none() {
+        eprintln!("SKIP: no pinned LOK build");
+        return;
+    }
+    let (_dir, mut worker, doc) = open_book(FODS);
+    for scheme in ["COLOR_SCHEME_ELY_DARK", "COLOR_SCHEME_ELY_LIGHT"] {
+        worker.run(&doc, "view.theme", &[scheme]).expect("the theme runs");
+        let undo = worker.values(&doc, ".uno:Undo").expect("the undo stack");
+        let undo: serde_json::Value = serde_json::from_str(&undo).expect("undo JSON");
+        assert_eq!(undo["actions"], "", "{scheme} left undo steps");
+    }
 }

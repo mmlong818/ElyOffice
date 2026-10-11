@@ -15,7 +15,7 @@ use gpui::{
 };
 
 use crate::document::{RemoveAttachment, SaveAttachment};
-use crate::view::PdfView;
+use crate::view::{PdfView, Unread};
 use crate::viewer::Viewer;
 
 /// A size as people read it.
@@ -30,7 +30,7 @@ pub fn size(bytes: u64) -> String {
 impl PdfView {
     /// Reads the attachments once an edit.
     pub fn ask_files(&mut self, cx: &mut Context<Self>) {
-        if self.files.is_some() || self.reading_files {
+        if self.files.is_some() || self.reading_files || self.unread.contains(&Unread::Files) {
             return;
         }
         self.reading_files = true;
@@ -44,7 +44,10 @@ impl PdfView {
                 }
                 match read {
                     Ok(files) => view.files = Some(files),
-                    Err(error) => view.fail("reading attachments", &error, cx),
+                    Err(error) => {
+                        view.unread.insert(Unread::Files);
+                        view.fail("reading attachments", &error, cx)
+                    }
                 }
                 cx.notify();
             },

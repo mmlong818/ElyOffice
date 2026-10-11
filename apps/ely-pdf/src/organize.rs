@@ -81,7 +81,7 @@ impl PdfView {
         let pages = self.chosen_pages();
         let before = pages.iter().filter(|page| **page < to).count();
         let landed = (to - before..to - before + pages.len()).collect();
-        self.edit_picking("moving pages", Some(landed), move |worker, doc| worker.move_pages(doc, &pages, to), cx);
+        self.queue_edit("moving pages", Some(landed), true, move |worker, doc| worker.move_pages(doc, &pages, to), cx);
     }
 }
 
@@ -105,14 +105,14 @@ impl Viewer {
         }
         view.update(cx, |view, cx| {
             view.picked.clear();
-            view.edit("deleting pages", move |worker, doc| worker.delete_pages(doc, &pages), cx);
+            view.edit_pages("deleting pages", move |worker, doc| worker.delete_pages(doc, &pages), cx);
         });
     }
 
     fn turn_pages(&mut self, by: i32, cx: &mut Context<Self>) {
         self.on_pages(cx, |view, cx| {
             let pages = view.chosen_pages();
-            view.edit("turning pages", move |worker, doc| worker.rotate_pages(doc, &pages, by), cx);
+            view.edit_pages("turning pages", move |worker, doc| worker.rotate_pages(doc, &pages, by), cx);
         });
     }
 
@@ -136,7 +136,7 @@ impl Viewer {
         self.on_pages(cx, |view, cx| {
             let at = view.chosen_pages().last().copied().expect("one page at least");
             let size = view.sizes[at];
-            view.edit("inserting a page", move |worker, doc| worker.insert_blank(doc, at + 1, size), cx);
+            view.edit_pages("inserting a page", move |worker, doc| worker.insert_blank(doc, at + 1, size), cx);
         });
     }
 
@@ -148,7 +148,7 @@ impl Viewer {
         self.pick(false, cx, |viewer, path: PathBuf, cx| {
             viewer.on_pages(cx, |view, cx| {
                 let at = view.chosen_pages().last().copied().expect("one page at least") + 1;
-                view.edit(
+                view.edit_pages(
                     "inserting pages",
                     move |worker, doc| worker.insert_file(doc, at, &path).map(|(_, mark)| mark),
                     cx,

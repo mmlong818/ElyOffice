@@ -33,6 +33,39 @@ fn pages_export_as_images_and_text() {
     assert!(text.contains("First") && text.contains("Second"), "{text}");
 }
 
+#[cfg(unix)]
+#[test]
+fn a_write_the_system_refuses_reports_it_without_a_crash() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let mut cx = TestAppContext::single();
+    let path = file(dir.path(), "doc.pdf", &[(612.0, 792.0, &["First"])]);
+    let (viewer, cx) = windowed(&mut cx, dir.path(), &[path], true);
+    shown(cx, &viewer);
+    let locked = dir.path().join("locked");
+    std::fs::create_dir(&locked).expect("a folder");
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o500)).expect("read-only");
+    let id = cx.update(|_, app| viewer.read(app).core.tabs[0].id);
+    let txt = locked.join("doc.txt");
+    let how = Optimizing { compress: true, from: 300, to: 0 };
+    // The window's toasts live on its root.
+    let root = cx.update(|window, app| {
+        let root = ely_ui::document_root(ely_platform::AppId::Pdf, viewer.clone().into(), &ely_ui::commands::FILE, Vec::new(), window, app);
+        viewer.update(app, |viewer, _| viewer.core.root = root.downgrade());
+        root
+    });
+    cx.update(|_, app| viewer.update(app, |viewer, cx| viewer.write_export(id, Kind::Text, how, txt.clone(), cx)));
+    let failed = |app: &gpui::App| {
+        let toasts = root.read(app).toasts(app);
+        toasts.iter().any(|(text, severity)| {
+            *severity == Some(ely_gpui_component::primitives::Severity::Danger) && text.contains("Permission denied")
+        })
+    };
+    settle(cx, failed);
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o700)).expect("writable again");
+    assert!(!txt.exists(), "nothing is written");
+}
+
 #[test]
 fn a_damaged_file_opens_repaired_and_saves_as_a_new_file() {
     let dir = tempfile::tempdir().expect("a temp dir");
@@ -43,7 +76,7 @@ fn a_damaged_file_opens_repaired_and_saves_as_a_new_file() {
     bytes.truncate(at);
     bytes.extend_from_slice(b"startxref\n9\n%%EOF\n");
     std::fs::write(&path, &bytes).expect("writes");
-    let (viewer, cx) = windowed(&mut cx, dir.path(), &[path.clone()], true);
+    let (viewer, cx) = windowed(&mut cx, dir.path(), std::slice::from_ref(&path), true);
     let view = shown(cx, &viewer);
     assert_eq!(cx.update(|_, app| viewer.read(app).active_tab().and_then(|tab| tab.risk)), Some(ely_office::Risk::Repaired));
     assert!(cx.update(|_, app| view.read(app).repair.as_ref().is_some_and(|report| !report.is_empty())));
@@ -125,7 +158,7 @@ fn a_picture_that_breaks_as_it_draws_stops_an_overwrite() {
     let dir = tempfile::tempdir().expect("a temp dir");
     let mut cx = TestAppContext::single();
     let (path, bytes) = broken_picture(dir.path(), 792.0, 600.0);
-    let (viewer, cx) = windowed(&mut cx, dir.path(), &[path.clone()], true);
+    let (viewer, cx) = windowed(&mut cx, dir.path(), std::slice::from_ref(&path), true);
     shown(cx, &viewer);
     settle(cx, |app| viewer.read(app).active_tab().and_then(|tab| tab.risk) == Some(ely_office::Risk::Repaired));
     let id = cx.update(|_, app| viewer.read(app).core.tabs[0].id);
@@ -151,7 +184,7 @@ fn a_picture_never_drawn_is_checked_before_an_overwrite() {
     let path = dir.path().join("long.pdf");
     worker.save(doc, &path).expect("saves");
     let bytes = std::fs::read(&path).expect("reads");
-    let (viewer, cx) = windowed(&mut cx, dir.path(), &[path.clone()], true);
+    let (viewer, cx) = windowed(&mut cx, dir.path(), std::slice::from_ref(&path), true);
     shown(cx, &viewer);
     for _ in 0..10 {
         super::frames(cx);
@@ -161,4 +194,28 @@ fn a_picture_never_drawn_is_checked_before_an_overwrite() {
     cx.update(|window, app| viewer.update(app, |viewer, cx| viewer.save(id, None, window, cx)));
     settle(cx, |app| viewer.read(app).active_tab().and_then(|tab| tab.risk) == Some(ely_office::Risk::Repaired));
     assert_eq!(std::fs::read(&path).expect("reads"), bytes, "Save turned into Save As");
+}
+
+#[test]
+fn an_edited_document_does_not_quote_the_files_size() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let mut cx = TestAppContext::single();
+    let path = file(dir.path(), "doc.pdf", &[(612.0, 792.0, &["First"])]);
+    let (viewer, cx) = windowed(&mut cx, dir.path(), &[path], true);
+    let view = shown(cx, &viewer);
+    // The window's toasts live on its root.
+    let root = cx.update(|window, app| {
+        let root = ely_ui::document_root(ely_platform::AppId::Pdf, viewer.clone().into(), &ely_ui::commands::FILE, Vec::new(), window, app);
+        viewer.update(app, |viewer, _| viewer.core.root = root.downgrade());
+        root
+    });
+    let note = ely_pdf_engine::NewAnnot { page: 0, shape: ely_pdf_engine::Shape::Note((100.0, 500.0)), rgb: None, contents: "n".into(), author: String::new() };
+    cx.update(|_, app| view.update(app, |view, cx| view.annotate("a note", vec![note], cx)));
+    settle(cx, |app| view.read(app).settled() && view.read(app).modified());
+    let id = cx.update(|_, app| viewer.read(app).core.tabs[0].id);
+    let out = dir.path().join("small.pdf");
+    let how = Optimizing { compress: true, from: 300, to: 150 };
+    cx.update(|_, app| viewer.update(app, |viewer, cx| viewer.write_export(id, Kind::Optimized, how, out.clone(), cx)));
+    let done = cx.update(|_, app| crate::viewer::Viewer::text(app, "pdf.export.done", &[("name", "small.pdf")]));
+    settle(cx, |app| root.read(app).toasts(app).iter().any(|(text, _)| *text == done));
 }

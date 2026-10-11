@@ -2,7 +2,7 @@
 
 use std::rc::Rc;
 
-use ely_files::{Fingerprint, Policy, PolicyEngine};
+use ely_files::Fingerprint;
 use ely_gpui_component::{
     buttons::{Button, ButtonVariant},
     git::{self as merging, Region, Take, ThreeWayMerge},
@@ -102,7 +102,7 @@ impl Desk {
             Choice::Mine => {
                 if let Some(tab) = self.tab_mut(id) {
                     tab.session.rebase(fingerprint);
-                    tab.extra.policy = PolicyEngine::new(Policy::MarkAutoSave, true);
+                    tab.extra.restart_autosave();
                 }
                 self.set_outside(id, Outside::Clear, cx);
                 self.save(id, None, window, cx);
@@ -112,19 +112,10 @@ impl Desk {
                 if open > 0 {
                     return log::error!("mark: a merge with {open} open conflicts");
                 }
-                let Some(tab) = self.tab_mut(id) else {
-                    return;
-                };
-                if let Err(error) = tab.session.reload_at(fingerprint) {
-                    let why = error.to_string();
-                    return self.set_outside(id, Outside::Unread(why), cx);
+                // Disk text is saved; the merge edits it.
+                if let Some(view) = self.adopt_disk(id, &disk, fingerprint, cx) {
+                    view.update(cx, |view, cx| view.adopt(merged, cx));
                 }
-                tab.extra.base = disk.text.clone();
-                tab.extra.policy = PolicyEngine::new(Policy::MarkAutoSave, true);
-                tab.doc.lock().expect("the text lock").source = disk;
-                let view = tab.view.clone();
-                view.update(cx, |view, cx| view.adopt(merged, cx));
-                self.set_outside(id, Outside::Clear, cx);
             }
         }
     }

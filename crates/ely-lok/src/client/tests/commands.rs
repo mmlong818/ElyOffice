@@ -240,7 +240,7 @@ fn a_kernel_dialog_is_closed_and_reported() {
         let source = dir.path().join("in.fods");
         write(&source, FODS);
         let doc = worker
-            .load(&format!("file://{}", source.display()))
+            .load(&crate::file_url(&source))
             .expect("the sheet loads");
         let base = poll_until(&mut worker, &doc, &Events::default(), SETTLE, |_| false);
         // Calc's Backspace opens Delete Contents.
@@ -436,7 +436,7 @@ fn an_owned_save_clears_the_modified_state() {
         state(seen, ".uno:ModifiedStatus") == Some("true")
     });
     let copy = dir.path().join("copy.docx");
-    doc.save_owned(&mut worker, &format!("file://{}", copy.display()), "docx")
+    doc.save_owned(&mut worker, &crate::file_url(&copy), "docx")
         .expect("the owned save");
     let saved = poll_until(&mut worker, &doc, &base, SETTLE, |seen| {
         state(seen, ".uno:ModifiedStatus") == Some("false")

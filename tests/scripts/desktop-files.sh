@@ -17,7 +17,7 @@ command -v desktop-file-validate >/dev/null || {
 count=0
 while IFS=$'\t' read -r slug name _; do
   file=$work/$slug.desktop
-  "$root/packaging/linux/appimage.sh" --desktop "$slug" >"$file"
+  "$root/packaging/linux/package.sh" --desktop "$slug" >"$file"
   report=$(desktop-file-validate "$file" 2>&1) || fail "$slug.desktop is not valid: $report"
   [ -z "$report" ] || fail "$slug.desktop has hints: $report"
   grep -qx "Name=$name" "$file" || fail "$slug.desktop has the wrong name"

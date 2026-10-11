@@ -18,10 +18,13 @@ use gpui::{AnyElement, App, Context, IntoElement, SharedString, WeakEntity};
 use super::window::SettingsView;
 use crate::i18n::text;
 
+/// Each kind's size, and whether a clear waits.
+type Usage = Vec<(Kind, u64, bool)>;
+
 /// Last read sizes and limits; a clear waiting or failed.
 #[derive(Default)]
 pub(crate) struct Storage {
-    usage: Option<Result<Vec<(Kind, u64, bool)>, SharedString>>,
+    usage: Option<Result<Usage, SharedString>>,
     limits: Option<Result<Limits, SharedString>>,
     /// A clear waiting for the user's yes.
     confirming: Option<Kind>,

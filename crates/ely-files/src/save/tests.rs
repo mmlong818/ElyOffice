@@ -462,8 +462,8 @@ fn save_as_onto_its_own_file_checks_for_outside_changes() {
     let alias = dir.path().join("alias.docx");
     #[cfg(unix)]
     std::os::unix::fs::symlink(&own, &alias).expect("the alias");
-    #[cfg(not(unix))]
-    let alias = own.clone();
+    #[cfg(windows)]
+    std::fs::hard_link(&own, &alias).expect("the alias");
     assert!(matches!(
         save_as(&mut session, &alias, b"local"),
         Err(SaveError::Conflict)

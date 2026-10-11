@@ -182,3 +182,60 @@ fn twin_reflog_events_stay_apart() {
         .collect();
     assert_eq!(found, [2], "it moved one down, alone");
 }
+
+#[test]
+fn a_shown_file_deleted_since_says_it_changed() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let root = committed(dir.path());
+    std::fs::write(root.join("gone.txt"), "x").expect("writes");
+    let clean = recover::clean_preview(&git(), &root, false).expect("previews");
+    std::fs::remove_file(root.join("gone.txt")).expect("removes");
+    let write = Write::Clean {
+        files: clean.files,
+        dirs: clean.dirs,
+        ignored: false,
+    };
+    let error = run(&root, write).expect_err("refused");
+    assert!(
+        error
+            .to_string()
+            .contains("gone.txt changed since the preview"),
+        "{error}"
+    );
+}
+
+#[test]
+fn a_pick_in_one_repository_stays_there() {
+    let (one, other) = (
+        tempfile::tempdir().expect("a temp dir"),
+        tempfile::tempdir().expect("a temp dir"),
+    );
+    let (first, second) = (committed(one.path()), committed(other.path()));
+    let mut cx = TestAppContext::single();
+    let (tree, cx) = window(&mut cx, one.path());
+    for root in [&first, &second] {
+        cx.update(|_, app| tree.update(app, |tree, cx| tree.open_path(root.clone(), cx)));
+    }
+    settle(cx, |app| {
+        tree.read(app).repos.len() == 2 && branch(tree.read(app)).is_some()
+    });
+    let ids = cx.update(|_, app| {
+        tree.read(app)
+            .repos
+            .iter()
+            .map(|o| o.id)
+            .collect::<Vec<_>>()
+    });
+    cx.update(|_, app| {
+        tree.update(app, |tree, cx| {
+            tree.activate(Some(ids[0]), cx);
+            tree.pick_place(crate::places::Place::Remote("origin".into()), cx);
+            tree.activate(Some(ids[1]), cx);
+        })
+    });
+    assert!(cx.update(|_, app| {
+        tree.read(app)
+            .active()
+            .is_some_and(|o| o.picked_place.is_none())
+    }));
+}

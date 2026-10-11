@@ -18,11 +18,16 @@ pub use client::{
 };
 #[cfg(feature = "view")]
 pub use view::{
-    CONTEXT, Copy, Cut, Geom, Layout, LokError, LokView, Paste, Reported, TILE_TWIPS, ZOOM_STEPS,
+    CONTEXT, Copy, Cut, Geom, Layout, LokError, LokView, Paste, Reported, ZOOM_STEPS,
     Zoomed, init, layout, paper, read_off, scheme,
 };
 #[cfg(feature = "view")]
 mod view;
+
+/// One tile edge in twips.
+pub const TILE_TWIPS: i32 = 3840;
+/// Twips per pixel at zoom 1.0 and DPI 1.0.
+pub(crate) const TWIPS_PER_PIXEL: f32 = 15.0;
 pub use ipc::STALE;
 pub use ipc::file_url_of as file_url;
 pub use ipc::path_of_file_url as file_path;

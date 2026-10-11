@@ -11,7 +11,8 @@ use crate::{AppId, lock::FileLock};
 
 mod shared;
 pub use shared::{
-    APPEARANCE, AUTHOR, Appearance, LANGUAGE, Language, MOTION, Motion, OMARCHY_SYNC, Shared, word,
+    APPEARANCE, AUTHOR, Appearance, CHECK_UPDATES, LANGUAGE, Language, MOTION, Motion,
+    OMARCHY_SYNC, Shared, word,
 };
 
 /// The layout this build reads and writes.

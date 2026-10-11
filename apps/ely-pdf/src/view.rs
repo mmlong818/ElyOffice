@@ -23,6 +23,17 @@ pub struct Failed(pub String);
 /// The document changed what it shows.
 pub struct Reported;
 
+/// A page or document read that failed once.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum Unread {
+    Notes(usize),
+    Layer(usize),
+    Names,
+    Files,
+    /// The signatures of the file at this path.
+    Signatures(std::path::PathBuf),
+}
+
 pub struct PdfView {
     worker: Arc<Mutex<Mupdf>>,
     pub doc: Doc,
@@ -37,10 +48,14 @@ pub struct PdfView {
     pub tiles: HashMap<TileKey, Arc<RenderImage>>,
     /// Images no longer drawn, freed at the next render.
     pub retired: ely_gpui_component::primitives::Retired,
-    /// A tile reached the screen; logged once (PERF-05).
-    pub drawn: bool,
+    /// Tile pixels painted; the first paint is logged (PERF-05).
+    pub painted: f64,
     /// Tiles the worker could not draw; not asked again.
     pub failed: HashSet<TileKey>,
+    /// Reads that failed; not asked again until an edit.
+    pub unread: HashSet<Unread>,
+    /// Old tiles shown under their page until covered.
+    pub backdrop: Vec<crate::backdrop::Old>,
     pub text: HashMap<usize, Arc<Vec<Char>>>,
     pub asking_text: HashSet<usize>,
     pub marks: Vec<Bookmark>,
@@ -63,12 +78,18 @@ pub struct PdfView {
     /// Edits waiting their turn, and whether one runs.
     pub queue: VecDeque<crate::edits::Queued>,
     pub editing: bool,
+    /// The running edit may move pages.
+    pub moving: bool,
     /// History marks: now, and at the last load or save.
     pub mark: String,
     pub saved: String,
+    /// Saves so far: a read from before one is stale.
+    pub saves: u64,
     /// Page pictures for the side panel, by page and darkness.
     pub thumbs: HashMap<(usize, bool), Arc<RenderImage>>,
     pub thumbs_failed: HashSet<usize>,
+    /// Pictures from before an edit; shown until repainted.
+    pub thumbs_stale: HashSet<(usize, bool)>,
     /// A picture is on its way from the worker.
     pub thumbing: bool,
     /// Pages picked in the side panel, and the anchor.
@@ -143,7 +164,8 @@ impl PdfView {
     pub fn retire_all(&mut self) -> ely_gpui_component::primitives::Retired {
         let mut images = std::mem::take(&mut self.retired);
         let tiles = self.tiles.drain().map(|(_, image)| image);
-        for image in tiles.chain(self.thumbs.drain().map(|(_, image)| image)) {
+        let old = self.backdrop.drain(..).map(|old| old.image);
+        for image in tiles.chain(old).chain(self.thumbs.drain().map(|(_, image)| image)) {
             images.push(image);
         }
         images
@@ -164,8 +186,10 @@ impl PdfView {
             scroll: ScrollHandle::new(),
             tiles: HashMap::new(),
             retired: Default::default(),
-            drawn: false,
+            painted: 0.0,
             failed: HashSet::new(),
+            unread: HashSet::new(),
+            backdrop: Vec::new(),
             text: HashMap::new(),
             asking_text: HashSet::new(),
             marks: loaded.marks,
@@ -180,10 +204,13 @@ impl PdfView {
             edited: 0,
             queue: VecDeque::new(),
             editing: false,
+            moving: false,
             saved: loaded.mark.clone(),
+            saves: 0,
             mark: loaded.mark,
             thumbs: HashMap::new(),
             thumbs_failed: HashSet::new(),
+            thumbs_stale: HashSet::new(),
             thumbing: false,
             picked: BTreeSet::new(),
             anchor: None,
@@ -223,10 +250,10 @@ impl PdfView {
     pub fn fail(&self, what: &str, error: &io::Error, cx: &mut Context<Self>) {
         // Engine text may quote the document: the user sees it.
         log::error!("pdf: {what} failed ({:?})", error.kind());
-        let text = match error.kind() {
+        let text = match ely_pdf_engine::refused(error) {
             _ if ely_pdf_engine::is_stale(error) => ely_ui::i18n::text(cx, "pdf.object.changed", &[]),
-            io::ErrorKind::PermissionDenied => restricted(&error.to_string(), cx),
-            _ => ely_ui::i18n::text(cx, "pdf.failed", &[("what", what), ("error", &error.to_string())]),
+            Some(needed) => restricted(needed, cx),
+            None => ely_ui::i18n::text(cx, "pdf.failed", &[("what", what), ("error", &error.to_string())]),
         };
         cx.emit(Failed(text.to_string()));
     }
@@ -311,6 +338,9 @@ impl PdfView {
 
     /// Every page tile goes; images are freed next render.
     pub fn retire_tiles(&mut self) {
+        for old in self.backdrop.drain(..) {
+            self.retired.push(old.image);
+        }
         for (_, image) in self.tiles.drain() {
             self.retired.push(image);
         }

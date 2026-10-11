@@ -6,7 +6,7 @@ use std::{
     time::Duration,
 };
 
-use anyhow::{Context as _, Result};
+use anyhow::Result;
 use cef::{args::Args, *};
 use futures::{FutureExt as _, StreamExt as _, channel::mpsc};
 use gpui::{App, AsyncApp, Global, WeakEntity};
@@ -14,10 +14,12 @@ use gpui::{App, AsyncApp, Global, WeakEntity};
 use crate::{handlers, surface::Shared, view::WebView};
 
 /// CEF beside the app, else the fetched one.
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 fn framework_dir() -> Result<PathBuf> {
     #[cfg(target_os = "macos")]
     {
         const NAME: &str = "Chromium Embedded Framework.framework";
+        use anyhow::Context as _;
         let exe = std::env::current_exe()?;
         let mut places: Vec<PathBuf> = Vec::new();
         if let Some(dir) = std::env::var_os("ELY_CEF") {
@@ -41,6 +43,7 @@ fn framework_dir() -> Result<PathBuf> {
 
     #[cfg(target_os = "windows")]
     {
+        use anyhow::Context as _;
         const NAME: &str = "libcef.dll";
         let exe = std::env::current_exe()?;
         let mut places = Vec::new();
@@ -62,28 +65,63 @@ fn framework_dir() -> Result<PathBuf> {
 
 static LOADED: OnceLock<std::result::Result<PathBuf, String>> = OnceLock::new();
 
-/// Loads the framework once; every process needs it first.
+/// Loads CEF once and sets its API version.
 fn load() -> Result<PathBuf> {
     LOADED
         .get_or_init(|| {
-            let dir = framework_dir().map_err(|error| format!("{error:#}"))?;
-            #[cfg(target_os = "macos")]
-            let library = dir.join("Chromium Embedded Framework");
-            #[cfg(target_os = "macos")]
-            let name = std::ffi::CString::new(library.as_os_str().as_encoded_bytes())
-                .map_err(|error| error.to_string())?;
-            #[cfg(target_os = "macos")]
-            if unsafe { load_library(Some(&*name.as_ptr().cast())) } != 1 {
-                return Err(format!("CEF did not load from {}", library.display()));
-            }
-            // Windows imports libcef.dll at process startup. The linker and the
-            // Windows DLL search path require it beside the executable.
+            let dir = open()?;
+            // Versioned calls exit the process until this runs.
             let _ = api_hash(sys::CEF_API_VERSION_LAST, 0);
             log::info!("web: CEF loaded from {}", dir.display());
             Ok(dir)
         })
         .clone()
         .map_err(anyhow::Error::msg)
+}
+
+/// Loads the framework; its folder.
+#[cfg(target_os = "macos")]
+fn open() -> std::result::Result<PathBuf, String> {
+    let dir = framework_dir().map_err(|error| format!("{error:#}"))?;
+    let library = dir.join("Chromium Embedded Framework");
+    let name = std::ffi::CString::new(library.as_os_str().as_encoded_bytes()).map_err(|error| error.to_string())?;
+    if unsafe { load_library(Some(&*name.as_ptr().cast())) } != 1 {
+        return Err(format!("CEF did not load from {}", library.display()));
+    }
+    Ok(dir)
+}
+
+/// The folder of the libcef.dll this process linked.
+#[cfg(windows)]
+fn open() -> std::result::Result<PathBuf, String> {
+    use std::os::windows::ffi::OsStringExt as _;
+    use windows_sys::Win32::System::LibraryLoader::{GetModuleFileNameW, GetModuleHandleW};
+    let name: Vec<u16> = "libcef.dll".encode_utf16().chain([0]).collect();
+    let module = unsafe { GetModuleHandleW(name.as_ptr()) };
+    if module.is_null() {
+        return Err(format!("libcef.dll is not loaded: {}", std::io::Error::last_os_error()));
+    }
+    let mut path = vec![0u16; 32_768];
+    let len = unsafe { GetModuleFileNameW(module, path.as_mut_ptr(), path.len() as u32) } as usize;
+    if len == 0 || len == path.len() {
+        return Err(format!("libcef.dll has no path: {}", std::io::Error::last_os_error()));
+    }
+    let file = PathBuf::from(std::ffi::OsString::from_wide(&path[..len]));
+    file.parent().map(Path::to_path_buf).ok_or_else(|| format!("{} has no folder", file.display()))
+}
+
+/// The folder of the libcef.so this process linked.
+#[cfg(target_os = "linux")]
+fn open() -> std::result::Result<PathBuf, String> {
+    use std::os::unix::ffi::OsStrExt as _;
+    let mut info: libc::Dl_info = unsafe { std::mem::zeroed() };
+    let entry = sys::cef_api_hash as *const libc::c_void;
+    if unsafe { libc::dladdr(entry, &mut info) } == 0 || info.dli_fname.is_null() {
+        return Err("libcef.so is not loaded".into());
+    }
+    let name = unsafe { std::ffi::CStr::from_ptr(info.dli_fname) };
+    let file = PathBuf::from(std::ffi::OsStr::from_bytes(name.to_bytes()));
+    file.parent().map(Path::to_path_buf).ok_or_else(|| format!("{} has no folder", file.display()))
 }
 
 /// In a CEF helper process, runs it to its end.
@@ -183,11 +221,17 @@ fn make_browsers() {
             runtime_style: RuntimeStyle::ALLOY,
             ..Default::default()
         };
+        let scripts = match surface.lock().expect("the surface lock").scripts {
+            true => State::ENABLED,
+            false => State::DISABLED,
+        };
         let settings = BrowserSettings {
             windowless_frame_rate: 60,
+            javascript: scripts,
             ..Default::default()
         };
-        let made = browser_host_create_browser(
+        // Made at once: no view ever waits on a browser.
+        let made = browser_host_create_browser_sync(
             Some(&info),
             Some(&mut handlers::client(&surface)),
             Some(&url.as_str().into()),
@@ -195,9 +239,15 @@ fn make_browsers() {
             None,
             None,
         );
-        if made != 1 {
-            surface.lock().expect("the surface lock").failed =
-                Some(format!("CEF made no browser for {url}"));
+        match made {
+            Some(browser) => {
+                handlers::adopt(&browser, surface.clone());
+                surface.lock().expect("the surface lock").browser = Some(browser);
+            }
+            None => {
+                surface.lock().expect("the surface lock").failed =
+                    Some(format!("CEF made no browser for {url}"))
+            }
         }
     }
 }
@@ -213,10 +263,11 @@ pub fn start(data: &Path, cx: &mut App) -> Result<()> {
     crate::mac::adopt_app_protocol()?;
     let exe = std::env::current_exe()?;
     // Bundled, CEF finds its helper apps; else this binary helps.
-    let bundled = framework.parent().is_some_and(|dir| {
-        let name = exe.file_name().unwrap_or_default().to_string_lossy();
-        dir.join(format!("{name} Helper.app")).is_dir()
-    });
+    let bundled = cfg!(target_os = "macos")
+        && framework.parent().is_some_and(|dir| {
+            let name = exe.file_name().unwrap_or_default().to_string_lossy();
+            dir.join(format!("{name} Helper.app")).is_dir()
+        });
     let helper = if bundled {
         String::new()
     } else {
@@ -231,6 +282,10 @@ pub fn start(data: &Path, cx: &mut App) -> Result<()> {
         browser_subprocess_path: helper.as_str().into(),
         #[cfg(target_os = "macos")]
         framework_dir_path: framework.to_string_lossy().as_ref().into(),
+        #[cfg(not(target_os = "macos"))]
+        resources_dir_path: framework.to_string_lossy().as_ref().into(),
+        #[cfg(not(target_os = "macos"))]
+        locales_dir_path: framework.join("locales").to_string_lossy().as_ref().into(),
         root_cache_path: cache.to_string_lossy().as_ref().into(),
         persist_session_cookies: false as _,
         log_severity: LogSeverity::WARNING,
@@ -253,7 +308,7 @@ pub fn start(data: &Path, cx: &mut App) -> Result<()> {
             let why = held(&cache).unwrap_or_else(|| "CEF did not initialize".into());
             log::error!("web: {why}");
             *FAILED.lock().expect("the start lock") = Some(why);
-            cx.update(|cx| crate::view::deliver(cx));
+            cx.update(crate::view::deliver);
             return;
         }
         log::info!("web: CEF started, cache {}", cache.display());
@@ -279,7 +334,7 @@ pub fn start(data: &Path, cx: &mut App) -> Result<()> {
             run_later();
             make_browsers();
             do_message_loop_work();
-            cx.update(|cx| crate::view::deliver(cx));
+            cx.update(crate::view::deliver);
             // As cefclient: CEF does not ask for all work.
             due = Some(FALLBACK);
         }
@@ -296,6 +351,7 @@ fn stop() {
 }
 
 /// Why CEF would refuse this cache: another app holds it.
+#[cfg(any(unix, target_os = "windows"))]
 fn held(cache: &Path) -> Option<String> {
     let lock = std::fs::read_link(cache.join("SingletonLock")).ok()?;
     let lock = lock.to_string_lossy();
@@ -335,4 +391,21 @@ fn windows_process_alive(pid: u32) -> bool {
         CloseHandle(process);
     }
     !queried || exit_code == STILL_ACTIVE
+}
+
+#[cfg(not(any(unix, target_os = "windows")))]
+fn held(_cache: &Path) -> Option<String> {
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn cef_loads_with_its_api_version() {
+        let dir = super::load().expect("CEF loads");
+        #[cfg(not(target_os = "macos"))]
+        assert!(dir.join("locales").is_dir(), "{} holds CEF's files", dir.display());
+        // Without the version this call exits the process.
+        assert!(cef::command_line_create().is_some());
+    }
 }

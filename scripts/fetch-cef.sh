@@ -4,7 +4,9 @@ set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 [ -d "$root/reference/cef-rs" ] || { echo "fetch-cef: run scripts/fetch-references.sh first" >&2; exit 1; }
-work=$(mktemp -d)
+# Not the system temp: Windows may block programs there.
+mkdir -p "$root/engines"
+work=$(mktemp -d "$root/engines/cef-export.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 cd "$root/reference/cef-rs"
 # The exporter checks each archive against CEF's own index.

@@ -10,6 +10,7 @@ enum { MAY_PRINT = 1, MAY_COPY = 2, MAY_EDIT = 4, MAY_ANNOTATE = 8, MAY_FILL = 1
 int ely_permissions(fz_context *ctx, fz_document *doc)
 {
 	int may = 0;
+	fz_var(may);
 	fz_try(ctx)
 	{
 		pdf_document *pdf = ely_pdf_of(ctx, doc);

@@ -82,6 +82,8 @@ fn follow(cx: &mut App) -> std::io::Result<()> {
     std::fs::create_dir_all(&dir)?;
     let (sender, mut changes) = mpsc::unbounded();
     let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| match event {
+        // Reads, ours included, are no change.
+        Ok(event) if crate::watching::only_read(&event.kind) => {}
         Ok(event) if event.paths.iter().any(|changed| changed.file_name() == path.file_name()) => {
             let _ = sender.unbounded_send(());
         }

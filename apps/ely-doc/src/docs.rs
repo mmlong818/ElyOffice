@@ -46,7 +46,13 @@ pub struct Docs {
     pub back: Vec<(u64, ely_lok::Rect)>,
     /// Last jump: tab, input, prior cursor moves, target.
     pub going: Option<(u64, u64, u64, ely_lok::Rect)>,
+    /// Dialog reads asked; a dialog or tab change voids older.
+    pub dialog_asked: u64,
+    dialog_seen: Seen,
 }
+
+/// Open dialog kinds, Ely's and the shell's, and the tab.
+type Seen = (Option<std::mem::Discriminant<Dialog>>, Option<std::mem::Discriminant<ely_office::Dialog>>, Option<u64>);
 
 /// The right column's panels.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -83,6 +89,14 @@ impl Host for Docs {
         self.count(id, view, cx);
         self.found(id, view, cx);
         self.offer_spelling(id, view, cx);
+    }
+
+    /// A dialog about a closed tab goes with it.
+    fn tab_closed(&mut self, tab: &ely_office::Tab<Extra, ely_office::Lok>, cx: &mut Context<Self>) {
+        if matches!(self.dialog, Some(Dialog::Output { tab: of, .. }) if of == tab.id) {
+            self.dialog = None;
+            cx.notify();
+        }
     }
 
     fn search_leaves(&mut self, cx: &mut Context<Self>) {
@@ -126,7 +140,7 @@ pub fn open(app: AppId, window: &mut Window, cx: &mut App) -> Entity<Root> {
     let root = ely_ui::document_root(app, docs.clone().into(), &ely_ui::commands::FILE, menus, window, cx);
     docs.update(cx, |docs, cx| {
         docs.core.root = root.downgrade();
-        docs.core.window = Some(window.window_handle());
+        docs.own_window(window, cx);
         window.focus(&docs.core.focus, cx);
     });
     let launched = ely_ui::launch_files(cx);
@@ -163,6 +177,7 @@ impl Docs {
             failed(docs, error, cx)
         })
         .detach();
+        cx.observe_self(|docs, _| docs.watch_dialogs()).detach();
         Docs {
             core: Core::new(worker, work, cx),
             dialog: None,
@@ -175,6 +190,18 @@ impl Docs {
             navigating: true,
             back: Vec::new(),
             going: None,
+            dialog_asked: 0,
+            dialog_seen: (None, None, None),
+        }
+    }
+
+    /// A dialog or tab change ends earlier dialog reads.
+    fn watch_dialogs(&mut self) {
+        let ely = self.dialog.as_ref().map(std::mem::discriminant);
+        let now = (ely, self.core.dialog.as_ref().map(std::mem::discriminant), self.core.active);
+        if self.dialog_seen != now {
+            self.dialog_seen = now;
+            self.dialog_asked += 1;
         }
     }
 
@@ -209,7 +236,6 @@ impl Render for Docs {
             .on_action(cx.listener(Self::on_open))
             .on_action(cx.listener(Self::on_save))
             .on_action(cx.listener(Self::on_save_as))
-            .on_action(cx.listener(Self::on_quit))
             .on_action(cx.listener(Self::on_close_tab))
             .child(shell)
             .children(self.core_dialog(cx))

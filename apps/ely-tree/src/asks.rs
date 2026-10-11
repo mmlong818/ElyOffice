@@ -128,6 +128,18 @@ pub enum Choice {
 }
 
 impl Tree {
+    /// Opens a read's dialog unless another opened since.
+    pub fn offer(&mut self, ask: Ask, cx: &mut Context<Self>) {
+        match (&self.ask, ask) {
+            (None, ask) => self.ask = Some(ask),
+            (Some(_), Ask::Failed { title, detail }) => {
+                self.toast(format!("{title}: {detail}").into(), Severity::Danger, cx)
+            }
+            (Some(_), _) => log::info!("tree: a later dialog stands; read dropped"),
+        }
+        cx.notify();
+    }
+
     pub fn dialog(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let this = cx.weak_entity();
         let dismiss = {
@@ -239,8 +251,7 @@ impl Tree {
                 let (title, go) = (label("tree.branch.title"), label("tree.branch.create"));
                 Some(self.form(
                     "tree-new-branch",
-                    title,
-                    go,
+                    (title, go),
                     rows,
                     Some(toggle.into_any_element()),
                     dismiss,
@@ -259,7 +270,7 @@ impl Tree {
                         div().w_full().child(Input::new(message)),
                     );
                 let (title, go) = (label("tree.tag.title"), label("tree.tag.create"));
-                Some(self.form("tree-new-tag", title, go, rows, None, dismiss, cx))
+                Some(self.form("tree-new-tag", (title, go), rows, None, dismiss, cx))
             }
             Ask::Rename { old, name, .. } => {
                 let label = |key: &str| text(cx, key, &[]);
@@ -271,7 +282,7 @@ impl Tree {
                     text(cx, "tree.rename.title", &[("name", old)]),
                     label("tree.rename.go"),
                 );
-                Some(self.form("tree-rename", title, go, rows, None, dismiss, cx))
+                Some(self.form("tree-rename", (title, go), rows, None, dismiss, cx))
             }
             Ask::Stash { .. }
             | Ask::Remote { .. }
@@ -335,8 +346,7 @@ impl Tree {
     pub(crate) fn form(
         &self,
         id: &'static str,
-        title: gpui::SharedString,
-        go: gpui::SharedString,
+        (title, go): (gpui::SharedString, gpui::SharedString),
         rows: DescriptionList,
         extra: Option<AnyElement>,
         dismiss: impl Fn(&mut Window, &mut App) + 'static,

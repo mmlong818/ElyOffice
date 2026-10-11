@@ -126,6 +126,7 @@ pub(super) const EN: &[(&str, &str)] = &[
     ("pdf.export.tail", "optimized"),
     ("pdf.export.done", "Saved {name}."),
     ("pdf.export.images_done", "Saved {count} page images."),
+    ("pdf.export.images_done.one", "Saved 1 page image."),
     (
         "pdf.export.optimized_done",
         "Saved {name}: {before} → {after}.",
@@ -246,6 +247,7 @@ pub(super) const ZH_CN: &[(&str, &str)] = &[
     ("pdf.export.tail", "已优化"),
     ("pdf.export.done", "已保存 {name}。"),
     ("pdf.export.images_done", "已保存 {count} 张页面图片。"),
+    ("pdf.export.images_done.one", "已保存 1 张页面图片。"),
     (
         "pdf.export.optimized_done",
         "已保存 {name}：{before} → {after}。",

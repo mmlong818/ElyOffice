@@ -59,6 +59,8 @@ pub enum Wrote {
     Done,
     /// A character the font cannot draw; nothing changed.
     Missing(char),
+    /// The document's own font cannot write; nothing changed.
+    Unwritable,
     /// The would-be result: BGRA, size, and whether it grew.
     Preview(Vec<u8>, (u32, u32), bool),
 }
@@ -106,6 +108,9 @@ impl Mupdf {
                 &mut height,
             )
         })?;
+        if status == 3 {
+            return Ok(Wrote::Unwritable);
+        }
         if status == 2 {
             let missing = u32::try_from(missing).ok().and_then(char::from_u32);
             return Ok(Wrote::Missing(missing.ok_or_else(|| io::Error::other("a missing glyph out of range"))?));

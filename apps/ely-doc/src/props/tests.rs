@@ -11,13 +11,19 @@ use ely_office::prelude::*;
 
 /// The panel, shown on the active tab.
 pub(super) fn panel(cx: &mut TestAppContext, docs: &Entity<Docs>) -> Entity<Props> {
-    cx.update(|app| {
+    let props = cx.update(|app| {
         let tab = docs.read(app).active_tab().expect("a tab");
         let (view, doc) = (tab.view.clone(), tab.doc.clone());
         let props = docs.read(app).props.clone();
         props.update(app, |props, cx| props.show(Some((&view, &doc)), cx));
         props
-    })
+    });
+    // The lists come from a background read.
+    settle(cx, |app| {
+        let props = props.read(app);
+        !props.fonts.is_empty() && props.shown.as_ref().is_some_and(|shown| !shown.paragraph.is_empty())
+    });
+    props
 }
 
 fn run(cx: &mut TestAppContext, props: &Entity<Props>, id: &str, values: &[&str]) {

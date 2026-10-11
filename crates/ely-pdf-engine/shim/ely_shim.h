@@ -38,7 +38,7 @@ void ely_read_block(fz_context *ctx, fz_document *doc, pdf_page *page, int numbe
 void ely_remove_block(fz_context *ctx, pdf_document *pdf, pdf_page *page, ely_shape *shape);
 void ely_drop_shape(fz_context *ctx, ely_shape *shape);
 pdf_obj *ely_append_content(fz_context *ctx, pdf_document *pdf, pdf_obj *page, fz_buffer *buf);
-const char *ely_add_resource(fz_context *ctx, pdf_document *pdf, pdf_obj *page, pdf_obj *type, const char *stem,
+const char *ely_add_resource(fz_context *ctx, pdf_obj *page, pdf_obj *type, const char *stem,
 	pdf_obj *ref, char *name, size_t room);
 void ely_json_string(fz_context *ctx, fz_output *out, const char *s);
 fz_json *ely_member(fz_context *ctx, fz_json *obj, const char *key, int type);
@@ -52,5 +52,35 @@ void ely_watch_begin(fz_context *ctx);
 int ely_watch_end(fz_context *ctx);
 const char *ely_open_warnings(void);
 void ely_drop_alt(fz_context *ctx, pdf_document *pdf, pdf_page *page);
+
+/* A font to write with: new, or the page's own. */
+typedef enum
+{
+	PEN_CID,
+	PEN_SIMPLE,
+	PEN_CJK,
+	PEN_OWN
+} ely_pen_kind;
+
+typedef struct
+{
+	ely_pen_kind kind;
+	fz_font *font;
+	int ordering;
+	pdf_obj *ref;
+	/* The page's own font: object number, description, code width. */
+	int num;
+	pdf_font_desc *desc;
+	int bytes;
+	/* Unicode and code pairs of the own font. */
+	int *map, mapped;
+} ely_pen;
+
+int ely_choose_pen(fz_context *ctx, const char *choice, fz_font *own, pdf_page *page, ely_pen *p);
+const char *ely_pen_resource(fz_context *ctx, pdf_document *pdf, pdf_page *page, ely_pen *p, char *name, size_t room);
+int ely_pen_has(fz_context *ctx, ely_pen *p, int u);
+float ely_pen_advance(fz_context *ctx, ely_pen *p, int u, float size);
+void ely_pen_code(fz_context *ctx, fz_buffer *buf, ely_pen *p, int u);
+void ely_drop_pen(fz_context *ctx, ely_pen *p);
 
 #endif

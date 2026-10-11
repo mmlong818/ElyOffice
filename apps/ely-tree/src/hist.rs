@@ -95,6 +95,7 @@ fn graph(logged: &[Logged]) -> Vec<GraphRow> {
 
 impl Tree {
     pub fn set_side(&mut self, side: crate::tree::Side, cx: &mut Context<Self>) {
+        self.look = None;
         self.side = side;
         self.ensure_side(cx);
         cx.notify();
@@ -252,7 +253,7 @@ impl Tree {
     pub fn search(&mut self, cx: &mut Context<Self>) {
         let Some(id) = self.active else { return };
         let text = self.search.read(cx).text().trim().to_string();
-        let query = (!text.is_empty()).then(|| Query {
+        let query = (!text.is_empty()).then_some(Query {
             find: self.find,
             text,
         });
@@ -278,6 +279,7 @@ impl Tree {
 
     /// Reads a commit, or a stash with its untracked files.
     pub fn pick_in(&mut self, whose: Whose, commit: &str, cx: &mut Context<Self>) {
+        self.look = None;
         let Some(git) = self.git.as_ref().ok().cloned() else {
             return;
         };

@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "render": "node render.mjs",
-    "check": "tsc -p ."
+    "check": "tsc -p .",
+    "verify": "node verify.mjs"
   },
   "dependencies": {
     "playwright": "1.64.0"

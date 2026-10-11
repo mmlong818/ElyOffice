@@ -15,6 +15,8 @@ holds() {
   rm -rf "$base"
   mkdir -p "$base"
   git -C "$base" init -q
+  # LF, as every tree here; Windows defaults convert.
+  git -C "$base" config core.autocrlf false
   for f in $files; do
     if git -C "$src" cat-file -e "HEAD:$f" 2>/dev/null; then
       mkdir -p "$base/$(dirname "$f")"

@@ -1,0 +1,5 @@
+# Internal records stay out of source archives.
+agents.md export-ignore
+CLAUDE.md export-ignore
+PRD.md export-ignore
+tasks export-ignore

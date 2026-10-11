@@ -143,7 +143,7 @@ impl Book {
         } else {
             rule
         };
-        self.dialog = Some(Dialog::Validation {
+        self.open_dialog(Dialog::Validation {
             tab: id,
             rule: Box::new(rule),
             fields: Box::new(fields),
@@ -275,7 +275,7 @@ impl Book {
         };
         let value1 = cx.new(|cx| TextInput::new(window, cx));
         let value2 = cx.new(|cx| TextInput::new(window, cx));
-        self.dialog = Some(Dialog::Conditional {
+        self.open_dialog(Dialog::Conditional {
             tab: id,
             kind: "cell",
             operator: "greater",
@@ -338,7 +338,7 @@ impl Book {
                     book.toast(text, Severity::Info, cx);
                 }
                 Ok(formats) => {
-                    book.dialog = Some(Dialog::Formats {
+                    book.open_dialog(Dialog::Formats {
                         tab: id,
                         formats,
                         chosen: 0,

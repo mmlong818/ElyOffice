@@ -343,7 +343,12 @@ fn a_picked_reflog_event_stays_itself_as_others_arrive() {
         panic!("a reflog event");
     };
     assert!(now.same(was), "the event moved to HEAD@{{2}}");
-    assert!(cx.update(|_, app| tree.read(app).picked_place.as_ref() == Some(&picked)));
+    assert!(cx.update(|_, app| {
+        tree.read(app)
+            .active()
+            .and_then(|o| o.picked_place.as_ref())
+            == Some(&picked)
+    }));
 }
 
 #[test]
@@ -382,4 +387,30 @@ fn a_held_config_lock_waits_for_a_retry_too() {
             .expect("reads");
         String::from_utf8_lossy(&read).trim() == "Locked Out"
     });
+}
+
+#[test]
+fn a_read_that_lands_late_leaves_the_users_dialog_open() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let root = committed(dir.path());
+    let head = sh(&root, &["rev-parse", "HEAD"]).trim().to_string();
+    let mut cx = TestAppContext::single();
+    let (tree, cx) = window(&mut cx, dir.path());
+    cx.update(|_, app| tree.update(app, |tree, cx| tree.open_path(root.clone(), cx)));
+    settle(cx, |app| branch(tree.read(app)).is_some());
+    cx.update(|_, app| {
+        tree.update(app, |tree, cx| {
+            tree.ask_move(&head, cx);
+            tree.ask = Some(Ask::Failed {
+                title: "mine".into(),
+                detail: "".into(),
+            });
+        })
+    });
+    cx.run_until_parked();
+    let ask = cx.update(|_, app| match &tree.read(app).ask {
+        Some(Ask::Failed { title, .. }) => title.to_string(),
+        _ => "replaced".into(),
+    });
+    assert_eq!(ask, "mine");
 }

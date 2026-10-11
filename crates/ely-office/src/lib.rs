@@ -72,6 +72,8 @@ pub trait Host: Sized + 'static {
     fn observed(&mut self, id: u64, view: &Entity<View<Self>>, cx: &mut Context<Self>);
     /// Runs before a search first moves the cursor.
     fn search_leaves(&mut self, _: &mut Context<Self>) {}
+    /// Runs as a quit starts, before any tab closes.
+    fn quitting(&mut self, _: &mut Context<Self>) {}
     /// Runs when a close stops: question or save cancelled.
     fn close_cancelled(&mut self, _: &mut Context<Self>) {}
     /// An outside change met a save; true if shown.
@@ -240,11 +242,7 @@ pub fn in_window<H: Host, R>(
 }
 
 /// Opens the print panel after GPUI releases the app.
-pub fn print_later<H: Host>(
-    pdf: std::path::PathBuf,
-    cx: &mut Context<H>,
-    failed: impl FnOnce(&mut H, String, &mut Context<H>) + 'static,
-) {
+pub fn print_later<H: Tabs>(pdf: std::path::PathBuf, cx: &mut Context<H>) {
     // The panel's modal loop calls back into GPUI.
     cx.spawn(async move |this, cx| {
         let printed = ely_platform::print::print_pdf(&pdf);
@@ -256,7 +254,7 @@ pub fn print_later<H: Host>(
             Ok(printed) => log::info!("office: print done, printed {printed}"),
             Err(error) => {
                 if this
-                    .update(cx, |host, cx| failed(host, error.to_string(), cx))
+                    .update(cx, |host, cx| host.print_failed(&error.to_string(), cx))
                     .is_err()
                 {
                     log::error!("office: printing failed after its window closed: {error}");
@@ -265,6 +263,14 @@ pub fn print_later<H: Host>(
         }
     })
     .detach();
+}
+
+/// Addresses a click may open outside: web and mail.
+pub fn outward(uri: &str) -> bool {
+    // Schemes ignore case.
+    ["https://", "http://", "mailto:"]
+        .iter()
+        .any(|scheme| uri.get(..scheme.len()).is_some_and(|head| head.eq_ignore_ascii_case(scheme)))
 }
 
 /// A localized message.
@@ -289,6 +295,11 @@ pub trait Tabs: Host {
     fn toast(&self, text: SharedString, severity: Severity, cx: &mut App) {
         log::warn!("{}: {text}", Self::KIND.app.slug());
         self.toast_unlogged(text, severity, cx);
+    }
+
+    fn print_failed(&self, error: &str, cx: &mut App) {
+        let text = text(cx, "office.print.failed", &[("error", error)]);
+        self.toast(text, Severity::Danger, cx);
     }
 
     /// A success toast with a button that opens `path`.
@@ -378,3 +389,16 @@ pub trait Tabs: Host {
 }
 
 impl<H: Host> Tabs for H {}
+
+#[cfg(test)]
+mod outward_tests {
+    #[test]
+    fn web_and_mail_go_out_in_any_case() {
+        for uri in ["https://a.example/", "HTTPS://a.example/", "Http://a.example/", "MAILTO:x@a.example"] {
+            assert!(super::outward(uri), "{uri}");
+        }
+        for uri in ["ftp://a.example/", "file:///etc/passwd", "javascript:alert(1)", "httpsx://a", "ht", "\u{e9}https://"] {
+            assert!(!super::outward(uri), "{uri}");
+        }
+    }
+}

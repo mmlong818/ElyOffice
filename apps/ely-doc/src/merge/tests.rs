@@ -22,9 +22,9 @@ fn records_fill_previews_and_files() {
     let csv = dir.path().join("people.csv");
     std::fs::write(&csv, "Name,City\nAda,London\n«City»,上海\n").expect("the csv writes");
     let table = read_csv(&csv).expect("the csv reads");
-    cx.update(|app| docs.update(app, |docs, cx| docs.insert_field("Name", cx)));
+    cx.update(|app| docs.update(app, |docs, cx| docs.field_here("Name", cx)));
     type_into(&mut cx, &docs, " of ");
-    cx.update(|app| docs.update(app, |docs, cx| docs.insert_field("City", cx)));
+    cx.update(|app| docs.update(app, |docs, cx| docs.field_here("City", cx)));
     let source = cx.update(|app| docs.read(app).core.tabs[0].name.to_string());
     cx.update(|app| {
         docs.update(app, |docs, cx| {
@@ -171,7 +171,7 @@ fn a_merge_keeps_its_source_when_the_tab_changes() {
     let table = read_csv(&csv).expect("the csv reads");
     cx.update(|app| {
         docs.update(app, |docs, cx| {
-            docs.insert_field("Name", cx);
+            docs.field_here("Name", cx);
             docs.preview_record(source, &table, 0, cx);
             docs.core.active = Some(other);
         })
@@ -191,6 +191,14 @@ fn a_merge_keeps_its_source_when_the_tab_changes() {
     });
     let preview = dir.path().join("preview.odt");
     let id = cx.update(|app| docs.read(app).core.tabs[2].id);
+    // The preview is active now; the template stays.
+    cx.update(|app| {
+        docs.update(app, |docs, cx| {
+            docs.core.active = Some(id);
+            assert_eq!(docs.source(cx), Some(source), "the template stays after a preview");
+            assert!(docs.merge.read(cx).previews.contains(&id), "the preview is known");
+        })
+    });
     with_window(&mut cx, &docs, |docs, window, cx| {
         docs.write_as(id, preview.clone(), None, window, cx)
     });
@@ -227,7 +235,7 @@ fn two_generations_keep_their_own_templates() {
     for text in ["SourceA ", "SourceB "] {
         sources.push(blank(&mut cx, &docs));
         type_into(&mut cx, &docs, text);
-        cx.update(|app| docs.update(app, |docs, cx| docs.insert_field("Name", cx)));
+        cx.update(|app| docs.update(app, |docs, cx| docs.field_here("Name", cx)));
         settled(&cx, &docs);
     }
     let csv = dir.path().join("one.csv");
@@ -264,4 +272,41 @@ fn two_generations_keep_their_own_templates() {
             "{want} lands"
         );
     }
+}
+
+#[test]
+fn the_template_chosen_with_the_data_stays_through_a_preview() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let mut cx = TestAppContext::single();
+    let Some(docs) = docs(&mut cx, dir.path()) else {
+        eprintln!("SKIP: no LOK build");
+        return;
+    };
+    let template = blank(&mut cx, &docs);
+    type_into(&mut cx, &docs, "Dear ");
+    let csv = dir.path().join("two.csv");
+    std::fs::write(&csv, "Name\nAda\nGrace\n").expect("the csv writes");
+    cx.update(|app| docs.update(app, |docs, cx| docs.choose_csv(cx)));
+    cx.simulate_path_prompt_response(move |_| Some(vec![csv]));
+    settle(&cx, |app| docs.read(app).merge.read(app).table.is_some());
+    cx.update(|app| docs.update(app, |docs, cx| docs.insert_field("Name", cx)));
+    let table = cx.update(|app| docs.read(app).merge.read(app).table.clone().expect("the data"));
+    // As the panel's buttons do: preview, then generate.
+    cx.update(|app| docs.update(app, |docs, cx| {
+        let source = docs.source(cx).expect("the template");
+        docs.preview_record(source, &table, 0, cx);
+    }));
+    settle(&cx, |app| tabs(app, &docs) == 2 && docs.read(app).core.active != Some(template));
+    let out = dir.path().join("out");
+    std::fs::create_dir(&out).expect("the folder");
+    cx.update(|app| docs.update(app, |docs, cx| {
+        let source = docs.source(cx).expect("the template, not the preview");
+        assert_eq!(source, template);
+        docs.generate(source, table.clone(), false, out.clone(), cx);
+    }));
+    let stem = cx.update(|app| docs.read(app).tab(template).expect("a tab").name.to_string());
+    let target = |n: usize| out.join(format!("{stem} {n}.docx"));
+    settle(&cx, |_| target(2).exists());
+    let (first, second) = (text_of(&mut cx, &docs, &target(1)), text_of(&mut cx, &docs, &target(2)));
+    assert!(first.contains("Dear Ada") && second.contains("Dear Grace"), "{first:?} {second:?}");
 }

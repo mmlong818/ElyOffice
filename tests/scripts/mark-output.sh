@@ -42,7 +42,7 @@ git -C "$repo" -c user.name=t -c user.email=t@e.x add -A
 git -C "$repo" -c user.name=t -c user.email=t@e.x commit -qm one
 original=$(cat "$doc")
 launch() {
-  ELY_LOG=info ELY_LOCALE=en ELY_NO_DIALOG=1 HOME="$work" \
+  ELY_LOG=info ELY_LOCALE=en ELY_NO_DIALOG=1 HOME="$work" ELY_PRINT_TO="$work/printed.pdf" \
     "$root/target/debug/ely-mark" "$@" >"$work/log" 2>&1 &
   app=$!
   waits "mark: shown as"
@@ -183,13 +183,23 @@ pdftotext "$repo/t.pdf" - | grep -q "END MARK" || fail "the PDF lacks text"
 [ "$(grep -c 'without 1 images' "$work/log")" -ge 3 ] || fail "the PDF hid a missing image"
 export_as "Plain Text"
 grep -q 'x^2' "$repo/t.txt" && grep -qx 'RAW TEXT' "$repo/t.txt" && grep -qx 'TWO' "$repo/t.txt" && grep -q 'END MARK' "$repo/t.txt" || fail "the text: $(cat "$repo/t.txt")"
-# Print renders the same page, then the system panel.
-printed=$(count "web: printed")
+# Print saves each job to a file here.
+done_ok() { count "office: print done, printed true"; }
+printed=$(done_ok)
 key 'keystroke "p" using command down'
-for _ in $(seq 60); do [ "$(count "web: printed")" -gt "$printed" ] && break; sleep 0.25; done
-[ "$(count "web: printed")" -gt "$printed" ] || fail "print made no PDF"
-sleep 2
-key 'key code 53'
+for _ in $(seq 60); do [ "$(done_ok)" -gt "$printed" ] && break; sleep 0.25; done
+[ "$(done_ok)" -gt "$printed" ] || fail "print made no job: $(grep -E "mark: job|print" "$work/log" | tail -n 4)"
+pdftotext "$work/printed.pdf" - | grep -q "END MARK" || fail "the printed job lacks the text"
+# Two prints at once: each job renders and prints.
+rm "$work/printed.pdf"
+printed=$(done_ok)
+jobs=$(count "mark: job .* ok true")
+osascript -e 'tell application "System Events" to keystroke "p" using command down' -e 'tell application "System Events" to keystroke "p" using command down' >/dev/null
+for _ in $(seq 80); do [ "$(done_ok)" -ge $((printed + 2)) ] && break; sleep 0.25; done
+[ "$(done_ok)" -ge $((printed + 2)) ] || fail "a second print cancelled the first: $(grep -E "mark: job|print" "$work/log" | tail -n 6)"
+[ "$(grep -o "mark: job [0-9]* printed .*, ok true" "$work/log" | tail -n 2 | cut -d' ' -f3 | sort -u | wc -l)" -eq 2 ] || fail "the two prints were not two jobs"
+[ "$(count "mark: job .* ok true")" -ge $((jobs + 2)) ] || fail "a job did not render"
+pdftotext "$work/printed.pdf" - | grep -q "END MARK" || fail "the last job lacks the text"
 # Rich copy carries HTML; it overwrites the clipboard.
 if [ "${ELY_CLIPBOARD_TEST:-}" = 1 ]; then
   key 'keystroke "f" using command down'

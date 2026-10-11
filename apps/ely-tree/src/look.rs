@@ -13,6 +13,9 @@ use crate::{
     tree::Tree,
 };
 
+/// A commit and its added and removed line counts.
+type Row = (Commit, Option<(usize, usize)>);
+
 pub enum Look {
     FileLog {
         repo: u64,
@@ -20,7 +23,7 @@ pub enum Look {
         serial: u64,
         path: String,
         touches: Option<Result<Vec<Touch>, String>>,
-        rows: Rc<Vec<(Commit, Option<(usize, usize)>)>>,
+        rows: Rc<Vec<Row>>,
         picked: Option<usize>,
         view: Option<Result<View, String>>,
     },

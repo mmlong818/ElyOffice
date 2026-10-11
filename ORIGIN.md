@@ -1,23 +1,53 @@
-# Source origin and Windows candidate scope
+# 来源与贡献归属 | Origin and attribution
 
-This source snapshot is based on ElyOffice commit `ff92f26af0d96ba3a3742c67c3c4e31c05cc3890` dated 2026-10-09. The original source is the migrated repository [ZacharyZhang-NY/ElyOffice](https://git.zacharyzhang.com/ZacharyZhang-NY/ElyOffice). The earlier GitHub URL is [github.com/ZacharyZhang-NY/ElyOffice](https://github.com/ZacharyZhang-NY/ElyOffice). It returned HTTP 404 during preparation of this candidate; the migrated repository above is reachable.
+本项目源自 ElyOffice。原 GitHub 仓库地址为 [ZacharyZhang-NY/ElyOffice](https://github.com/ZacharyZhang-NY/ElyOffice)，本次准备时返回 HTTP 404。原作者迁移后的上游仓库为 [git.zacharyzhang.com/ZacharyZhang-NY/ElyOffice](https://git.zacharyzhang.com/ZacharyZhang-NY/ElyOffice)。本派生公开仓库为 [mmlong818/ElyOffice](https://github.com/mmlong818/ElyOffice)，由 `mmlong818` 维护。
 
-The repository URL identifies the upstream account as `ZacharyZhang-NY`. Source commit metadata, including the pinned baseline commit, credits the author as `雷电芽衣`. This notice records repository provenance; it does not claim that this candidate owns the original project or that the upstream author transferred any copyright.
+This project originates from ElyOffice. Its former GitHub repository URL was [ZacharyZhang-NY/ElyOffice](https://github.com/ZacharyZhang-NY/ElyOffice), which returned HTTP 404 during this preparation. The original author's migrated upstream repository is [git.zacharyzhang.com/ZacharyZhang-NY/ElyOffice](https://git.zacharyzhang.com/ZacharyZhang-NY/ElyOffice). This derivative public repository is [mmlong818/ElyOffice](https://github.com/mmlong818/ElyOffice), maintained by `mmlong818`.
 
-## Baseline and later upstream work
+| 角色 | 仓库 / 账号 | 说明 |
+| --- | --- | --- |
+| 原项目旧地址 | [GitHub: ZacharyZhang-NY/ElyOffice](https://github.com/ZacharyZhang-NY/ElyOffice) | 本次准备时返回 HTTP 404 |
+| 原作者迁移上游 | [git.zacharyzhang.com: ElyOffice](https://git.zacharyzhang.com/ZacharyZhang-NY/ElyOffice) | 原作者项目的上游仓库 |
+| 本派生仓库 | [GitHub: mmlong818/ElyOffice](https://github.com/mmlong818/ElyOffice) | 维护者 `mmlong818` |
+| 原作者账号 | [ZacharyZhang-NY](https://github.com/ZacharyZhang-NY) | 上游提交显示名为“雷电芽衣” |
+| 原作者 X | [x.com/ZacharyZhang](https://x.com/ZacharyZhang) | 原作者 X |
 
-This candidate deliberately keeps the pre-Windows-change baseline `ff92f26af0d96ba3a3742c67c3c4e31c05cc3890` and the history leading to it. It excludes the 202 later commits on upstream `main`. At the 2026-10-12 audit, upstream `main` was `178625b6f3761c7a71ff6b1cd267643615e4fc48`, 202 commits ahead. Upstream commit [`09d2a6b68132314df3555e87f97971a5ddce9088`](https://git.zacharyzhang.com/ZacharyZhang-NY/ElyOffice/commit/09d2a6b68132314df3555e87f97971a5ddce9088), dated 2026-10-10, already adds release GUI subsystem settings to all eight apps and starts LOK/PDF workers without a console. This candidate's matching no-console behavior is therefore not presented as novel or ahead of upstream. Later upstream changes have not been merged here.
+| Role | Repository / account | Description |
+| --- | --- | --- |
+| Former original URL | [GitHub: ZacharyZhang-NY/ElyOffice](https://github.com/ZacharyZhang-NY/ElyOffice) | Returned HTTP 404 during this preparation |
+| Original author's migrated upstream | [git.zacharyzhang.com: ElyOffice](https://git.zacharyzhang.com/ZacharyZhang-NY/ElyOffice) | Upstream repository for the original project |
+| This derivative repository | [GitHub: mmlong818/ElyOffice](https://github.com/mmlong818/ElyOffice) | Maintainer: `mmlong818` |
+| Original author account | [ZacharyZhang-NY](https://github.com/ZacharyZhang-NY) | Upstream commit display name: “雷电芽衣” |
+| Original author X | [x.com/ZacharyZhang](https://x.com/ZacharyZhang) | Original author X |
 
-The candidate contains local Windows installer/build portability work, LOK worker supervision (Windows Job Object, bootstrap/deadline handling and tests), Windows path/process fixes, and the associated packaging scripts. These changes have not been independently reviewed against the 202 later upstream commits. Review upstream before carrying the work onto its current base.
+本仓库保留原作者已有的署名、版权及许可声明；这些声明不表示版权转让，也不改变原作者权利。`mmlong818` 维护的 fork 工作及其他新增贡献，应按各自实际贡献者署名，不归称为原作者原创。仓库根目录的原始 [LICENSE](LICENSE) 保持原文，项目许可声明为 AGPL-3.0-or-later。第三方许可及声明见 [docs/licenses.md](docs/licenses.md)。
 
-## License and third-party sources
+This repository retains the original author's existing attribution, copyright, and license notices. These notices do not imply a copyright transfer or change the original author's rights. Fork maintenance by `mmlong818` and other new contributions should be attributed to their respective contributors, not presented as original work by the upstream author. The original root [LICENSE](LICENSE) is retained verbatim; the project declares AGPL-3.0-or-later. Third-party licenses and notices are listed in [docs/licenses.md](docs/licenses.md).
 
-The root workspace declares `AGPL-3.0-or-later`; the original `LICENSE` file is retained. Preserve upstream attribution and license notices in any redistribution. Third-party components and their notices remain governed by their own licenses; see [`docs/licenses.md`](docs/licenses.md). Existing upstream patches remain under [`patches/`](patches/), and the original source-fetch/build scripts continue to define the LibreOffice and MuPDF patch chain.
+## 基线与上游整合 | Baseline and upstream integration
 
-## Windows build and verification limits
+早期 fork 基线为 `ff92f26af0d96ba3a3742c67c3c4e31c05cc3890`。先前 Windows 源码提交为 `59cb32d3fb0c55586a6e6763a57987ad38a6ff2d`；它保留了原作者历史。当前整合树将迁移上游 `main` 截止快照 `60d82d0c5e96b47a7b2c7636f216ea61e9a5e1cb`（2026-10-11）合入本 fork，并保留两边历史。该上游快照比早期 `ff92f26` 多 210 个提交。本次整合报告记录检查范围与限制：[docs/WINDOWS_INTEGRATION.md](docs/WINDOWS_INTEGRATION.md)。
 
-This is a source candidate only. No clean-room full build or install was run for this candidate, and no executable or archive is included. The Windows installer workflow has no signing step; installers produced by these scripts are unsigned unless separately signed by a release process.
+The early fork baseline is `ff92f26af0d96ba3a3742c67c3c4e31c05cc3890`. The previous Windows source commit is `59cb32d3fb0c55586a6e6763a57987ad38a6ff2d`; it preserves the original author history. The current integration tree merges migrated upstream `main` at the reviewed cutoff snapshot `60d82d0c5e96b47a7b2c7636f216ea61e9a5e1cb` (2026-10-11) into this fork while retaining both histories. That upstream snapshot is 210 commits beyond the early `ff92f26` baseline. The current integration report records checks and limits: [docs/WINDOWS_INTEGRATION.md](docs/WINDOWS_INTEGRATION.md).
 
-The new suite assembly and installer scripts require prebuilt inputs supplied by the caller: staged CEF content, a staged PDF worker, LibreOffice runtime and license files, LOK application binaries, the Cargo release directory, Git for Windows, and NSIS. The assembly script checks fixed CEF and PDF provenance manifest hashes and refuses a stage marked as not installer-ready; those producer stages and local readiness metadata are not all generated by a clean checkout of this repository. The MuPDF/OpenSSL/tessdata scripts retain pinned source revisions and use the existing `patches/mupdf` patch series. The baseline repository contains 39 LibreOffice patches (through `0039`) and five MuPDF patches. The native Windows SAL patch validated for the 2026-10-11 stage is preserved separately at [`patches/windows/libreoffice/0053-sal-long-path-threshold-boundary.patch`](patches/windows/libreoffice/0053-sal-long-path-threshold-boundary.patch), with its source revision and validation boundary documented beside it. It is intentionally outside the default cross-platform patch chain. The supplied provenance includes no `0040`–`0052` patch sources and does not describe a complete native LibreOffice build pipeline, so this candidate does not claim that a full Windows LibreOffice runtime can be rebuilt from it. The suite hashes check expected staged metadata; they do not prove that every binary was built from source included here. Consult each script's parameters and the original licensing documents before packaging a redistributable runtime.
+上游提交 [09d2a6b68132314df3555e87f97971a5ddce9088](https://git.zacharyzhang.com/ZacharyZhang-NY/ElyOffice/commit/09d2a6b68132314df3555e87f97971a5ddce9088) 已为八个应用加入 release GUI 子系统属性，并让 LOK/PDF worker 以无控制台模式启动。因此，相同行为不是本 fork 独有或领先上游的功能。
 
-The Windows installer scripts accept explicit output/stage locations. Their `D:\ElyOffice` text is a generic writable-folder example in a user-facing message, not a machine checkout path. `outputs/`, `target/`, engine downloads, runtime stages, and local `work/` readiness files are intentionally excluded from this source candidate.
+Upstream commit [09d2a6b68132314df3555e87f97971a5ddce9088](https://git.zacharyzhang.com/ZacharyZhang-NY/ElyOffice/commit/09d2a6b68132314df3555e87f97971a5ddce9088) already adds release GUI subsystem attributes to all eight apps and starts LOK/PDF workers without a console. Matching behavior is not unique to this fork or ahead of upstream.
+
+## Windows 工作范围 | Windows work in this fork
+
+本 fork 的 Windows 工作包括构建和安装脚本可移植性、LOK worker Job Object 监督与 bootstrap/deadline、Windows 路径及进程处理，以及打包脚本。上游更新已整合到当前工作树；旧安装程序（2026-10-11）仍只对应 `59cb32d`，不包含本次整合源码，也未在本轮重建。
+
+Windows work in this fork includes build and installer portability, LOK worker Job Object supervision with bootstrap and deadlines, Windows path and process handling, and packaging scripts. Upstream updates are integrated into the current source tree; the earlier installer (2026-10-11) still corresponds only to `59cb32d`, does not contain this integration, and was not rebuilt this round.
+
+套件安装需要调用方提供 CEF/PDF worker stages、LibreOffice runtime 与许可文件、LOK 应用二进制、Cargo release 目录、Git for Windows 和 NSIS。仓库脚本不会在干净 checkout 中自动生成所有预制 stage 与本地 readiness 元数据。本次没有执行完整 native CEF、LibreOffice 或 MuPDF 重建，也没有运行整套安装器。
+
+Suite installation requires caller-provided CEF/PDF worker stages, LibreOffice runtime and license files, LOK app binaries, a Cargo release directory, Git for Windows, and NSIS. Repository scripts do not automatically generate every prebuilt stage and local readiness metadata from a clean checkout. This round did not rebuild native CEF, LibreOffice, or MuPDF in full and did not run the complete installer.
+
+LibreOffice 默认跨平台补丁链保留 `0001`–`0039`。Windows SAL 补丁 [`0053-sal-long-path-threshold-boundary.patch`](patches/windows/libreoffice/0053-sal-long-path-threshold-boundary.patch) 独立保存，SHA-256 为 `66FA79185CB10E911FB23934CEB4BC76505BB7E0F74F7AEE1E0B010C146D8DD7`，不属于默认补丁链。可用来源材料没有 `0040`–`0052` 的补丁原件或完整原生 Windows LibreOffice 构建步骤，因此本仓库不声称可从现有内容完整重建 Windows LibreOffice runtime。细节见 [patches/windows/libreoffice/README.md](patches/windows/libreoffice/README.md)。
+
+The default cross-platform LibreOffice patch chain retains `0001`–`0039`. Windows SAL patch [`0053-sal-long-path-threshold-boundary.patch`](patches/windows/libreoffice/0053-sal-long-path-threshold-boundary.patch) is kept separately; its SHA-256 is `66FA79185CB10E911FB23934CEB4BC76505BB7E0F74F7AEE1E0B010C146D8DD7`. It is outside the default patch chain. The available provenance does not include original patches `0040`–`0052` or a complete native Windows LibreOffice build procedure, so this repository does not claim that the complete Windows LibreOffice runtime can be rebuilt from its current contents. See [patches/windows/libreoffice/README.md](patches/windows/libreoffice/README.md) for details.
+
+脚本生成的 Windows 安装程序默认未签名。本仓库此次准备的是源码；不包含 exe、安装包或二进制 release。发布安装程序时，应单独核对其来源、完整对应源码、第三方许可和签名流程。
+
+Windows installers produced by the scripts are unsigned by default. This preparation is for source; it includes no exe, installer, or binary release. Before distributing an installer, verify its provenance, complete corresponding source, third-party licenses, and signing process separately.

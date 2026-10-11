@@ -9,6 +9,11 @@ pub(super) const EN: &[(&str, &str)] = &[
     ("settings.appearance.light", "Light"),
     ("settings.appearance.dark", "Dark"),
     ("settings.omarchy", "Follow Omarchy"),
+    ("settings.updates", "Check for updates at launch"),
+    (
+        "settings.updates.hint",
+        "Off, Ely asks its release server for a newer version only when you choose Check for Updates.",
+    ),
     ("settings.language", "Language"),
     ("settings.language.system", "System"),
     ("settings.language.next", "Applies the next time each app starts"),
@@ -64,6 +69,11 @@ pub(super) const ZH_CN: &[(&str, &str)] = &[
     ("settings.appearance.light", "浅色"),
     ("settings.appearance.dark", "深色"),
     ("settings.omarchy", "跟随 Omarchy"),
+    ("settings.updates", "启动时检查更新"),
+    (
+        "settings.updates.hint",
+        "关闭时，只在你选择“检查更新”时才向发布服务器询问新版本。",
+    ),
     ("settings.language", "语言"),
     ("settings.language.system", "跟随系统"),
     ("settings.language.next", "各应用下次启动时生效"),

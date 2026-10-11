@@ -101,8 +101,8 @@ impl Tree {
         };
         let lines = (!shown.picked.is_empty() && self.partial(shown)).then(|| {
             let this = this.clone();
-            let n = shown.picked.len().to_string();
-            Button::new("tree-lines", text(cx, key, &[("n", &n)]))
+            let n = shown.picked.len();
+            Button::new("tree-lines", ely_ui::i18n::counted(cx, key, n as u64, &[("n", &n.to_string())]))
                 .variant(ButtonVariant::Primary)
                 .size(ControlSize::Sm)
                 .on_click(move |_, _, cx| {

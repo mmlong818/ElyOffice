@@ -1,0 +1,11 @@
+<!doctype html>
+<meta charset="utf-8">
+<p>A page shown, never run.</p>
+<script>
+  // Asks until answered: the bridge comes up late.
+  const ask = () => {
+    const again = setTimeout(ask, 200)
+    window.elyQuery?.({ request: "ran", onSuccess: () => clearTimeout(again), onFailure: () => {} })
+  }
+  ask()
+</script>

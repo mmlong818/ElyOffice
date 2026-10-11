@@ -59,9 +59,18 @@ impl Deck {
             log::info!("show: the slides already measure {w} x {h}");
             return;
         }
-        tab.extra.size_asked = Some((w, h));
-        let (w, h) = (w.to_string(), h.to_string());
-        self.design_command("slide.size", &[&w, &h, "true"], cx);
+        let (id, view) = (tab.id, tab.view.clone());
+        let before = view.read(cx).sent();
+        tab.extra.size_asked = Some(((w, h), before + 1));
+        let (sw, sh) = (w.to_string(), h.to_string());
+        self.run_in(Some(id), "slide.size", &[&sw, &sh, "true"], cx);
+        // Refused before sending: run_in said so already.
+        if view.read(cx).sent() == before
+            && let Some(tab) = self.tab_mut(id)
+        {
+            tab.extra.size_asked = None;
+        }
+        self.force_reread(id, cx);
     }
 
     /// Enters or leaves the master view.

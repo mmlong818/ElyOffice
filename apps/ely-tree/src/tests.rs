@@ -53,7 +53,9 @@ pub(crate) fn committed(dir: &Path) -> PathBuf {
     root
 }
 
-fn paths(files: &[Changed]) -> Vec<(&str, GitStatus, Option<(usize, usize)>)> {
+type Listed<'a> = (&'a str, GitStatus, Option<(usize, usize)>);
+
+fn paths(files: &[Changed]) -> Vec<Listed<'_>> {
     files
         .iter()
         .map(|file| (file.path.as_ref(), file.status, file.lines))
@@ -68,7 +70,7 @@ fn a_repository_opens_from_inside_and_a_bare_one_does_not() {
     let opened = repo::open(&git(), &root.join("deep")).expect("opens");
     assert_eq!(
         opened.root,
-        std::fs::canonicalize(&root).expect("real"),
+        dunce::canonicalize(&root).expect("real"),
         "the real top"
     );
     assert!(opened.git_dir.ends_with(".git"));
@@ -322,7 +324,7 @@ fn a_gone_upstream_has_no_counts() {
 #[test]
 fn a_linked_file_keeps_its_own_name() {
     let dir = tempfile::tempdir().expect("a temp dir");
-    let root = std::fs::canonicalize(dir.path()).expect("real");
+    let root = dunce::canonicalize(dir.path()).expect("real");
     std::fs::create_dir(root.join("docs")).expect("a folder");
     std::fs::write(root.join("real.md"), "a").expect("a file");
     let outside = tempfile::tempdir().expect("another dir");

@@ -529,7 +529,7 @@ AI 或脚本修改文件与其他外部修改使用同一套处理规则。ElyMa
 
 ### 15.2 接入基线
 
-后端以 Kigi CLI（https://github.com/ZacharyZhang-NY/Kigi-CLI，Rust）为基础，以 Rust 依赖直接嵌入，不用 ACP（用户 2026-10-05 定）。提供商登录（订阅账号或 API 密钥）、模型与端点配置沿用 Kigi 的实现，不另写一套。不解析终端装饰文本来伪造结构化事件。
+后端以 Kigi CLI（https://git.zacharyzhang.com/ZacharyZhang-NY/Kigi-CLI，Rust）为基础，以 Rust 依赖直接嵌入，不用 ACP（用户 2026-10-05 定）。提供商登录（订阅账号或 API 密钥）、模型与端点配置沿用 Kigi 的实现，不另写一套。不解析终端装饰文本来伪造结构化事件。
 
 会话恢复只在 Kigi 的会话存储支持并通过验证时启用。不能把本地历史回放当成后端会话已经恢复。
 
@@ -870,10 +870,10 @@ UI 自动测试、内核测试和手工交互测试互相补充。三端的输�
 核对日期：2026-10-01。来源用于确认接口、项目结构和许可条件，不证明 Ely 已完成接入。产品功能、默认设置与性能目标由本文定义。正式实现应记录所采用版本的固定提交和许可证，而不是只引用默认分支。
 
 [S1] Ely GPUI Components，README，组件库使用方式、主题及许可证。  
-`https://github.com/ZacharyZhang-NY/Ely-GPUI-Components/blob/main/README.md`
+`https://git.zacharyzhang.com/ZacharyZhang-NY/Ely-GPUI-Components/blob/main/README.md`
 
 [S2] Ely GPUI Components，TASKS，组件分类与 host/prove 等状态定义。  
-`https://github.com/ZacharyZhang-NY/Ely-GPUI-Components/blob/main/TASKS.md`
+`https://git.zacharyzhang.com/ZacharyZhang-NY/Ely-GPUI-Components/blob/main/TASKS.md`
 
 [S3] LibreOfficeKit 官方文档，C/C++ 接口、分块渲染和输入回调。  
 `https://docs.libreoffice.org/libreofficekit.html`

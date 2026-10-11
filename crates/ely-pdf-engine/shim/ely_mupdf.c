@@ -155,6 +155,7 @@ void ely_close(fz_context *ctx, fz_document *doc)
 int ely_needs_password(fz_context *ctx, fz_document *doc)
 {
 	int locked = 0;
+	fz_var(locked);
 	fz_try(ctx)
 		locked = fz_needs_password(ctx, doc);
 	fz_catch(ctx)
@@ -166,6 +167,7 @@ int ely_needs_password(fz_context *ctx, fz_document *doc)
 int ely_authenticate(fz_context *ctx, fz_document *doc, const char *password)
 {
 	int access = 0;
+	fz_var(access);
 	fz_try(ctx)
 		access = fz_authenticate_password(ctx, doc, password);
 	fz_catch(ctx)

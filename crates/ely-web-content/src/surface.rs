@@ -30,6 +30,8 @@ pub(crate) struct Surface {
     pub browser: Option<Browser>,
     /// The view went before its browser came.
     pub closed: bool,
+    /// Whether the page's scripts run.
+    pub scripts: bool,
     /// The only folder pages load from, real path.
     root: PathBuf,
     /// A folder images alone may also come from.
@@ -52,6 +54,7 @@ impl Surface {
             failed: None,
             browser: None,
             closed: false,
+            scripts: true,
             root,
             images: None,
         }

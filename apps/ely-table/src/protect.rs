@@ -58,7 +58,7 @@ impl Book {
                         confirm: masked("table.protect.confirm", cx),
                         now,
                     };
-                    book.dialog = Some(Dialog::Protect {
+                    book.open_dialog(Dialog::Protect {
                         tab: id,
                         protecting: Box::new(protecting),
                     });

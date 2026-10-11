@@ -24,6 +24,9 @@ use gpui::{App, SharedString};
 
 const EN: &[(&str, &str)] = &[
     ("menu.app.quit", "Quit {app}"),
+    ("updates.failed", "The update did not finish: {error}"),
+    ("updates.latest", "{app} {version} is the latest version."),
+    ("menu.app.updates", "Check for Updates…"),
     ("menu.app.switch", "Open Ely App"),
     ("toast.open", "Open"),
     ("toast.open_failed", "The file did not open: {error}"),
@@ -38,6 +41,7 @@ const EN: &[(&str, &str)] = &[
     ("command.file.export", "Export…"),
     ("command.file.print", "Print…"),
     ("command.blocked.no_document", "No open document"),
+    ("command.blocked.unbuilt", "Not built for this platform yet"),
     ("palette.group.file", "File"),
     ("gallery.ready", "Ready"),
     ("gallery.nav", "Navigation"),
@@ -76,6 +80,9 @@ const EN: &[(&str, &str)] = &[
 
 const ZH_CN: &[(&str, &str)] = &[
     ("menu.app.quit", "退出 {app}"),
+    ("updates.failed", "更新没有完成：{error}"),
+    ("updates.latest", "{app} {version} 已是最新版本。"),
+    ("menu.app.updates", "检查更新…"),
     ("menu.app.switch", "打开 Ely 应用"),
     ("toast.open", "打开"),
     ("toast.open_failed", "文件没能打开：{error}"),
@@ -90,6 +97,7 @@ const ZH_CN: &[(&str, &str)] = &[
     ("command.file.export", "导出…"),
     ("command.file.print", "打印…"),
     ("command.blocked.no_document", "没有打开的文档"),
+    ("command.blocked.unbuilt", "此平台尚未构建"),
     ("palette.group.file", "文件"),
     ("gallery.ready", "就绪"),
     ("gallery.nav", "导航"),
@@ -134,6 +142,24 @@ pub fn install(cx: &mut App) {
     let tag = locale_tag(cx);
     let locale = resolve(&tag);
     log::info!("i18n: locale {tag} -> {locale}");
+    install_as(locale, cx);
+}
+
+/// Installs the catalogs speaking `locale` (en-US or zh-CN).
+pub fn install_as(locale: &'static str, cx: &mut App) {
+    let (en, zh) = catalogs();
+    cx.set_global(
+        I18n::new(locale)
+            .catalog("en-US", &en)
+            .catalog("zh-CN", &zh),
+    );
+}
+
+/// Keys and messages of one language.
+type Catalog = Vec<(&'static str, &'static str)>;
+
+/// The English and Chinese catalogs, every module's messages.
+fn catalogs() -> (Catalog, Catalog) {
     let en: Vec<_> = EN
         .iter()
         .chain(office::EN)
@@ -182,11 +208,7 @@ pub fn install(cx: &mut App) {
         .chain(settings::ZH_CN)
         .copied()
         .collect();
-    cx.set_global(
-        I18n::new(locale)
-            .catalog("en-US", &en)
-            .catalog("zh-CN", &zh),
-    );
+    (en, zh)
 }
 
 /// `ELY_LOCALE`, then the language setting, then the system's.
@@ -203,9 +225,63 @@ pub fn text(cx: &App, key: &str, args: &[(&str, &str)]) -> SharedString {
     cx.global::<I18n>().text(key, args)
 }
 
+/// The message for `n` things: `key.one` when one, else `key`.
+pub fn counted(cx: &App, key: &str, n: u64, args: &[(&str, &str)]) -> SharedString {
+    text(cx, &count_key(key, n), args)
+}
+
+fn count_key(key: &str, n: u64) -> String {
+    match n {
+        1 => format!("{key}.one"),
+        _ => key.to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::resolve;
+    use super::{catalogs, count_key, resolve};
+    use std::collections::BTreeSet;
+
+    #[test]
+    fn one_thing_takes_the_singular() {
+        assert_eq!(count_key("tree.changed", 1), "tree.changed.one");
+        for n in [0, 2, 21] {
+            assert_eq!(count_key("tree.changed", n), "tree.changed", "{n}");
+        }
+    }
+
+    #[gpui::test]
+    fn counted_reads_one_and_many_in_both_languages(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            super::install_as("en-US", cx);
+            let said = |n: u64, cx: &gpui::App| super::counted(cx, "tree.changed", n, &[("n", &n.to_string())]);
+            assert_eq!((said(1, cx), said(2, cx)), ("1 file changed".into(), "2 files changed".into()));
+            super::install_as("zh-CN", cx);
+            assert_eq!((said(1, cx), said(2, cx)), ("1 个文件有改动".into(), "2 个文件有改动".into()));
+        });
+    }
+
+    #[test]
+    fn every_english_singular_reads_unlike_its_plural_at_one() {
+        let (en, _) = catalogs();
+        let text = |key: &str| en.iter().find(|(k, _)| *k == key).map(|(_, v)| *v).expect("the key");
+        for (key, one) in en.iter().filter(|(key, _)| key.ends_with(".one")) {
+            let many = text(key.trim_end_matches(".one")).replace("{n}", "1").replace("{count}", "1");
+            assert_ne!(*one, many, "{key} reads like its plural");
+            assert!(!one.contains("{n}") && !one.contains("{count}"), "{key} names its one");
+        }
+    }
+
+    #[test]
+    fn both_catalogs_hold_the_same_keys_and_singulars() {
+        let (en, zh) = catalogs();
+        let keys = |list: &[(&str, &str)]| list.iter().map(|(key, _)| key.to_string()).collect::<BTreeSet<_>>();
+        let (en, zh) = (keys(&en), keys(&zh));
+        assert_eq!(en.symmetric_difference(&zh).collect::<Vec<_>>(), Vec::<&String>::new());
+        for key in en.iter().filter_map(|key| key.strip_suffix(".one")) {
+            assert!(en.contains(key), "{key}.one has no plural");
+        }
+    }
 
     #[test]
     fn zh_variants_pick_zh_cn_others_pick_en() {

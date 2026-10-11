@@ -18,6 +18,7 @@ mod notes;
 mod organize;
 mod output;
 mod protect;
+mod reads;
 mod removal;
 mod sign;
 mod structure;
@@ -71,6 +72,12 @@ pub(crate) fn windowed<'a>(
         ely_ui::i18n::install(cx);
     });
     cx.update(crate::keys::bind);
+    cx.update(|cx| {
+        // As document_root does: menus before the window.
+        let menus = crate::keys::menus(cx);
+        let file = &ely_ui::commands::FILE;
+        cx.set_menus(ely_ui::commands::menus(ely_platform::AppId::Pdf, file, true, menus, cx));
+    });
     let held = match worker {
         true => Mupdf::with(Worker::spawn().expect("the worker")),
         false => Mupdf::default(),

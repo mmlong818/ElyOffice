@@ -1,6 +1,6 @@
 //! Images, text, optimized copies, printing leave, repaired files (C11.8).
 
-use std::{io::ErrorKind, path::Path};
+use std::path::Path;
 
 use ely_pdf_engine::{
     Doc, Lock, Optimizing, Worker,
@@ -89,7 +89,8 @@ fn printing_and_copying_need_leave() {
     worker.protect(doc, &limited, Some(&Lock { user: String::new(), owner: "owner".into(), allow: may::EDIT })).expect("protects");
     let (mut other, read) = opened(&limited);
     for refused in [other.print_copy(read, &dir.path().join("p.pdf")), other.export_text(read, &dir.path().join("t.txt"))] {
-        assert_eq!(refused.expect_err("refused").kind(), ErrorKind::PermissionDenied);
+        let refused = refused.expect_err("refused");
+        assert!(ely_pdf_engine::refused(&refused).is_some(), "refused: {refused}");
     }
     worker.print_copy(doc, &dir.path().join("print.pdf")).expect("an unprotected file prints");
 }

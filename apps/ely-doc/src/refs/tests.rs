@@ -5,6 +5,8 @@ use crate::tests::{blank, docs, settle, settled, text_of, type_into, with_window
 
 /// The open prompt's request and field.
 fn asked(cx: &TestAppContext, docs: &Entity<Docs>) -> (Ask, Entity<TextInput>) {
+    // Prompts open once their kernel read comes back.
+    cx.run_until_parked();
     cx.update(|app| match &docs.read(app).dialog {
         Some(Dialog::Ask { ask, field }) => (ask.clone(), field.clone()),
         _ => panic!("a prompt is open"),
@@ -35,6 +37,7 @@ fn references_go_in_through_their_dialogs() {
     with_window(&mut cx, &docs, |docs, window, cx| {
         docs.on_reference(&InsertReference, window, cx)
     });
+    cx.run_until_parked();
     assert!(
         cx.update(|app| docs.read(app).dialog.is_none()),
         "no bookmark, no cross-reference dialog"
@@ -55,6 +58,7 @@ fn references_go_in_through_their_dialogs() {
     with_window(&mut cx, &docs, |docs, window, cx| {
         docs.on_reference(&InsertReference, window, cx)
     });
+    cx.run_until_parked();
     cx.update(|app| docs.update(app, |docs, cx| docs.insert_reference(cx)));
     with_window(&mut cx, &docs, |docs, window, cx| {
         docs.on_link(&InsertLink, window, cx)
@@ -187,4 +191,50 @@ fn a_long_formula_prefills_whole() {
     });
     let (_, field) = asked(&cx, &docs);
     assert_eq!(cx.update(|app| field.read(app).text().to_string()), long);
+}
+
+#[test]
+fn a_late_dialog_read_never_replaces_a_newer_dialog() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let mut cx = TestAppContext::single();
+    let Some(docs) = docs(&mut cx, dir.path()) else {
+        eprintln!("SKIP: no LOK build");
+        return;
+    };
+    blank(&mut cx, &docs);
+    // The link dialog opens before the bookmarks come back.
+    with_window(&mut cx, &docs, |docs, window, cx| {
+        docs.on_bookmark(&InsertBookmark, window, cx);
+        docs.on_link(&InsertLink, window, cx);
+    });
+    cx.run_until_parked();
+    assert!(cx.update(|app| matches!(docs.read(app).dialog, Some(Dialog::Link { .. }))), "the link dialog stays");
+    // Opened and closed meanwhile: the old ask lapses too.
+    with_window(&mut cx, &docs, |docs, window, cx| {
+        docs.dialog = None;
+        cx.notify();
+        docs.on_bookmark(&InsertBookmark, window, cx);
+        docs.on_link(&InsertLink, window, cx);
+    });
+    cx.update(|app| docs.update(app, |docs, cx| {
+        docs.dialog = None;
+        cx.notify();
+    }));
+    cx.run_until_parked();
+    assert!(cx.update(|app| docs.read(app).dialog.is_none()), "nothing pops up later");
+    // A close prompt shown and cancelled meanwhile counts too.
+    let id = cx.update(|app| docs.read(app).core.active.expect("a tab"));
+    type_into(&mut cx, &docs, "edited");
+    settled(&cx, &docs);
+    with_window(&mut cx, &docs, |docs, window, cx| {
+        docs.on_bookmark(&InsertBookmark, window, cx);
+        docs.request_close(id, ely_office::After::Tab, window, cx);
+    });
+    assert!(cx.update(|app| docs.read(app).core.dialog.is_some()), "the close asks");
+    cx.update(|app| docs.update(app, |docs, cx| {
+        docs.core.dialog = None;
+        cx.notify();
+    }));
+    cx.run_until_parked();
+    assert!(cx.update(|app| docs.read(app).dialog.is_none()), "no bookmark prompt after the cancel");
 }

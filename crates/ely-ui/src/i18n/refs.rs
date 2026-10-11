@@ -50,6 +50,10 @@ pub(super) const EN: &[(&str, &str)] = &[
     ("doc.review.accept_all", "Accept All"),
     ("doc.review.reject_all", "Reject All"),
     ("doc.review.panel", "Comments and Changes"),
+    (
+        "doc.review.unread",
+        "A comment by {author} has an unreadable time {at}: {error}",
+    ),
     ("doc.review.comments", "Comments {n}"),
     ("doc.review.changes", "Changes {n}"),
     ("doc.review.accept", "Accept"),
@@ -101,6 +105,10 @@ pub(super) const ZH_CN: &[(&str, &str)] = &[
     ("doc.review.accept_all", "全部接受"),
     ("doc.review.reject_all", "全部拒绝"),
     ("doc.review.panel", "批注与修订"),
+    (
+        "doc.review.unread",
+        "{author} 的一条批注时间读不出（{at}）：{error}",
+    ),
     ("doc.review.comments", "批注 {n}"),
     ("doc.review.changes", "修订 {n}"),
     ("doc.review.accept", "接受"),

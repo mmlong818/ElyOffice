@@ -41,6 +41,7 @@ static int quiet_elem(fz_context *ctx, pdf_obj *elem, int page, int inherited)
 	int pg, i, on = 0;
 	if (!pdf_is_dict(ctx, elem) || pdf_mark_obj(ctx, elem))
 		return 0;
+	fz_var(on);
 	fz_try(ctx)
 	{
 		pg = pdf_dict_gets(ctx, elem, "Pg") ? pdf_to_num(ctx, pdf_dict_gets(ctx, elem, "Pg")) : inherited;

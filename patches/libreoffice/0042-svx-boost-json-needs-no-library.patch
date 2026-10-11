@@ -1,0 +1,26 @@
+svx, sd: Boost.JSON needs no library to link
+
+diff --git a/svx/Library_svxcore.mk b/svx/Library_svxcore.mk
+index 08daa4dd7..e20b9c529 100644
+--- a/svx/Library_svxcore.mk
++++ b/svx/Library_svxcore.mk
+@@ -51,6 +51,7 @@ $(eval $(call gb_Library_set_precompiled_header,svxcore,svx/inc/pch/precompiled_
+ 
+ $(eval $(call gb_Library_add_defs,svxcore,\
+     -DSVXCORE_DLLIMPLEMENTATION \
++    -DBOOST_ALL_NO_LIB \
+ ))
+ 
+ $(eval $(call gb_Library_use_libraries,svxcore,\
+diff --git a/sd/Library_sd.mk b/sd/Library_sd.mk
+index f29e8f280..7d04eb6be 100644
+--- a/sd/Library_sd.mk
++++ b/sd/Library_sd.mk
+@@ -49,6 +49,7 @@ $(eval $(call gb_Library_set_include,sd,\
+ 
+ $(eval $(call gb_Library_add_defs,sd,\
+ 	-DSD_DLLIMPLEMENTATION \
++	-DBOOST_ALL_NO_LIB \
+ 	-DSDUI_DLL_NAME=\"$(call gb_Library_get_runtime_filename,$(call gb_Library__get_name,sdui))\" \
+ ))
+ 
