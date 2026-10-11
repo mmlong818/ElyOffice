@@ -4,6 +4,10 @@
 
 This project originates from ElyOffice. Its former GitHub repository URL was [ZacharyZhang-NY/ElyOffice](https://github.com/ZacharyZhang-NY/ElyOffice), which returned HTTP 404 during this preparation. The original author's migrated upstream repository is [git.zacharyzhang.com/ZacharyZhang-NY/ElyOffice](https://git.zacharyzhang.com/ZacharyZhang-NY/ElyOffice). This derivative public repository is [mmlong818/ElyOffice](https://github.com/mmlong818/ElyOffice), maintained by `mmlong818`.
 
+LibreOffice 及 LibreOfficeKit 由 [LibreOffice 社区](https://zh-cn.libreoffice.org/)开发；参见 [LibreOfficeKit 文档](https://docs.libreoffice.org/libreofficekit.html)。原 ElyOffice 项目及其界面与集成由 ZacharyZhang-NY 和贡献者开发。本 Windows 公开派生版本由 `mmlong818` 维护。以上说明用于标明项目和来源归属，不表示存在官方隶属或认可。
+
+LibreOffice and LibreOfficeKit are developed by the [LibreOffice community](https://www.libreoffice.org/); see the [LibreOfficeKit documentation](https://docs.libreoffice.org/libreofficekit.html). The original ElyOffice project, its interface, and its integration were developed by ZacharyZhang-NY and contributors. This public Windows derivative is maintained by `mmlong818`. These are project and source attributions; they make no claim of official affiliation or endorsement.
+
 | 角色 | 仓库 / 账号 | 说明 |
 | --- | --- | --- |
 | 原项目旧地址 | [GitHub: ZacharyZhang-NY/ElyOffice](https://github.com/ZacharyZhang-NY/ElyOffice) | 本次准备时返回 HTTP 404 |

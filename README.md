@@ -1,8 +1,8 @@
 # Ely Office
 
-离线优先的 Rust 与 GPUI 桌面应用。文件保存在你的文件夹中；无需账号或云服务。
+ElyOffice 是采用 Rust／GPUI 界面的第三方办公套件；本仓库维护其 Windows 派生版本。ElyDoc、ElyTable 和 ElyShow 通过 LibreOfficeKit 使用 LibreOffice 文档引擎；ElyPDF 使用 MuPDF 与 Tesseract。离线优先，文件保存在你的文件夹中；无需账号或云服务。
 
-Offline-first desktop apps built with Rust and GPUI. Files stay in your folders; no account or cloud service is required.
+ElyOffice is a third-party office suite with a Rust/GPUI interface. This repository maintains its Windows derivative. ElyDoc, ElyTable, and ElyShow use the LibreOffice document engine through LibreOfficeKit; ElyPDF uses MuPDF and Tesseract. The apps are offline-first; files stay in your folders, with no account or cloud service required.
 
 | 项目角色 | 仓库 | 说明 |
 | --- | --- | --- |
