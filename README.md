@@ -1,77 +1,42 @@
-# Ely Office
+# ElyOffice
 
-ElyOffice 是采用 Rust／GPUI 界面的第三方办公套件；本仓库维护其 Windows 派生版本。ElyDoc、ElyTable 和 ElyShow 通过 LibreOfficeKit 使用 LibreOffice 文档引擎；ElyPDF 使用 MuPDF 与 Tesseract。离线优先，文件保存在你的文件夹中；无需账号或云服务。
+ElyOffice 是一套面向本地文件的开源桌面办公应用，涵盖文档、表格、演示、PDF、Git 仓库管理和 Markdown 编辑。本仓库维护其 Windows 派生版本。文件保存在你的设备上；日常处理本地文件无需账号或云端存储。
 
-ElyOffice is a third-party office suite with a Rust/GPUI interface. This repository maintains its Windows derivative. ElyDoc, ElyTable, and ElyShow use the LibreOffice document engine through LibreOfficeKit; ElyPDF uses MuPDF and Tesseract. The apps are offline-first; files stay in your folders, with no account or cloud service required.
+ElyOffice is an open-source desktop suite for working with local files, covering documents, spreadsheets, presentations, PDFs, Git repository management, and Markdown editing. This repository maintains its Windows derivative. Your files stay on your device; working with local files does not require an account or cloud storage.
 
-| 项目角色 | 仓库 | 说明 |
+## 应用 | Apps
+
+| 应用 | 用途 | Purpose |
 | --- | --- | --- |
-| 旧原仓库地址 | [ZacharyZhang-NY/ElyOffice on GitHub](https://github.com/ZacharyZhang-NY/ElyOffice) | 本次核查时返回 HTTP 404 |
-| 迁移后的上游仓库 | [ZacharyZhang-NY/ElyOffice on git.zacharyzhang.com](https://git.zacharyzhang.com/ZacharyZhang-NY/ElyOffice) | 原项目上游 |
-| 本 fork | [mmlong818/ElyOffice on GitHub](https://github.com/mmlong818/ElyOffice) | 由 `mmlong818` 维护 |
-| 原作者账号 | [ZacharyZhang-NY](https://github.com/ZacharyZhang-NY) | 原提交显示名为“雷电芽衣” |
-| 原作者 X | [x.com/ZacharyZhang](https://x.com/ZacharyZhang) | 原作者 X |
+| ElyDoc | 编辑文档 | Write and edit documents |
+| ElyTable | 处理表格与 CSV 文件 | Work with spreadsheets and CSV files |
+| ElyShow | 制作演示文稿 | Create presentations |
+| ElyPDF | 阅读与处理 PDF | Read and work with PDFs |
+| ElyTree | 管理 Git 仓库 | Manage Git repositories |
+| ElyMark | 编辑 Markdown | Edit Markdown |
 
-| Project role | Repository | Description |
-| --- | --- | --- |
-| Former original repository URL | [ZacharyZhang-NY/ElyOffice on GitHub](https://github.com/ZacharyZhang-NY/ElyOffice) | Returned HTTP 404 during this review |
-| Migrated upstream repository | [ZacharyZhang-NY/ElyOffice on git.zacharyzhang.com](https://git.zacharyzhang.com/ZacharyZhang-NY/ElyOffice) | Upstream for the original project |
-| This fork | [mmlong818/ElyOffice on GitHub](https://github.com/mmlong818/ElyOffice) | Maintained by `mmlong818` |
-| Original author account | [ZacharyZhang-NY](https://github.com/ZacharyZhang-NY) | Original commit display name: “雷电芽衣” |
-| Original author X | [x.com/ZacharyZhang](https://x.com/ZacharyZhang) | Original author X |
+## 获取 ElyOffice | Get ElyOffice
 
-原作者的署名、版权和许可声明按原样保留。本 fork 的维护及新增贡献按各自贡献者署名，不将其归于原作者。许可为 AGPL-3.0-or-later，见原始 [LICENSE](LICENSE)；第三方许可与来源见 [docs/licenses.md](docs/licenses.md)。
+本仓库目前提供源码，尚未发布 Windows 安装包或二进制版本。请在 [GitHub Releases](https://github.com/mmlong818/ElyOffice/releases) 查看发布状态。
 
-Original author attribution, copyright, and license notices are retained as provided. Maintenance and new contributions in this fork are attributed to their respective contributors, not to the original author. The license is AGPL-3.0-or-later; see the original [LICENSE](LICENSE). Third-party licenses and sources are listed in [docs/licenses.md](docs/licenses.md).
+This repository currently provides source code; no Windows installer or binary release has been published. Check [GitHub Releases](https://github.com/mmlong818/ElyOffice/releases) for release status.
 
-当前整合源码纳入迁移上游 `main` 至审阅截止快照 `60d82d0c5e96b47a7b2c7636f216ea61e9a5e1cb`（2026-10-11）的改进，并保留本 fork 的 Windows 工作及提交历史。早期 Windows 改动起于 `ff92f26af0d96ba3a3742c67c3c4e31c05cc3890`，先前发布提交为 `59cb32d3fb0c55586a6e6763a57987ad38a6ff2d`。2026-10-11 验证的安装程序对应旧提交 `59cb32d`，不包含本次上游整合。上游提交 [09d2a6b68132314df3555e87f97971a5ddce9088](https://git.zacharyzhang.com/ZacharyZhang-NY/ElyOffice/commit/09d2a6b68132314df3555e87f97971a5ddce9088) 已为八个应用加入 release GUI 子系统设置，并以无控制台模式启动 LOK/PDF worker；这些不应描述为本 fork 的原创功能。
+## 开发 | Development
 
-The integrated source includes migrated upstream `main` through the reviewed cutoff snapshot `60d82d0c5e96b47a7b2c7636f216ea61e9a5e1cb` (2026-10-11), while preserving this fork's Windows work and commit history. The earlier Windows changes began at `ff92f26af0d96ba3a3742c67c3c4e31c05cc3890`; the prior published commit is `59cb32d3fb0c55586a6e6763a57987ad38a6ff2d`. The installer verified on 2026-10-11 corresponds to the old `59cb32d` commit and does not include this upstream integration. Upstream commit [09d2a6b68132314df3555e87f97971a5ddce9088](https://git.zacharyzhang.com/ZacharyZhang-NY/ElyOffice/commit/09d2a6b68132314df3555e87f97971a5ddce9088) already adds release GUI subsystem settings to all eight apps and starts LOK/PDF workers without a console; those features are not claimed as original to this fork.
+ElyOffice 使用 Rust 与 GPUI 构建界面。ElyDoc、ElyTable 和 ElyShow 通过 LibreOfficeKit 使用 LibreOffice 文档引擎；ElyPDF 使用 MuPDF 和 Tesseract。Windows 构建条件与当前限制见 [Windows 整合说明](docs/WINDOWS_INTEGRATION.md)。贡献入口见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
-来源、贡献归属、补丁及构建限制见 [ORIGIN.md](ORIGIN.md)。本轮整合检查与未执行项目见 [docs/WINDOWS_INTEGRATION.md](docs/WINDOWS_INTEGRATION.md)。
+ElyOffice uses Rust and GPUI for its interface. ElyDoc, ElyTable, and ElyShow use the LibreOffice document engine through LibreOfficeKit; ElyPDF uses MuPDF and Tesseract. See the [Windows integration notes](docs/WINDOWS_INTEGRATION.md) for Windows build requirements and current limitations. See [CONTRIBUTING.md](CONTRIBUTING.md) to get started contributing.
 
-See [ORIGIN.md](ORIGIN.md) for provenance, contribution attribution, patches, and build limits. This round's integration checks and items not run are in [docs/WINDOWS_INTEGRATION.md](docs/WINDOWS_INTEGRATION.md).
+## 来源与许可 | Credits and licence
 
-| App | Does | Engine |
-| --- | --- | --- |
-| ElyDoc | Word processing (DOCX, ODT) | LibreOfficeKit |
-| ElyTable | Spreadsheets (XLSX, ODS, CSV) | LibreOfficeKit |
-| ElyShow | Presentations (PPTX, ODP) | LibreOfficeKit, system media |
-| ElyPDF | PDF reading and editing, OCR, signatures | MuPDF, Tesseract |
-| ElyTree | Git client | Git |
-| ElyMark | Markdown | Milkdown, CodeMirror in CEF |
-| ElyMail, ElyAgent | Second release | — |
+ElyOffice 由 [ZacharyZhang-NY](https://github.com/ZacharyZhang-NY) 创建（[X](https://x.com/ZacharyZhang)）。原仓库为 [github.com/ZacharyZhang-NY/ElyOffice](https://github.com/ZacharyZhang-NY/ElyOffice)，现已迁移至 [git.zacharyzhang.com/ZacharyZhang-NY/ElyOffice](https://git.zacharyzhang.com/ZacharyZhang-NY/ElyOffice)。本 fork 位于 [github.com/mmlong818/ElyOffice](https://github.com/mmlong818/ElyOffice)，由 `mmlong818` 维护。文档引擎来自 [LibreOffice 社区](https://zh-cn.libreoffice.org/)开发的 LibreOffice。
 
-## Build (macOS)
+ElyOffice was created by [ZacharyZhang-NY](https://github.com/ZacharyZhang-NY) ([X](https://x.com/ZacharyZhang)). The original repository is [github.com/ZacharyZhang-NY/ElyOffice](https://github.com/ZacharyZhang-NY/ElyOffice), now migrated to [git.zacharyzhang.com/ZacharyZhang-NY/ElyOffice](https://git.zacharyzhang.com/ZacharyZhang-NY/ElyOffice). This fork is [github.com/mmlong818/ElyOffice](https://github.com/mmlong818/ElyOffice), maintained by `mmlong818`. The document engine comes from LibreOffice, developed by the [LibreOffice community](https://www.libreoffice.org/).
 
-```sh
-scripts/doctor.sh                 # toolchain versions
-scripts/fetch-references.sh       # upstream sources at pinned commits
-scripts/build-libreoffice.sh      # patched LibreOffice 26.2.6.3 (about an hour)
-scripts/build-mupdf.sh            # patched MuPDF 1.28.5
-scripts/build-git.sh && scripts/fetch-git-lfs.sh
-scripts/fetch-tessdata.sh && scripts/fetch-cef.sh
-scripts/build-mark-content.sh     # ElyMark's page
-cargo build -p ely-lok --bins -p ely-pdf-engine --bins
-cargo run -p ely-doc              # or ely-table, ely-show, ely-pdf, ely-tree, ely-mark
-```
+项目沿革与详细归属见[来源说明](ORIGIN.md)。
 
-Packages: `packaging/macos/release.sh` writes each app's `.app` and `.dmg`, the source archive and the upstream source archive (patched MuPDF, Git) to `dist/`. Linux recipes are in `packaging/linux` and have not been run here. Windows-specific source recipes and their staging requirements are described in [ORIGIN.md](ORIGIN.md); this candidate has not undergone a clean full build/install.
+See [ORIGIN.md](ORIGIN.md) for project history and detailed attribution.
 
-## Tests
+自有代码采用 AGPL-3.0-or-later，见 [LICENSE](LICENSE)。第三方组件各自采用其许可，详见[许可与源码说明](docs/licenses.md)。
 
-`cargo test --workspace`, the window scripts in `tests/scripts` (macOS, Accessibility permission), and the benchmark `tests/perf/bench.py`.
-
-## Documents
-
-| | |
-| --- | --- |
-| `docs/help.md` | Help: opening and saving, recovery, offline limits, repositories |
-| `docs/compatibility.md` | Versioned compatibility list |
-| `docs/accessibility.md` | Accessibility and language review |
-| `docs/perf/` | Benchmark records |
-| `docs/licenses.md` | Licences and sources |
-
-## Licence
-
-AGPL-3.0-or-later (`LICENSE`). Third-party components keep their own licences; see `docs/licenses.md`.
+ElyOffice code is licensed under AGPL-3.0-or-later; see [LICENSE](LICENSE). Third-party components retain their respective licences; see [licence and source notes](docs/licenses.md).
