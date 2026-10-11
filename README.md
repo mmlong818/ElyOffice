@@ -2,6 +2,12 @@
 
 Offline-first desktop apps in Rust and GPUI. Files stay in your folders; no account, no cloud service.
 
+## Source snapshot
+
+This source-only candidate is based on upstream commit `ff92f26af0d96ba3a3742c67c3c4e31c05cc3890`. It is intentionally not synchronized with later upstream history. As of 2026-10-12, upstream `main` is `178625b6f3761c7a71ff6b1cd267643615e4fc48`, 202 commits ahead, and already includes its own release GUI/no-console implementation. This candidate does not claim that behavior is new or that this snapshot is current upstream. See [ORIGIN.md](ORIGIN.md) for provenance and scope.
+
+The Windows build and installer scripts need externally prepared runtime stages and are not a clean-checkout, one-command full build. No clean full build/install was run for this candidate. Generated installers are unsigned; no binaries are included.
+
 | App | Does | Engine |
 | --- | --- | --- |
 | ElyDoc | Word processing (DOCX, ODT) | LibreOfficeKit |
@@ -26,7 +32,7 @@ cargo build -p ely-lok --bins -p ely-pdf-engine --bins
 cargo run -p ely-doc              # or ely-table, ely-show, ely-pdf, ely-tree, ely-mark
 ```
 
-Packages: `packaging/macos/release.sh` writes each app's `.app` and `.dmg`, the source archive and the upstream source archive (patched MuPDF, Git) to `dist/`. Linux and Windows recipes are in `packaging/linux` and `packaging/windows`; they have not been run on those systems.
+Packages: `packaging/macos/release.sh` writes each app's `.app` and `.dmg`, the source archive and the upstream source archive (patched MuPDF, Git) to `dist/`. Linux recipes are in `packaging/linux` and have not been run here. Windows-specific source recipes and their staging requirements are described in [ORIGIN.md](ORIGIN.md); this candidate has not undergone a clean full build/install.
 
 ## Tests
 

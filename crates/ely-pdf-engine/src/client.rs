@@ -8,6 +8,9 @@ use std::{
 
 use ely_ipc::{Pack, Unpack, check_reply, read_frame, write_frame};
 
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
 use crate::proto::{self, Bookmark, Char, tag};
 
 
@@ -103,7 +106,10 @@ impl Worker {
 
     /// Spawns `bin`; one from other sources is refused.
     pub fn spawn_from(bin: &Path) -> io::Result<Self> {
-        let mut child = Command::new(bin)
+        let mut command = Command::new(bin);
+        #[cfg(windows)]
+        command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW; stdio remains piped.
+        let mut child = command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

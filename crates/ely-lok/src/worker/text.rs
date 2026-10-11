@@ -37,7 +37,7 @@ pub(super) fn import(lok: &Lok, unpack: &mut Unpack) -> io::Result<u64> {
     // A .txt name must not land in Writer.
     let kind = with_doc(id, |doc| doc.kind())?;
     if kind != 1 {
-        close(id);
+        close(id)?;
         return Err(io::Error::other(format!(
             "the text loaded as kind {kind}, not a sheet"
         )));

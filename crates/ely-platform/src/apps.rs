@@ -59,17 +59,25 @@ pub fn installed(app: AppId) -> bool {
 /// The `.app` a macOS binary sits in.
 fn bundle_of(binary: &Path) -> Option<&Path> {
     let bundle = binary.parent()?.parent()?.parent()?;
-    (cfg!(target_os = "macos") && bundle.extension().is_some_and(|ext| ext == "app")).then_some(bundle)
+    (cfg!(target_os = "macos") && bundle.extension().is_some_and(|ext| ext == "app"))
+        .then_some(bundle)
 }
 
 /// Starts `app` with `files`; a running one takes them.
 pub fn open(app: AppId, files: &[PathBuf]) -> io::Result<()> {
     let found = find(app)?.ok_or_else(|| {
-        io::Error::new(io::ErrorKind::NotFound, format!("{} is not installed", app.name()))
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("{} is not installed", app.name()),
+        )
     })?;
     // Launch Services hands files to a running app.
     if let Some(bundle) = bundle_of(&found) {
-        let out = Command::new("open").arg("-a").arg(bundle).args(files).output()?;
+        let out = Command::new("open")
+            .arg("-a")
+            .arg(bundle)
+            .args(files)
+            .output()?;
         if !out.status.success() {
             let said = String::from_utf8_lossy(&out.stderr).trim().to_owned();
             return Err(io::Error::other(format!("{}: {said}", app.name())));

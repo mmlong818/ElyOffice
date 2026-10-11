@@ -49,6 +49,10 @@ Section "Install"
   SetOutPath "$INSTDIR"
   File "/oname=${APP_SLUG}.exe" "${EXE}"
   File "/oname=${APP_SLUG}.ico" "${ICON}"
+!ifdef GIT_DIR
+  SetOutPath "$INSTDIR\git"
+  File /r "${GIT_DIR}\*.*"
+!endif
   WriteUninstaller "$INSTDIR\uninstall.exe"
   CreateShortcut "$SMPROGRAMS\${APP_NAME}.lnk" "$INSTDIR\${APP_SLUG}.exe" "" "$INSTDIR\${APP_SLUG}.ico"
   WriteRegStr HKCU "Software\Ely Office\${APP_NAME}" "InstallDir" "$INSTDIR"
@@ -66,6 +70,9 @@ Section "Uninstall"
   Delete "$INSTDIR\${APP_SLUG}.exe"
   Delete "$INSTDIR\${APP_SLUG}.ico"
   Delete "$INSTDIR\uninstall.exe"
+!ifdef GIT_DIR
+  RMDir /r "$INSTDIR\git"
+!endif
   RMDir "$INSTDIR"
   Delete "$SMPROGRAMS\${APP_NAME}.lnk"
   DeleteRegKey HKCU "Software\Ely Office\${APP_NAME}"

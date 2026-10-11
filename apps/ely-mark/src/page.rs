@@ -9,9 +9,11 @@ use serde_json::json;
 
 /// The app's Resources, else this build's `engines/content`.
 pub fn content() -> Result<PathBuf> {
-    let bundled = std::env::current_exe()?
-        .parent()
-        .and_then(|dir| Some(dir.parent()?.join("Resources/content")));
+    let exe_dir = std::env::current_exe()?.parent().map(Path::to_path_buf);
+    #[cfg(target_os = "macos")]
+    let bundled = exe_dir.and_then(|dir| Some(dir.parent()?.join("Resources/content")));
+    #[cfg(target_os = "windows")]
+    let bundled = exe_dir.map(|dir| dir.join("Resources/content/ely-mark"));
     let built = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../engines/content/ely-mark");
     for dir in bundled.into_iter().chain([built]) {
         if dir.join("index.html").is_file() {

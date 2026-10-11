@@ -48,7 +48,10 @@ fn trimmed(path: &Path, cap: u64) -> std::io::Result<()> {
     }
     let bytes = fs::read(path)?;
     let tail = &bytes[(length - cap / 2) as usize..];
-    let whole = tail.iter().position(|b| *b == b'\n').map_or(tail.len(), |n| n + 1);
+    let whole = tail
+        .iter()
+        .position(|b| *b == b'\n')
+        .map_or(tail.len(), |n| n + 1);
     fs::write(path, &tail[whole..])
 }
 
@@ -91,8 +94,15 @@ mod trim_tests {
         std::fs::write(&path, &lines).unwrap();
         super::trimmed(&path, 1000).unwrap();
         let kept = std::fs::read_to_string(&path).unwrap();
-        assert!(kept.len() <= 500 && kept.starts_with("line ") && kept.ends_with("line 199\n"), "{kept}");
+        assert!(
+            kept.len() <= 500 && kept.starts_with("line ") && kept.ends_with("line 199\n"),
+            "{kept}"
+        );
         super::trimmed(&path, 1000).unwrap();
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), kept, "a short log stays");
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            kept,
+            "a short log stays"
+        );
     }
 }

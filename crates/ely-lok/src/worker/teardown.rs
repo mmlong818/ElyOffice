@@ -4,16 +4,64 @@ use super::{LOK, docs, quit};
 
 /// Frees documents, destroys the kit, and reports what failed (LOK-10).
 pub(super) fn teardown_work() -> io::Result<()> {
-    let mut docs = docs().lock().expect("the docs lock");
-    crate::events::stop_all(&docs);
-    docs.clear();
-    let kit = LOK.swap(std::ptr::null_mut(), std::sync::atomic::Ordering::SeqCst);
-    if !kit.is_null() {
-        let kit = unsafe { Box::from_raw(kit) };
-        let joined = kit.join_threads();
-        log::info!("lok-worker: threads joined={joined}");
-        drop(kit);
+    #[cfg(windows)]
+    {
+        let raw = LOK.load(std::sync::atomic::Ordering::SeqCst);
+        if raw.is_null() {
+            return cleanup_profile();
+        }
+        let kit = unsafe { &mut *raw };
+        let result = (|| {
+            kit.close_admission(std::time::Duration::from_secs(10))?;
+            super::events::stop_and_join()?;
+            kit.wait_owner_drained(std::time::Duration::from_secs(10))?;
+
+            let documents = {
+                let mut registry = docs().lock().unwrap_or_else(|p| p.into_inner());
+                std::mem::take(&mut *registry)
+            };
+            crate::events::stop_all(&documents)?;
+            for doc in documents.values() {
+                doc.dispose_on_owner()?;
+            }
+            drop(documents);
+
+            let joined = kit.join_threads();
+            log::info!("lok-worker: threads joined={joined}");
+            if !joined {
+                return Err(io::Error::other("LibreOfficeKit joinThreads failed"));
+            }
+            kit.destroy_after_join()?;
+            crate::events::quiet_after_kit_destroy();
+            LOK.store(std::ptr::null_mut(), std::sync::atomic::Ordering::SeqCst);
+            Ok::<(), io::Error>(())
+        })();
+        if let Err(error) = result {
+            kit.quarantine();
+            return Err(error);
+        }
+        unsafe {
+            drop(Box::from_raw(raw));
+        }
+        return cleanup_profile();
     }
+    #[cfg(not(windows))]
+    {
+        let mut docs = docs().lock().expect("the docs lock");
+        crate::events::stop_all(&docs)?;
+        docs.clear();
+        let kit = LOK.swap(std::ptr::null_mut(), std::sync::atomic::Ordering::SeqCst);
+        if !kit.is_null() {
+            let kit = unsafe { Box::from_raw(kit) };
+            let joined = kit.join_threads();
+            log::info!("lok-worker: threads joined={joined}");
+            drop(kit);
+        }
+        cleanup_profile()
+    }
+}
+
+fn cleanup_profile() -> io::Result<()> {
     let Some(profile) = PROFILE.get() else {
         return Ok(());
     };

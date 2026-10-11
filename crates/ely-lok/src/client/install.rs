@@ -36,13 +36,25 @@ pub fn install_dir() -> io::Result<PathBuf> {
         };
     }
     let exe = std::env::current_exe()?;
-    let bundled = exe
-        .parent()
-        .unwrap_or(Path::new("."))
-        .join("../Frameworks");
-    if cfg!(target_os = "macos") && bundled.join("libmergedlo.dylib").try_exists()? {
-        return Ok(bundled);
+    let app_dir = exe.parent().unwrap_or(Path::new("."));
+    #[cfg(target_os = "macos")]
+    {
+        let bundled = app_dir.join("../Frameworks");
+        if bundled.join("libmergedlo.dylib").try_exists()? {
+            return Ok(bundled);
+        }
     }
+    #[cfg(windows)]
+    {
+        let bundled = app_dir.join("engines/libreoffice/program");
+        if bundled.join("mergedlo.dll").try_exists()? {
+            return Ok(bundled);
+        }
+    }
+
+    #[cfg(windows)]
+    let dev = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../engines/libreoffice/program");
+    #[cfg(not(windows))]
     let dev = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../engines/lo-src/instdir/LibreOffice.app/Contents/Frameworks");
     if dev.try_exists()? {

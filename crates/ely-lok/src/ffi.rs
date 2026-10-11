@@ -1,7 +1,9 @@
 use std::{
+    any::Any,
     ffi::{CString, c_char, c_void},
     io,
     path::Path,
+    sync::Arc,
 };
 
 /// The kit vtable: nSize, then 26 slots in header order.
@@ -33,7 +35,12 @@ type Hook2 = unsafe extern "C" fn(*const i8, *const i8) -> *mut Kit;
 /// A loaded LibreOfficeKit instance.
 pub struct Lok {
     kit: *mut Kit,
+    #[cfg(not(windows))]
     _lib: Library,
+    #[cfg(windows)]
+    _lib: Arc<Library>,
+    #[cfg(windows)]
+    owner: owner::OwnerState,
 }
 
 /// A LOK event callback (LibreOfficeKitCallback).
@@ -47,6 +54,8 @@ pub struct Document {
     doc: *mut Doc,
     /// The kernel view the load made.
     view: i32,
+    #[cfg(windows)]
+    core: Arc<document::DocCore>,
 }
 
 /// Calls vtable slot `index` as `F`.
@@ -61,6 +70,9 @@ macro_rules! call {
 }
 
 mod document;
+#[cfg(windows)]
+#[allow(dead_code)]
+mod owner;
 mod slideshow;
 pub use document::{Raw, close_window};
 
@@ -72,6 +84,44 @@ impl Lok {
     /// LOK_FEATURE_DOCUMENT_PASSWORD: the client answers.
     pub const DOCUMENT_PASSWORD: u64 = 1 << 0;
 
+    fn invoke_kit<T: Any + Send>(
+        &self,
+        task: impl FnOnce(*mut Kit) -> T + Send + 'static,
+    ) -> io::Result<T> {
+        #[cfg(windows)]
+        {
+            let owner = self.owner.clone();
+            let task_owner = owner.clone();
+            owner
+                .invoke(move || task(task_owner.native_kit().cast()))
+                .map_err(owner_error)
+        }
+        #[cfg(not(windows))]
+        {
+            Ok(task(self.kit))
+        }
+    }
+
+    #[cfg(windows)]
+    pub(super) fn close_admission(&self, timeout: std::time::Duration) -> io::Result<()> {
+        self.owner.close_admission(timeout).map_err(owner_error)
+    }
+
+    #[cfg(windows)]
+    pub(super) fn wait_owner_drained(&self, timeout: std::time::Duration) -> io::Result<()> {
+        self.owner.wait_drained(timeout).map_err(owner_error)
+    }
+
+    #[cfg(windows)]
+    pub(super) fn quarantine(&self) {
+        self.owner.quarantine();
+    }
+
+    #[cfg(windows)]
+    pub(super) fn owner_failed_closed(&self) -> bool {
+        self.owner.is_quarantined()
+    }
+
     /// dlopens the LOK library and hooks with the profile URL.
     pub fn hook(install: &Path, profile_url: &str) -> io::Result<Self> {
         let install = std::fs::canonicalize(install)?;
@@ -79,110 +129,205 @@ impl Lok {
         let install_str = install.to_string_lossy().into_owned();
         let install_c = cstring(&install_str)?;
         let profile_c = cstring(profile_url)?;
+        #[cfg(windows)]
+        let lib = Arc::new(Library::open(install)?);
+        #[cfg(not(windows))]
         let lib = Library::open(install)?;
         let hook: Hook2 = unsafe {
             lib.symbol(b"libreofficekit_hook_2\0")
                 .or_else(|_| lib.symbol(b"libreofficekit_hook\0"))
                 .map_err(|error| io::Error::new(io::ErrorKind::NotFound, error))?
         };
+        #[cfg(windows)]
+        let native_api = {
+            use owner::{BufferFree, IsCurrent, Post};
+            let is_current: IsCurrent = unsafe {
+                lib.symbol(b"ely_lok_owner_is_current_v1\0")
+                    .map_err(|error| io::Error::new(io::ErrorKind::NotFound, error))?
+            };
+            let post: Post = unsafe {
+                lib.symbol(b"ely_lok_owner_post_v1\0")
+                    .map_err(|error| io::Error::new(io::ErrorKind::NotFound, error))?
+            };
+            let buffer_free: BufferFree = unsafe {
+                lib.symbol(b"ely_lok_buffer_free_v1\0")
+                    .map_err(|error| io::Error::new(io::ErrorKind::NotFound, error))?
+            };
+            (is_current, post, buffer_free)
+        };
         let kit = unsafe { hook(install_c.as_ptr(), profile_c.as_ptr()) };
-        if !kit.is_null() {
-            type F = unsafe extern "C" fn(*mut Kit, u64);
-            let features =
-                Self::PART_IN_INVALIDATION | Self::NO_TILED_ANNOTATIONS | Self::DOCUMENT_PASSWORD;
-            call!((*kit).class, 7, F, kit, features);
-        }
         if kit.is_null() {
             return Err(io::Error::other(format!(
                 "lok hook failed for {install_str}"
             )));
         }
+        #[cfg(windows)]
+        let lok = {
+            type Destroy = unsafe extern "C" fn(*mut Kit);
+            let class = unsafe { (*kit).class };
+            let destroy: Destroy = unsafe { std::mem::transmute((*class).entries[0]) };
+            let owner = unsafe {
+                owner::OwnerState::new(
+                    kit.cast(),
+                    owner::NativeApi {
+                        is_current: native_api.0,
+                        post: native_api.1,
+                        buffer_free: native_api.2,
+                        destroy: std::mem::transmute::<Destroy, owner::KitDestroy>(destroy),
+                    },
+                    lib.clone(),
+                    std::time::Duration::from_secs(30),
+                )
+            };
+            Self {
+                kit,
+                _lib: lib,
+                owner,
+            }
+        };
+        #[cfg(not(windows))]
+        let mut lok = Self { kit, _lib: lib };
+        let features =
+            Self::PART_IN_INVALIDATION | Self::NO_TILED_ANNOTATIONS | Self::DOCUMENT_PASSWORD;
+        lok.invoke_kit(move |kit| {
+            type F = unsafe extern "C" fn(*mut Kit, u64);
+            call!((*kit).class, 7, F, kit, features);
+        })?;
         log::info!("lok: hooked {}", install_str);
-        Ok(Self { kit, _lib: lib })
+        Ok(lok)
     }
 
     /// The BuildId string of the hooked library.
-    pub fn build_id(&self) -> String {
-        let class = unsafe { (*self.kit).class };
-        type F = unsafe extern "C" fn(*mut Kit) -> *mut i8;
-        let raw = call!(class, 9, F, self.kit);
-        unsafe { std::ffi::CStr::from_ptr(raw) }
-            .to_string_lossy()
-            .into_owned()
+    pub fn build_id(&self) -> io::Result<String> {
+        #[cfg(windows)]
+        let owner = self.owner.clone();
+        self.invoke_kit(move |kit| {
+            let class = unsafe { (*kit).class };
+            type F = unsafe extern "C" fn(*mut Kit) -> *mut i8;
+            let raw = call!(class, 9, F, kit);
+            #[cfg(windows)]
+            {
+                unsafe { owner::copy_c_string_and_free(&owner, raw.cast()) }.unwrap_or_default()
+            }
+            #[cfg(not(windows))]
+            {
+                unsafe { std::ffi::CStr::from_ptr(raw) }
+                    .to_string_lossy()
+                    .into_owned()
+            }
+        })
     }
 
     /// Loads a document; failures surface (LOK-09).
     pub fn load(&self, url: &str, options: &str) -> io::Result<Document> {
-        let class = unsafe { (*self.kit).class };
         let url_c = cstring(url)?;
         let options_c = cstring(options)?;
-        type F = unsafe extern "C" fn(*mut Kit, *const i8, *const i8) -> *mut Doc;
-        let doc = call!(class, 3, F, self.kit, url_c.as_ptr(), options_c.as_ptr());
-        if doc.is_null() {
-            return Err(io::Error::other(self.error()));
-        }
-        type View = unsafe extern "C" fn(*mut Doc) -> i32;
-        let doc_class = unsafe { (*doc).class };
-        let view = call!(doc_class, 28, View, doc);
+        let loaded = self
+            .invoke_kit(move |kit| {
+                type F = unsafe extern "C" fn(*mut Kit, *const i8, *const i8) -> *mut Doc;
+                let class = unsafe { (*kit).class };
+                let doc = call!(class, 3, F, kit, url_c.as_ptr(), options_c.as_ptr());
+                if doc.is_null() {
+                    return Err(kit_error_raw(kit));
+                }
+                type View = unsafe extern "C" fn(*mut Doc) -> i32;
+                let doc_class = unsafe { (*doc).class };
+                let view = call!(doc_class, 28, View, doc);
+                Ok((doc as usize, view))
+            })?
+            .map_err(io::Error::other)?;
+        let (raw_doc, view) = loaded;
+        let doc = raw_doc as *mut Doc;
         log::info!("lok: loaded into view {view}");
-        Ok(Document { doc, view })
-    }
-
-    /// The kit's current error text.
-    fn error(&self) -> String {
-        let class = unsafe { (*self.kit).class };
-        type Get = unsafe extern "C" fn(*mut Kit) -> *mut i8;
-        type Free = unsafe extern "C" fn(*mut i8);
-        let raw = call!(class, 2, Get, self.kit);
-        if raw.is_null() {
-            return "unknown LOK error".into();
+        #[cfg(windows)]
+        {
+            Ok(Document::from_owner(doc, view, self.owner.clone()))
         }
-        let text = unsafe { std::ffi::CStr::from_ptr(raw) }
-            .to_string_lossy()
-            .into_owned();
-        call!(class, 4, Free, raw);
-        text
+        #[cfg(not(windows))]
+        {
+            Ok(Document { doc, view })
+        }
     }
 
     /// Registers the kit-wide callback.
-    pub fn register_callback(&self, callback: Callback) {
-        let class = unsafe { (*self.kit).class };
-        type F = unsafe extern "C" fn(*mut Kit, Callback, *mut c_void);
-        call!(class, 5, F, self.kit, callback, std::ptr::null_mut());
+    pub fn register_callback(&self, callback: Callback) -> io::Result<()> {
+        self.invoke_kit(move |kit| {
+            let class = unsafe { (*kit).class };
+            type F = unsafe extern "C" fn(*mut Kit, Callback, *mut c_void);
+            call!(class, 5, F, kit, callback, std::ptr::null_mut());
+        })
     }
 
-    /// Answers a password question; None refuses.
+    /// Answers a password question; callback calls are owner-reentrant.
     pub fn set_password(&self, url: &str, password: Option<&str>) {
-        let class = unsafe { (*self.kit).class };
         let url_c = cstring(url).expect("a url without NUL");
         let password_c = password.map(|password| cstring(password).expect("no NUL"));
-        let password_ptr = password_c.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
-        type F = unsafe extern "C" fn(*mut Kit, *const c_char, *const c_char);
-        call!(class, 8, F, self.kit, url_c.as_ptr(), password_ptr);
+        let result = self.invoke_kit(move |kit| {
+            let class = unsafe { (*kit).class };
+            let password_ptr = password_c.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
+            type F = unsafe extern "C" fn(*mut Kit, *const c_char, *const c_char);
+            call!(class, 8, F, kit, url_c.as_ptr(), password_ptr);
+        });
+        if let Err(error) = result {
+            log::warn!("lok: password callback answer failed: {error}");
+        }
     }
 
     /// Sets a kit option such as `author`.
     pub fn set_option(&self, option: &str, value: &str) -> io::Result<()> {
-        let class = unsafe { (*self.kit).class };
         let (option, value) = (cstring(option)?, cstring(value)?);
-        type F = unsafe extern "C" fn(*mut Kit, *const c_char, *const c_char);
-        call!(class, 14, F, self.kit, option.as_ptr(), value.as_ptr());
-        Ok(())
+        self.invoke_kit(move |kit| {
+            let class = unsafe { (*kit).class };
+            type F = unsafe extern "C" fn(*mut Kit, *const c_char, *const c_char);
+            call!(class, 14, F, kit, option.as_ptr(), value.as_ptr());
+        })
     }
 
-    /// Waits for the kit's threads to finish (LOK-10).
+    /// Waits for the kit's threads to finish (LOK-10). Called off the owner.
     pub fn join_threads(&self) -> bool {
-        let class = unsafe { (*self.kit).class };
+        #[cfg(windows)]
+        let kit = {
+            assert!(!self.owner.on_owner_thread());
+            self.owner.native_kit().cast::<Kit>()
+        };
+        #[cfg(not(windows))]
+        let kit = self.kit;
+        if kit.is_null() {
+            return false;
+        }
+        let class = unsafe { (*kit).class };
         type F = unsafe extern "C" fn(*mut Kit) -> i32;
-        call!(class, 20, F, self.kit) != 0
+        call!(class, 20, F, kit) != 0
+    }
+
+    pub(super) fn destroy_after_join(&mut self) -> io::Result<()> {
+        #[cfg(windows)]
+        {
+            self.owner.destroy_after_join().map_err(owner_error)?;
+            self.kit = std::ptr::null_mut();
+            Ok(())
+        }
+        #[cfg(not(windows))]
+        {
+            if !self.kit.is_null() {
+                let class = unsafe { (*self.kit).class };
+                type F = unsafe extern "C" fn(*mut Kit);
+                call!(class, 0, F, self.kit);
+                self.kit = std::ptr::null_mut();
+            }
+            Ok(())
+        }
     }
 
     /// Runs a macro by URL, for the debug probe.
     pub fn run_macro(&self, url: &str) -> i32 {
-        let class = unsafe { (*self.kit).class };
         let url_c = cstring(url).expect("a url");
-        type F = unsafe extern "C" fn(*mut Kit, *const i8) -> i32;
-        call!(class, 10, F, self.kit, url_c.as_ptr())
+        self.invoke_kit(move |kit| {
+            let class = unsafe { (*kit).class };
+            type F = unsafe extern "C" fn(*mut Kit, *const i8) -> i32;
+            call!(class, 10, F, kit, url_c.as_ptr())
+        })
+        .unwrap_or(-1)
     }
 
     #[cfg(target_os = "macos")]
@@ -219,15 +364,50 @@ impl Lok {
     }
 }
 
+fn kit_error_raw(kit: *mut Kit) -> String {
+    let class = unsafe { (*kit).class };
+    type Get = unsafe extern "C" fn(*mut Kit) -> *mut i8;
+    type Free = unsafe extern "C" fn(*mut i8);
+    let raw = call!(class, 2, Get, kit);
+    if raw.is_null() {
+        return "unknown LOK error".into();
+    }
+    let text = unsafe { std::ffi::CStr::from_ptr(raw) }
+        .to_string_lossy()
+        .into_owned();
+    call!(class, 4, Free, raw);
+    text
+}
+
 impl Drop for Lok {
     fn drop(&mut self) {
-        if self.kit.is_null() {
+        #[cfg(windows)]
+        {
+            if !self.owner.is_destroyed() {
+                // Native destruction is allowed only in the explicit worker
+                // teardown after successful joinThreads.
+                self.owner.quarantine();
+            }
             return;
         }
-        let class = unsafe { (*self.kit).class };
-        type F = unsafe extern "C" fn(*mut Kit);
-        call!(class, 0, F, self.kit);
-        log::info!("lok: destroyed");
+        #[cfg(not(windows))]
+        {
+            if self.kit.is_null() {
+                return;
+            }
+            let class = unsafe { (*self.kit).class };
+            type F = unsafe extern "C" fn(*mut Kit);
+            call!(class, 0, F, self.kit);
+            log::info!("lok: destroyed");
+        }
+    }
+}
+
+fn owner_error(error: owner::OwnerError) -> io::Error {
+    match error {
+        owner::OwnerError::TimedOut => io::Error::new(io::ErrorKind::TimedOut, error),
+        owner::OwnerError::Closed => io::Error::new(io::ErrorKind::BrokenPipe, error),
+        _ => io::Error::other(error),
     }
 }
 
@@ -307,14 +487,21 @@ struct Library {
 }
 
 #[cfg(windows)]
+unsafe impl Send for Library {}
+#[cfg(windows)]
+unsafe impl Sync for Library {}
+
+#[cfg(windows)]
 impl Library {
-    /// Loads `<install>/sofficeapp.dll`, merged fallback.
+    /// Loads the merged library first, keeping `<install>/sofficeapp.dll` as
+    /// a compatibility fallback.
     fn open(install: &Path) -> io::Result<Self> {
         use std::os::windows::ffi::OsStrExt;
         use windows_sys::Win32::System::LibraryLoader::{
-            LOAD_LIBRARY_SEARCH_DEFAULT_DIRS, LoadLibraryExW,
+            LOAD_LIBRARY_SEARCH_DEFAULT_DIRS, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR, LoadLibraryExW,
         };
-        for name in ["sofficeapp.dll", "mergedlo.dll"] {
+        let mut load_errors = Vec::new();
+        for name in ["mergedlo.dll", "sofficeapp.dll"] {
             let path = install.join(name);
             if !path.try_exists()? {
                 continue;
@@ -324,15 +511,24 @@ impl Library {
                 LoadLibraryExW(
                     wide.as_ptr(),
                     std::ptr::null_mut(),
-                    LOAD_LIBRARY_SEARCH_DEFAULT_DIRS,
+                    LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS,
                 )
             };
             if handle.is_null() {
-                return Err(io::Error::last_os_error());
+                let error = io::Error::last_os_error();
+                load_errors.push(format!("{}: {error}", path.display()));
+                continue;
             }
             return Ok(Self {
                 handle: handle as isize,
             });
+        }
+        if !load_errors.is_empty() {
+            return Err(io::Error::other(format!(
+                "could not load any LOK library under {}: {}",
+                install.display(),
+                load_errors.join("; ")
+            )));
         }
         Err(io::Error::new(
             io::ErrorKind::NotFound,
@@ -350,5 +546,19 @@ impl Library {
             return Err(format!("no symbol {}", String::from_utf8_lossy(name)));
         };
         Ok(unsafe { std::mem::transmute_copy(&ptr) })
+    }
+}
+
+#[cfg(windows)]
+impl Drop for Library {
+    fn drop(&mut self) {
+        #[link(name = "kernel32")]
+        unsafe extern "system" {
+            fn FreeLibrary(module: *mut std::ffi::c_void) -> i32;
+        }
+        if self.handle != 0 {
+            unsafe { FreeLibrary(self.handle as _) };
+            self.handle = 0;
+        }
     }
 }

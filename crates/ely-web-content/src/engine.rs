@@ -13,28 +13,51 @@ use gpui::{App, AsyncApp, Global, WeakEntity};
 
 use crate::{handlers, surface::Shared, view::WebView};
 
-/// The framework beside the app, else the fetched one.
+/// CEF beside the app, else the fetched one.
 fn framework_dir() -> Result<PathBuf> {
-    const NAME: &str = "Chromium Embedded Framework.framework";
-    let exe = std::env::current_exe()?;
-    let mut places: Vec<PathBuf> = Vec::new();
-    if let Some(dir) = std::env::var_os("ELY_CEF") {
-        places.push(PathBuf::from(dir).join(NAME));
-    }
-    if let Some(contents) = exe.parent().and_then(Path::parent) {
-        places.push(contents.join("Frameworks").join(NAME));
-        // A helper sits in Frameworks/<App> Helper.app/Contents/MacOS.
-        if let Some(frameworks) = contents.parent().and_then(Path::parent) {
-            places.push(frameworks.join(NAME));
+    #[cfg(target_os = "macos")]
+    {
+        const NAME: &str = "Chromium Embedded Framework.framework";
+        let exe = std::env::current_exe()?;
+        let mut places: Vec<PathBuf> = Vec::new();
+        if let Some(dir) = std::env::var_os("ELY_CEF") {
+            places.push(PathBuf::from(dir).join(NAME));
         }
+        if let Some(contents) = exe.parent().and_then(Path::parent) {
+            places.push(contents.join("Frameworks").join(NAME));
+            // A helper sits in Frameworks/<App> Helper.app/Contents/MacOS.
+            if let Some(frameworks) = contents.parent().and_then(Path::parent) {
+                places.push(frameworks.join(NAME));
+            }
+        }
+        if let Some(built) = option_env!("CEF_PATH") {
+            places.push(Path::new(built).join(NAME));
+        }
+        places
+            .into_iter()
+            .find(|place| place.is_dir())
+            .with_context(|| format!("no {NAME} beside {} or in engines/cef", exe.display()))
     }
-    if let Some(built) = option_env!("CEF_PATH") {
-        places.push(Path::new(built).join(NAME));
+
+    #[cfg(target_os = "windows")]
+    {
+        const NAME: &str = "libcef.dll";
+        let exe = std::env::current_exe()?;
+        let mut places = Vec::new();
+        if let Some(dir) = std::env::var_os("ELY_CEF") {
+            places.push(PathBuf::from(dir));
+        }
+        if let Some(dir) = exe.parent() {
+            places.push(dir.to_path_buf());
+        }
+        if let Some(built) = option_env!("CEF_PATH") {
+            places.push(Path::new(built).to_path_buf());
+        }
+        places
+            .into_iter()
+            .find(|place| place.join(NAME).is_file())
+            .with_context(|| format!("no {NAME} beside {} or in engines/cef", exe.display()))
     }
-    places
-        .into_iter()
-        .find(|place| place.is_dir())
-        .with_context(|| format!("no {NAME} beside {} or in engines/cef", exe.display()))
 }
 
 static LOADED: OnceLock<std::result::Result<PathBuf, String>> = OnceLock::new();
@@ -44,12 +67,17 @@ fn load() -> Result<PathBuf> {
     LOADED
         .get_or_init(|| {
             let dir = framework_dir().map_err(|error| format!("{error:#}"))?;
+            #[cfg(target_os = "macos")]
             let library = dir.join("Chromium Embedded Framework");
+            #[cfg(target_os = "macos")]
             let name = std::ffi::CString::new(library.as_os_str().as_encoded_bytes())
                 .map_err(|error| error.to_string())?;
+            #[cfg(target_os = "macos")]
             if unsafe { load_library(Some(&*name.as_ptr().cast())) } != 1 {
                 return Err(format!("CEF did not load from {}", library.display()));
             }
+            // Windows imports libcef.dll at process startup. The linker and the
+            // Windows DLL search path require it beside the executable.
             let _ = api_hash(sys::CEF_API_VERSION_LAST, 0);
             log::info!("web: CEF loaded from {}", dir.display());
             Ok(dir)
@@ -201,6 +229,7 @@ pub fn start(data: &Path, cx: &mut App) -> Result<()> {
         external_message_pump: true as _,
         no_sandbox: true as _,
         browser_subprocess_path: helper.as_str().into(),
+        #[cfg(target_os = "macos")]
         framework_dir_path: framework.to_string_lossy().as_ref().into(),
         root_cache_path: cache.to_string_lossy().as_ref().into(),
         persist_session_cookies: false as _,
@@ -272,6 +301,38 @@ fn held(cache: &Path) -> Option<String> {
     let lock = lock.to_string_lossy();
     let pid: i32 = lock.rsplit('-').next()?.parse().ok()?;
     // Only a live process holds it.
+    #[cfg(unix)]
     let alive = unsafe { libc::kill(pid, 0) } == 0;
+    #[cfg(target_os = "windows")]
+    let alive = windows_process_alive(pid as u32);
     alive.then(|| format!("another copy (process {pid}) is using {}", cache.display()))
+}
+
+#[cfg(target_os = "windows")]
+fn windows_process_alive(pid: u32) -> bool {
+    use std::ffi::c_void;
+
+    const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
+    const STILL_ACTIVE: u32 = 259;
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn OpenProcess(access: u32, inherit: i32, process_id: u32) -> *mut c_void;
+        fn GetExitCodeProcess(process: *mut c_void, exit_code: *mut u32) -> i32;
+        fn CloseHandle(object: *mut c_void) -> i32;
+        fn GetLastError() -> u32;
+    }
+
+    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+    if process.is_null() {
+        // An invalid PID is gone. Access denied or any other error is unknown;
+        // preserve the profile lock rather than treating a live process as dead.
+        return unsafe { GetLastError() } != 87;
+    }
+    let mut exit_code = 0;
+    let queried = unsafe { GetExitCodeProcess(process, &mut exit_code) != 0 };
+    unsafe {
+        CloseHandle(process);
+    }
+    !queried || exit_code == STILL_ACTIVE
 }

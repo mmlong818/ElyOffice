@@ -38,9 +38,61 @@ fn a_locked_document_asks_for_its_password() {
     let dir = tempfile::tempdir().expect("a temp dir");
     let mut worker =
         Worker::spawn(&install().expect("lok"), &dir.path().join("profile")).expect("the worker");
+    #[cfg(windows)]
+    let locked = {
+        let temp = std::path::PathBuf::from(
+            std::env::var_os("TEMP").expect("Windows locked fixture requires D: TEMP"),
+        );
+        assert!(
+            temp.is_absolute(),
+            "TEMP must be absolute: {}",
+            temp.display()
+        );
+        assert!(
+            temp.to_string_lossy().starts_with(r"D:\"),
+            "TEMP must be on D:, got {}",
+            temp.display()
+        );
+        let fixture = std::path::PathBuf::from(
+            std::env::var_os("ELY_LOK_TEST_LOCKED_FIXTURE_COPY")
+                .expect("set ELY_LOK_TEST_LOCKED_FIXTURE_COPY to the isolated D: fixture"),
+        );
+        assert!(
+            fixture.is_absolute(),
+            "fixture must be absolute: {}",
+            fixture.display()
+        );
+        assert!(
+            fixture.starts_with(&temp),
+            "fixture must be below TEMP on D:"
+        );
+        assert_eq!(
+            fixture.file_name(),
+            Some(std::ffi::OsStr::new("locked.odt"))
+        );
+        assert!(
+            fixture.is_file(),
+            "isolated locked fixture is missing: {}",
+            fixture.display()
+        );
+        let entries = std::fs::read_dir(fixture.parent().expect("fixture parent"))
+            .expect("fixture directory lists")
+            .map(|entry| entry.expect("fixture entry").file_name())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            entries,
+            [std::ffi::OsString::from("locked.odt")],
+            "stage only the primary fixture without sidecars"
+        );
+        fixture
+    };
+    #[cfg(not(windows))]
     let locked =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/client/tests/locked.odt");
+    #[cfg(windows)]
     let url = crate::file_url(&locked);
+    #[cfg(not(windows))]
+    let url = format!("file://{}", locked.display());
     for password in ["", "wrong"] {
         let error = worker
             .unlock(&url, password)

@@ -1,6 +1,6 @@
 use std::{
     io,
-    path::Path,
+    path::{Path, PathBuf},
     time::{Duration, Instant},
 };
 
@@ -55,7 +55,7 @@ pub struct RecoveryKey {
 impl RecoveryKey {
     /// The stored key, else this session's; never a file.
     pub fn load() -> Self {
-        let dir = account_home().map(|home| shared_dir(&home));
+        let dir = lock_dir();
         Self::from(dir.and_then(|dir| load_with(&KeyringBackend, &dir)))
     }
 
@@ -65,9 +65,62 @@ impl RecoveryKey {
             Ok(key) => Self { key, lasting: true },
             Err(error) => {
                 log::warn!("recovery: no system key store, this session's key only: {error}");
-                Self { key: *session_key(), lasting: false }
+                Self {
+                    key: *session_key(),
+                    lasting: false,
+                }
             }
         }
+    }
+}
+
+/// The cross-process lock uses the explicit suite root when one was requested.
+/// Without that override, preserve the platform's historical profile-derived path.
+fn lock_dir() -> io::Result<PathBuf> {
+    if std::env::var_os("ELYOFFICE_DATA_DIR").is_some() {
+        return ely_platform::data_root()
+            .map(|root| root.join("shared"))
+            .map_err(io::Error::other);
+    }
+    account_home().map(|home| shared_dir(&home))
+}
+
+#[cfg(test)]
+mod override_tests {
+    use std::process::Command;
+
+    #[test]
+    fn explicit_suite_root_redirects_recovery_lock_without_reading_a_key() {
+        const CHILD: &str = "ELYOFFICE_DATA_DIR_TEST_KEY_CHILD";
+        if std::env::var_os(CHILD).is_some() {
+            let root = ely_platform::data_root().expect("the explicit data root");
+            let lock_dir = super::lock_dir().expect("the redirected recovery lock directory");
+            assert_eq!(lock_dir, root.join("shared"));
+            println!("recovery-lock-dir={}", lock_dir.display());
+            return;
+        }
+
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("suite data root");
+        let output = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "key::override_tests::explicit_suite_root_redirects_recovery_lock_without_reading_a_key",
+                "--nocapture",
+            ])
+            .env(CHILD, "1")
+            .env("ELYOFFICE_DATA_DIR", &root)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "child failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(String::from_utf8_lossy(&output.stdout).contains(&format!(
+            "recovery-lock-dir={}",
+            root.join("shared").display()
+        )));
     }
 }
 

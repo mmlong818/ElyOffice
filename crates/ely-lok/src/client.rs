@@ -7,6 +7,9 @@ use std::{
 
 use crate::ipc::{self, Pack, Unpack, tag};
 
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
 pub use crate::events::{A11y, Cell, Events, Function, MIXED, Mark, Rect, Request};
 
 /// The pinned LibreOffice build the worker must report (LOK-01).
@@ -18,6 +21,8 @@ mod frames;
 mod install;
 pub use install::{install_dir, templates};
 use install::worker_bin;
+#[cfg(windows)]
+pub(crate) mod supervise;
 pub use doc::{Pdf, Sheet, Sheets};
 pub use feed::Feed;
 #[cfg(test)]
@@ -37,6 +42,12 @@ pub struct Worker {
     session: u64,
     stderr: ely_ipc::Relay,
     check: Check,
+    #[cfg(windows)]
+    supervisor: supervise::Supervisor,
+    #[cfg(windows)]
+    request_timeout: std::time::Duration,
+    #[cfg(windows)]
+    shutdown_timeout: std::time::Duration,
 }
 
 /// The start-up check: to run, passed, or why it failed.
@@ -121,6 +132,8 @@ impl Worker {
         let checked = self.version_checked().and_then(|build| self.verify(&build, &profile).map(|()| build));
         match checked {
             Ok(build) => {
+                #[cfg(windows)]
+                self.supervisor.ready()?;
                 log::info!("lok: worker up, {build}");
                 Ok(())
             }
@@ -134,12 +147,14 @@ impl Worker {
     /// Spawns with or without the dev probes.
     fn spawn_mode(install: &Path, profile_dir: &Path, dev: bool) -> io::Result<Self> {
         std::fs::create_dir_all(profile_dir)?;
+        #[cfg(windows)]
+        let profile_dir = supervise::ensure_profile_available(profile_dir)?;
         let worker_bin = worker_bin()?;
         log::info!("lok: worker from {}", worker_bin.display());
         let mut command = Command::new(worker_bin);
         command
             .arg(install)
-            .arg(profile_dir)
+            .arg(profile_dir.as_os_str())
             .env("SAL_FORCE_HIDPI_SCALING", "1")
             .env("SAL_SKIA", "raster");
         // Calc reports in document twips, as its geometry does.
@@ -151,6 +166,12 @@ impl Worker {
         if dev {
             command.arg("--dev");
         }
+        #[cfg(windows)]
+        command.arg(supervise::BOOTSTRAP_ARG);
+        #[cfg(windows)]
+        command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW; stdio remains piped.
+        #[cfg(windows)]
+        let mut supervisor = supervise::Supervisor::create(profile_dir.clone())?;
         if let Ok(sal_log) = std::env::var("ELY_LOK_SAL_LOG") {
             command.env("SAL_LOG", sal_log);
         }
@@ -163,6 +184,17 @@ impl Worker {
             .stderr(Stdio::piped())
             .spawn()
             .map_err(|error| io::Error::new(error.kind(), format!("lok-worker spawn: {error}")))?;
+        #[cfg(windows)]
+        if let Err(error) = supervisor.assign_child(&child) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(error);
+        }
+        #[cfg(windows)]
+        if let Err(error) = supervise::release(&mut child) {
+            let _ = supervisor.reap(&mut child, true);
+            return Err(error);
+        }
         let stderr = ely_ipc::relay(child.stderr.take().expect("piped stderr"), "lok-worker");
         let (stdin, stdout) = (
             child.stdin.take().expect("piped stdin"),
@@ -181,6 +213,12 @@ impl Worker {
             session: SESSIONS.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
             stderr,
             check: Check::Pending(profile_dir.to_path_buf()),
+            #[cfg(windows)]
+            supervisor,
+            #[cfg(windows)]
+            request_timeout: supervise::REQUEST_TIMEOUT,
+            #[cfg(windows)]
+            shutdown_timeout: supervise::SHUTDOWN_TIMEOUT,
         };
         Ok(worker)
     }
@@ -379,7 +417,13 @@ impl Worker {
 
     /// A worker whose output failed: stopped, reaped, and why.
     fn broken(&mut self, request: u8, error: io::Error) -> io::Error {
+        #[cfg(windows)]
+        self.supervisor.expire();
+        #[cfg(windows)]
+        let status = "job termination requested".to_owned();
+        #[cfg(not(windows))]
         let _ = self.child.kill();
+        #[cfg(not(windows))]
         let status = self.child.wait().map(|status| status.to_string()).unwrap_or_else(|wait| wait.to_string());
         log::error!("lok: the worker failed on request {request} ({status})");
         let said = self.stderr.last_error().map_or_else(String::new, |said| format!(": {said}"));
@@ -388,15 +432,55 @@ impl Worker {
 
     /// One round trip per request.
     pub(crate) fn request(&mut self, request: u8, payload: &[u8]) -> io::Result<Vec<u8>> {
+        #[cfg(windows)]
+        let _deadline = self.supervisor.operation(self.request_timeout)?;
+        #[cfg(windows)]
+        self.supervisor.check()?;
         // Nothing reaches a worker that has not passed its checks.
         self.ready()?;
         self.asked += 1;
-        ipc::write_frame(&mut self.stdin, request, self.asked, payload)?;
-        let (reply, id, body) = match self.replies.recv() {
+        if let Err(error) = ipc::write_frame(&mut self.stdin, request, self.asked, payload) {
+            #[cfg(windows)]
+            if self.supervisor.check().is_err() {
+                return Err(self.supervisor.timed_out());
+            }
+            #[cfg(windows)]
+            return Err(self.broken(request, error));
+            #[cfg(not(windows))]
+            return Err(error);
+        }
+        #[cfg(windows)]
+        let answer = self.replies.recv_timeout(self.request_timeout);
+        #[cfg(not(windows))]
+        let answer = self.replies.recv().map_err(|error| error);
+        let (reply, id, body) = match answer {
             Ok(Ok(frame)) => frame,
-            Ok(Err(error)) => return Err(self.broken(request, error)),
-            Err(_) => return Err(self.broken(request, io::Error::other("the reply reader stopped"))),
+            Ok(Err(error)) => {
+                #[cfg(windows)]
+                if self.supervisor.check().is_err() {
+                    return Err(self.supervisor.timed_out());
+                }
+                return Err(self.broken(request, error));
+            }
+            #[cfg(windows)]
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                self.supervisor.expire();
+                return Err(self.supervisor.timed_out());
+            }
+            #[cfg(windows)]
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                if self.supervisor.check().is_err() {
+                    return Err(self.supervisor.timed_out());
+                }
+                return Err(self.broken(request, io::Error::other("the reply reader stopped")));
+            }
+            #[cfg(not(windows))]
+            Err(_) => {
+                return Err(self.broken(request, io::Error::other("the reply reader stopped")));
+            }
         };
+        #[cfg(windows)]
+        self.supervisor.check()?;
         if let Err(error) = ipc::check_reply(self.asked, id) {
             return Err(self.broken(request, error));
         }
@@ -431,10 +515,27 @@ impl Worker {
             return Ok(());
         }
         self.down = true;
+        #[cfg(windows)]
+        let deadline = self.supervisor.operation(self.shutdown_timeout).ok();
+        #[cfg(windows)]
+        let mut outcome = match deadline.as_ref() {
+            Some(_) => self.answer_shutdown(),
+            None => Err(self.supervisor.timed_out()),
+        };
+        #[cfg(not(windows))]
         let mut outcome = self.answer_shutdown();
         if outcome.is_err() {
+            #[cfg(windows)]
+            self.supervisor.expire();
+            #[cfg(not(windows))]
             let _ = self.child.kill();
         }
+        #[cfg(windows)]
+        let status = match self.supervisor.reap(&mut self.child, outcome.is_err()) {
+            Ok(status) => status,
+            Err(error) => return Err(error),
+        };
+        #[cfg(not(windows))]
         let status = match self.child.wait() {
             Ok(status) => status,
             Err(error) => {
@@ -460,11 +561,33 @@ impl Worker {
     fn answer_shutdown(&mut self) -> io::Result<()> {
         self.asked += 1;
         ipc::write_frame(&mut self.stdin, tag::SHUTDOWN, self.asked, &[])?;
-        let reply = match self.replies.recv() {
+        #[cfg(windows)]
+        let answer = self.replies.recv_timeout(self.shutdown_timeout);
+        #[cfg(not(windows))]
+        let answer = self.replies.recv().map_err(|error| error);
+        let reply = match answer {
             Ok(Ok(frame)) => frame,
             Ok(Err(error)) => return Err(self.broken(tag::SHUTDOWN, error)),
-            Err(_) => return Err(self.broken(tag::SHUTDOWN, io::Error::other("the reply reader stopped"))),
+            #[cfg(windows)]
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                self.supervisor.expire();
+                return Err(self.supervisor.timed_out());
+            }
+            #[cfg(windows)]
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                return Err(
+                    self.broken(tag::SHUTDOWN, io::Error::other("the reply reader stopped"))
+                );
+            }
+            #[cfg(not(windows))]
+            Err(_) => {
+                return Err(
+                    self.broken(tag::SHUTDOWN, io::Error::other("the reply reader stopped"))
+                );
+            }
         };
+        #[cfg(windows)]
+        self.supervisor.check()?;
         ipc::check_reply(self.asked, reply.1)?;
         match reply {
             (tag::OK, _, _) => Ok(()),

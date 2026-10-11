@@ -26,7 +26,8 @@ pub fn print_pdf(pdf: &Path) -> anyhow::Result<bool> {
             }
         })
         .collect();
-    let (width, height) = paper_for(&sizes).ok_or_else(|| anyhow::anyhow!("{} has no pages", pdf.display()))?;
+    let (width, height) =
+        paper_for(&sizes).ok_or_else(|| anyhow::anyhow!("{} has no pages", pdf.display()))?;
     let paper = NSSize::new(width, height);
     if let Some(scale) = crate::env::value("ELY_PRINT_SHARED_SCALE") {
         // Tests start from a shared scale the copy must undo.
@@ -71,10 +72,21 @@ pub fn print_pdf(pdf: &Path) -> anyhow::Result<bool> {
 
 /// One paper holding every page, turned as needed.
 fn paper_for(sizes: &[(f64, f64)]) -> Option<(f64, f64)> {
-    let long = sizes.iter().map(|(w, h)| w.max(*h)).fold(None, |most: Option<f64>, side| Some(most.map_or(side, |m| m.max(side))))?;
+    let long = sizes
+        .iter()
+        .map(|(w, h)| w.max(*h))
+        .fold(None, |most: Option<f64>, side| {
+            Some(most.map_or(side, |m| m.max(side)))
+        })?;
     let short = sizes.iter().map(|(w, h)| w.min(*h)).fold(0.0, f64::max);
     // The largest page sets the paper's way up.
-    let (w, h) = sizes.iter().copied().fold((0.0, 0.0), |big, size| if size.0 * size.1 > big.0 * big.1 { size } else { big });
+    let (w, h) = sizes.iter().copied().fold((0.0, 0.0), |big, size| {
+        if size.0 * size.1 > big.0 * big.1 {
+            size
+        } else {
+            big
+        }
+    });
     // A square page leaves it to the others.
     let wide = match w == h {
         true => sizes.iter().any(|(w, h)| w > h),
@@ -96,9 +108,15 @@ mod tests {
     #[test]
     fn the_paper_holds_every_page() {
         assert_eq!(paper_for(&[(595.0, 420.0)]), Some((595.0, 420.0)));
-        assert_eq!(paper_for(&[(420.0, 595.0), (842.0, 1191.0)]), Some((842.0, 1191.0)));
+        assert_eq!(
+            paper_for(&[(420.0, 595.0), (842.0, 1191.0)]),
+            Some((842.0, 1191.0))
+        );
         // Wide and square pages: neither side may be cut.
-        assert_eq!(paper_for(&[(1000.0, 200.0), (600.0, 600.0)]), Some((1000.0, 600.0)));
+        assert_eq!(
+            paper_for(&[(1000.0, 200.0), (600.0, 600.0)]),
+            Some((1000.0, 600.0))
+        );
         assert_eq!(paper_for(&[]), None);
     }
 }

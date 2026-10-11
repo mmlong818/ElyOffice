@@ -20,6 +20,7 @@ image.workspace = true
 
 [features]
 view = ["dep:gpui", "dep:ely-gpui-component", "dep:ely-platform", "dep:futures"]
+supervisor-test = []
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
@@ -39,6 +40,13 @@ required-features = ["view"]
 [[bin]]
 name = "ely-lok-worker"
 path = "src/bin/ely-lok-worker.rs"
+
+[[bin]]
+name = "ely-lok-worker-fixture"
+path = "src/bin/ely-lok-worker-fixture.rs"
+test = false
+bench = false
+required-features = ["supervisor-test"]
 
 [lints]
 workspace = true

@@ -135,6 +135,9 @@ pub(super) fn text(unpack: &mut Unpack) -> io::Result<Vec<u8>> {
 
 /// How long a state check waits for the kernel.
 const STATE_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
+/// Native callback delivery is host-side and bounded by the worker's fatal deadline.
+#[cfg(windows)]
+const RESULT_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// Runs a table command and confirms it took (LOK-02, LOK-08).
 pub(super) fn uno(unpack: &mut Unpack) -> io::Result<Vec<u8>> {
@@ -180,13 +183,72 @@ fn run_checked(
         0
     };
     let undo_before = undo_entries(doc)?;
+    #[cfg(windows)]
+    let trace_select_all = command.uno == ".uno:SelectAll"
+        && std::env::var_os("ELY_LOK_TRACE_SELECT_ALL_FILE").is_some();
+    #[cfg(windows)]
+    let dispatch_started = std::time::Instant::now();
+    #[cfg(windows)]
+    if trace_select_all {
+        crate::events::trace_select_all(&format!(
+            "ELY_LOK_TRACE_SELECT_ALL dispatch-before id={id} command={} args={args:?} callback_seq={}",
+            command.uno,
+            crate::events::callback_sequence()
+        ));
+    }
     crate::events::clear_result(id);
+    #[cfg(windows)]
+    let awaits_result = crate::events::waits_for_result(command.uno);
+    #[cfg(windows)]
+    if awaits_result {
+        crate::events::begin_result(id, command.uno)?;
+    }
     doc.post_uno_notify(command.uno, args)?;
+    #[cfg(windows)]
+    if trace_select_all {
+        crate::events::trace_select_all(&format!(
+            "ELY_LOK_TRACE_SELECT_ALL native-post-return id={id} command={} elapsed_us={} callback_seq={}",
+            command.uno,
+            dispatch_started.elapsed().as_micros(),
+            crate::events::callback_sequence()
+        ));
+    }
+    #[cfg(windows)]
+    let completion = if awaits_result {
+        Some(crate::events::wait_result(id, command.uno, RESULT_WAIT)?)
+    } else {
+        None
+    };
     let checked = match command.check {
-        Check::Result => match crate::events::take_result(id) {
-            Some((_, true)) => Ok(()),
-            outcome => refuse(format!("the kernel reported {outcome:?}")),
-        },
+        Check::Result => {
+            #[cfg(windows)]
+            let outcome = completion.as_ref().map(|(success, _)| *success);
+            #[cfg(not(windows))]
+            let outcome = crate::events::take_result(id);
+            #[cfg(windows)]
+            if trace_select_all {
+                crate::events::trace_select_all(&format!(
+                    "ELY_LOK_TRACE_SELECT_ALL host-check id={id} command={} outcome={outcome:?} elapsed_us={} callback_seq={}",
+                    command.uno,
+                    dispatch_started.elapsed().as_micros(),
+                    crate::events::callback_sequence()
+                ));
+            }
+            #[cfg(windows)]
+            {
+                match outcome {
+                    Some(Some(true)) => Ok(()),
+                    outcome => refuse(format!("the kernel reported {outcome:?}")),
+                }
+            }
+            #[cfg(not(windows))]
+            {
+                match outcome {
+                    Some((_, true)) => Ok(()),
+                    outcome => refuse(format!("the kernel reported {outcome:?}")),
+                }
+            }
+        }
         Check::History => match history_count(doc, &history)? {
             after if after + 1 == before => Ok(()),
             after => refuse(format!("{history} went {before} to {after}")),
@@ -204,10 +266,21 @@ fn run_checked(
                 refuse(format!("the style list lacks {}", values[0]))
             }
         }
-        Check::Finished => match crate::events::take_result(id) {
-            Some(_) => Ok(()),
-            None => refuse("the kernel reported no completion".into()),
-        },
+        Check::Finished => {
+            #[cfg(windows)]
+            let completed = if let Some((success, _)) = completion.as_ref() {
+                success.is_some()
+            } else {
+                crate::events::take_result(id).is_some()
+            };
+            #[cfg(not(windows))]
+            let completed = crate::events::take_result(id).is_some();
+            if completed {
+                Ok(())
+            } else {
+                refuse("the kernel reported no completion".into())
+            }
+        }
         Check::Cropping => match crate::events::wait_cropping(id, STATE_WAIT) {
             true => Ok(()),
             false => refuse("the image did not enter crop mode".into()),

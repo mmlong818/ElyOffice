@@ -3,17 +3,54 @@
 use super::{OUT, quit};
 use crate::events::{Events, Rect};
 use crate::ipc::{self, Pack, tag};
+use std::sync::{Mutex, OnceLock};
+
+static PUSHER: OnceLock<Mutex<Option<std::thread::JoinHandle<()>>>> = OnceLock::new();
+
+/// Starts the sole event pusher and retains its join handle.
+pub(super) fn start() {
+    let handle = std::thread::spawn(push);
+    *PUSHER
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .unwrap_or_else(|p| p.into_inner()) = Some(handle);
+}
+
+/// Stops and joins the event pusher from the worker host thread.
+pub(super) fn stop_and_join() -> std::io::Result<()> {
+    crate::events::stop_push_thread();
+    if let Some(handle) = PUSHER
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .take()
+    {
+        handle
+            .join()
+            .map_err(|_| std::io::Error::other("event pusher panicked"))?;
+    }
+    Ok(())
+}
 
 /// Pushes each document's new events as they come (LOK-03).
 pub(super) fn push() {
     loop {
-        crate::events::wait_unpushed();
+        let has_events = crate::events::wait_unpushed();
+        #[cfg(windows)]
+        super::terminate_if_owner_failed(super::lok().owner_failed_closed());
+        if !has_events {
+            return;
+        }
         // Drained under the output lock: current at send.
         let out = OUT.get().expect("the output is set");
         let mut out = out.lock().expect("the output lock");
         for (id, batch) in crate::events::unpushed() {
             let revision = super::revision::of(id).unwrap_or(0);
-            let body = [Pack::new().u64(id).u64(revision).bytes(), pack_events(batch)].concat();
+            let body = [
+                Pack::new().u64(id).u64(revision).bytes(),
+                pack_events(batch),
+            ]
+            .concat();
             if let Err(error) = ipc::write_frame(&mut *out, tag::EVENTS, ipc::UNASKED, &body) {
                 log::warn!("lok-worker: event write failed: {error}");
                 quit(1);

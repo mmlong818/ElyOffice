@@ -23,17 +23,22 @@ pub(super) fn open(body: &str) -> (tempfile::TempDir, Worker, Doc) {
     let mut worker = Worker::spawn(&install, &dir.path().join("profile")).expect("the worker");
     let source = dir.path().join("in.fodt");
     write(&source, body);
-    let doc = worker
-        .load(&format!("file://{}", source.display()))
-        .expect("the document loads");
+    #[cfg(windows)]
+    let url = crate::file_url(&source);
+    #[cfg(not(windows))]
+    let url = format!("file://{}", source.display());
+    let doc = worker.load(&url).expect("the document loads");
     (dir, worker, doc)
 }
 
 /// The document saved as flat XML.
 pub(super) fn saved(dir: &tempfile::TempDir, worker: &mut Worker, doc: &Doc, name: &str) -> String {
     let out = dir.path().join(name);
-    doc.save_as(worker, &format!("file://{}", out.display()), "fodt")
-        .expect("the save works");
+    #[cfg(windows)]
+    let url = crate::ipc::file_url_of(&out);
+    #[cfg(not(windows))]
+    let url = format!("file://{}", out.display());
+    doc.save_as(worker, &url, "fodt").expect("the save works");
     std::fs::read_to_string(&out).expect("the save reads")
 }
 
@@ -135,7 +140,10 @@ fn the_kernels_close_keys_are_refused() {
     // Mod1+W, Mod1+F4, Mod1+Q close the frame or quit.
     for key in [534, 771, 528] {
         let refused = worker.post_key(&doc, 0, MOD1 | key).expect_err("refused");
-        assert!(refused.to_string().contains("closes the kernel's frame"), "{refused}");
+        assert!(
+            refused.to_string().contains("closes the kernel's frame"),
+            "{refused}"
+        );
     }
     std::thread::sleep(std::time::Duration::from_millis(500));
     let text = paragraphs(&saved(&dir, &mut worker, &doc, "out.fodt"));

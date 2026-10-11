@@ -22,7 +22,9 @@ pub struct Part {
 /// `app`'s log and its recent crash reports.
 pub fn gather(app: AppId) -> io::Result<Vec<Part>> {
     let mut parts = Vec::new();
-    let log = crate::data_dir(app).map_err(io::Error::other)?.join("ely.log");
+    let log = crate::data_dir(app)
+        .map_err(io::Error::other)?
+        .join("ely.log");
     parts.extend(log_part(log)?);
     for dir in crash_dirs() {
         parts.extend(crashes_in(&dir, &crashing(app), SystemTime::now())?);
@@ -33,9 +35,15 @@ pub fn gather(app: AppId) -> io::Result<Vec<Part>> {
 /// The log's newest part; only a missing log is nothing.
 fn log_part(log: PathBuf) -> io::Result<Option<Part>> {
     match std::fs::metadata(&log) {
-        Ok(meta) => Ok(Some(Part { bytes: meta.len().min(LOG_TAIL), path: log })),
+        Ok(meta) => Ok(Some(Part {
+            bytes: meta.len().min(LOG_TAIL),
+            path: log,
+        })),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(io::Error::new(error.kind(), format!("{}: {error}", log.display()))),
+        Err(error) => Err(io::Error::new(
+            error.kind(),
+            format!("{}: {error}", log.display()),
+        )),
     }
 }
 
@@ -70,11 +78,18 @@ fn crashes_in(dir: &Path, names: &[String], now: SystemTime) -> io::Result<Vec<P
         let entry = entry?;
         let name = entry.file_name().to_string_lossy().into_owned();
         // `ely-doc-2026-10-08-013420.ips`, helpers with their suffix.
-        let ours = names.iter().any(|own| name.starts_with(&format!("{own}-")) || name.starts_with(&format!("{own} ")));
+        let ours = names.iter().any(|own| {
+            name.starts_with(&format!("{own}-")) || name.starts_with(&format!("{own} "))
+        });
         let meta = entry.metadata()?;
-        let fresh = meta.modified().is_ok_and(|at| now.duration_since(at).is_ok_and(|age| age < CRASH_AGE));
+        let fresh = meta
+            .modified()
+            .is_ok_and(|at| now.duration_since(at).is_ok_and(|age| age < CRASH_AGE));
         if ours && fresh && meta.is_file() {
-            found.push(Part { path: entry.path(), bytes: meta.len() });
+            found.push(Part {
+                path: entry.path(),
+                bytes: meta.len(),
+            });
         }
     }
     found.sort_by(|a, b| a.path.cmp(&b.path));
@@ -93,7 +108,10 @@ impl Redact {
         Self::of(crate::user::account(), crate::settings::Shared::load())
     }
 
-    fn of(account: io::Result<String>, shared: io::Result<crate::settings::Shared>) -> io::Result<Self> {
+    fn of(
+        account: io::Result<String>,
+        shared: io::Result<crate::settings::Shared>,
+    ) -> io::Result<Self> {
         let mut names = vec![account?, shared?.author];
         names.extend(std::env::var("USER").ok());
         names.extend(std::env::var("USERNAME").ok());
@@ -103,7 +121,12 @@ impl Redact {
     pub fn apply(&self, text: &str) -> String {
         let mut out: String = text.split_inclusive('\n').map(path_free).collect();
         // Longest first, so short names never split long ones.
-        let mut names: Vec<&str> = self.names.iter().map(|name| name.trim()).filter(|name| !name.is_empty()).collect();
+        let mut names: Vec<&str> = self
+            .names
+            .iter()
+            .map(|name| name.trim())
+            .filter(|name| !name.is_empty())
+            .collect();
         names.sort_by_key(|name| std::cmp::Reverse(name.len()));
         for name in names {
             out = out.replace(name, "<user>");
@@ -152,12 +175,18 @@ fn closing(chars: &[char], from: usize, quote: char) -> usize {
 /// `/x`, `~/x`, `C:\x`, `\\host`, or `scheme://`.
 fn starts_path(rest: &[char]) -> bool {
     let at = |n: usize| rest.get(n).copied();
-    let drive = at(0).is_some_and(|c| c.is_ascii_alphabetic()) && at(1) == Some(':') && matches!(at(2), Some('\\' | '/'));
+    let drive = at(0).is_some_and(|c| c.is_ascii_alphabetic())
+        && at(1) == Some(':')
+        && matches!(at(2), Some('\\' | '/'));
     let scheme = {
-        let letters = rest.iter().take_while(|c| c.is_ascii_alphanumeric() || **c == '+' || **c == '-').count();
+        let letters = rest
+            .iter()
+            .take_while(|c| c.is_ascii_alphanumeric() || **c == '+' || **c == '-')
+            .count();
         letters > 1 && rest[letters..].starts_with(&[':', '/', '/'])
     };
-    let rooted = matches!(at(0), Some('/') | Some('\\')) && at(1).is_some_and(|c| !c.is_whitespace());
+    let rooted =
+        matches!(at(0), Some('/') | Some('\\')) && at(1).is_some_and(|c| !c.is_whitespace());
     rooted || (at(0) == Some('~') && at(1) == Some('/')) || drive || scheme
 }
 
@@ -184,10 +213,17 @@ pub fn bundle(app: AppId, parts: &[Part], redact: Option<&Redact>) -> io::Result
         let mut body = Vec::new();
         file.take(part.bytes).read_to_end(&mut body)?;
         if before[0] != b'\n' {
-            let whole = body.iter().position(|b| *b == b'\n').map_or(body.len(), |n| n + 1);
+            let whole = body
+                .iter()
+                .position(|b| *b == b'\n')
+                .map_or(body.len(), |n| n + 1);
             body.drain(..whole);
         }
-        let name = part.path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+        let name = part
+            .path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default();
         text.push_str(&format!("\n===== {name} =====\n"));
         text.push_str(&String::from_utf8_lossy(&body));
     }

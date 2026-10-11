@@ -52,7 +52,7 @@ fn full_name() -> io::Result<String> {
         return Ok(String::new());
     }
     let mut buffer = vec![0u16; size as usize];
-    if unsafe { GetUserNameExW(NameDisplay, buffer.as_mut_ptr(), &mut size) } == 0 {
+    if !unsafe { GetUserNameExW(NameDisplay, buffer.as_mut_ptr(), &mut size) } {
         return Err(io::Error::last_os_error());
     }
     Ok(String::from_utf16_lossy(&buffer[..size as usize]))

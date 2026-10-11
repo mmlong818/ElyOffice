@@ -77,7 +77,11 @@ mod tests {
     #[test]
     fn the_env_wins_then_the_setting_then_the_os_then_full_motion() {
         assert!(reduce_motion_from(Some(true), Motion::Full, Some(false)));
-        assert!(!reduce_motion_from(Some(false), Motion::Reduced, Some(true)));
+        assert!(!reduce_motion_from(
+            Some(false),
+            Motion::Reduced,
+            Some(true)
+        ));
         assert!(reduce_motion_from(None, Motion::Reduced, Some(false)));
         assert!(!reduce_motion_from(None, Motion::Full, Some(true)));
         assert!(reduce_motion_from(None, Motion::System, Some(true)));

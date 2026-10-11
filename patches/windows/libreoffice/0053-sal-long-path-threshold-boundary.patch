@@ -1,0 +1,21 @@
+diff --git a/sal/osl/w32/file_url.cxx b/sal/osl/w32/file_url.cxx
+index ea90ccad7..21b4fc827 100644
+--- a/sal/osl/w32/file_url.cxx
++++ b/sal/osl/w32/file_url.cxx
+@@ -684,14 +684,14 @@ oslFileError osl_getSystemPathFromFileURL_(const OUString& strURL, rtl_uString *
+             else
+             {
+                 /* do not separate the directory and file case, so the maximal path length without prefix is MAX_PATH-12 */
+-                if ( nDecodedLen - nSkip <= MAX_PATH - 12 )
++                if ( nDecodedLen - nSkip < MAX_PATH - 12 )
+                 {
+                     sTempPath = sDecodedURL->subView(nSkip);
+                 }
+                 else
+                 {
+                     sDecodedURL = GetCaseCorrectPathName(sDecodedURL->subView(nSkip));
+-                    if (sDecodedURL->getLength() <= MAX_PATH - 12
++                    if (sDecodedURL->getLength() < MAX_PATH - 12
+                         || sDecodedURL->startsWith(WSTR_SYSTEM_ROOT_PATH)
+                         || sDecodedURL->startsWith(WSTR_LONG_PATH_PREFIX))
+                     {

@@ -282,8 +282,17 @@ fn without_a_store_the_key_lasts_one_session_only() {
     let again = RecoveryKey::from(load_with(&RefusingBackend, dir.path()));
     assert!(!first.lasting, "the store refused, so nothing lasts");
     assert_eq!(first.key, again.key, "one key for the whole run");
-    let names: Vec<_> = std::fs::read_dir(dir.path()).expect("the dir").flatten().map(|e| e.file_name()).collect();
-    assert!(names.iter().all(|name| name.to_string_lossy().ends_with(".lock")), "no key on disk: {names:?}");
+    let names: Vec<_> = std::fs::read_dir(dir.path())
+        .expect("the dir")
+        .flatten()
+        .map(|e| e.file_name())
+        .collect();
+    assert!(
+        names
+            .iter()
+            .all(|name| name.to_string_lossy().ends_with(".lock")),
+        "no key on disk: {names:?}"
+    );
     let stored = RecoveryKey::from(Ok([7; 32]));
     assert!(stored.lasting);
 }

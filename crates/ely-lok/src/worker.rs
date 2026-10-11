@@ -42,13 +42,13 @@ pub fn run(
 fn serve(lok: Lok, input: impl io::Read + Send + 'static) -> io::Result<()> {
     let lok = Box::leak(Box::new(lok));
     pin(lok);
-    lok.register_callback(password::on_kit);
+    lok.register_callback(password::on_kit)?;
     lok.register_any_input(waiting);
     unsafe {
         gcd::dispatch_async_f(gcd::main_queue(), std::ptr::null_mut(), mark_pumping);
     }
     std::thread::spawn(move || reader(input));
-    std::thread::spawn(events::push);
+    events::start();
     lok.run_loop();
     Ok(())
 }
@@ -150,8 +150,12 @@ mod gcd {
 fn serve(lok: Lok, mut input: impl io::Read) -> io::Result<()> {
     let lok = Box::leak(Box::new(lok));
     pin(lok);
-    lok.register_callback(password::on_kit);
-    std::thread::spawn(events::push);
+    if let Err(error) = lok.register_callback(password::on_kit) {
+        #[cfg(windows)]
+        lok.quarantine();
+        return Err(error);
+    }
+    events::start();
     loop {
         match ipc::read_frame(&mut input)? {
             Some((tag, id, payload)) => answer(lok, tag, id, &payload),
@@ -165,15 +169,21 @@ fn serve(lok: Lok, mut input: impl io::Read) -> io::Result<()> {
 
 /// Handles one frame and writes its answer.
 fn answer(lok: &Lok, tag: u8, id: u64, payload: &[u8]) {
-    let out = OUT.get().expect("the output is set");
-    let mut out = out.lock().expect("the output lock");
     if tag == tag::SHUTDOWN {
         let outcome = teardown::teardown_work();
+        #[cfg(windows)]
+        terminate_if_owner_failed(lok.owner_failed_closed());
         let (reply_tag, body) = match &outcome {
             Ok(()) => (tag::OK, Vec::new()),
             Err(error) => (tag::ERR, Pack::new().str(&error.to_string()).bytes()),
         };
-        let _ = ipc::write_frame(&mut *out, reply_tag, id, &body);
+        let out = OUT.get().expect("the output is set");
+        let _ = ipc::write_frame(
+            &mut *out.lock().unwrap_or_else(|p| p.into_inner()),
+            reply_tag,
+            id,
+            &body,
+        );
         log::info!("lok-worker: shutdown");
         quit(if outcome.is_ok() { 0 } else { 1 });
     }
@@ -182,7 +192,7 @@ fn answer(lok: &Lok, tag: u8, id: u64, payload: &[u8]) {
     let mut unpack = Unpack::new(payload);
     let unpack = &mut unpack;
     let outcome = match tag {
-        tag::BUILD_ID => Ok(Pack::new().str(&lok.build_id()).bytes()),
+        tag::BUILD_ID => lok.build_id().map(|id| Pack::new().str(&id).bytes()),
         tag::LOAD => unpack
             .str()
             .and_then(|url| Ok((url, unpack.str()?)))
@@ -196,10 +206,10 @@ fn answer(lok: &Lok, tag: u8, id: u64, payload: &[u8]) {
             .map(|(width, height)| Pack::new().i64(width).i64(height).bytes()),
         tag::SAVE_AS => save(unpack).map(|()| Vec::new()),
         tag::EXPORT_PDF => export_pdf(unpack).map(|()| Vec::new()),
-        tag::CLOSE_DOC => unpack.u64().map(|id| {
-            close(id);
-            Vec::new()
-        }),
+        tag::CLOSE_DOC => unpack
+            .u64()
+            .map(|id| close(id))
+            .and_then(|closed| closed.map(|()| Vec::new())),
         tag::EXPECT => revision::expect(unpack),
         tag::REVISION => revision::current(unpack),
         tag::PAINT_TILE => input::painted(unpack),
@@ -268,6 +278,17 @@ fn answer(lok: &Lok, tag: u8, id: u64, payload: &[u8]) {
             .map(|()| Vec::new()),
         other => Err(io::Error::other(format!("unknown request {other}"))),
     };
+    #[cfg(windows)]
+    if outcome.as_ref().is_err_and(|error| {
+        error
+            .get_ref()
+            .and_then(|cause| cause.downcast_ref::<crate::events::ResultWaitError>())
+            .is_some()
+    }) {
+        lok.quarantine();
+    }
+    #[cfg(windows)]
+    terminate_if_owner_failed(lok.owner_failed_closed());
     let reply = match outcome {
         Ok(body) => (tag::OK, body),
         Err(error) => {
@@ -276,13 +297,20 @@ fn answer(lok: &Lok, tag: u8, id: u64, payload: &[u8]) {
             (tag::ERR, Pack::new().str(&error.to_string()).bytes())
         }
     };
+    let out = OUT.get().expect("the output is set");
+    let mut out = out.lock().unwrap_or_else(|p| p.into_inner());
     let mut written = ipc::write_frame(&mut *out, reply.0, id, &reply.1);
     // An oversized answer is refused; the worker lives.
     if let Err(error) = &written
         && error.kind() == io::ErrorKind::InvalidInput
     {
         log::warn!("lok-worker: request {tag}: {error}");
-        written = ipc::write_frame(&mut *out, tag::ERR, id, &Pack::new().str(&error.to_string()).bytes());
+        written = ipc::write_frame(
+            &mut *out,
+            tag::ERR,
+            id,
+            &Pack::new().str(&error.to_string()).bytes(),
+        );
     }
     if let Err(error) = written {
         log::warn!("lok-worker: frame write failed: {error}");
@@ -319,11 +347,20 @@ fn load(lok: &Lok, url: &str, password: String, filter: &str) -> io::Result<u64>
     };
     // A session number per load; native pointers get reused.
     let id = revision::session();
-    crate::events::watch(id, &doc);
-    doc.enable_a11y();
-    crate::events::seed_a11y(id, &doc.a11y_paragraph()?);
-    // Settle the initial layout now; later paints see it (LOK-03).
-    doc.post_uno(".uno:Repaginate", None)?;
+    let setup = (|| {
+        crate::events::watch(id, &doc)?;
+        doc.enable_a11y();
+        crate::events::seed_a11y(id, &doc.a11y_paragraph()?);
+        // Settle the initial layout now; later paints see it (LOK-03).
+        doc.post_uno(".uno:Repaginate", None)?;
+        Ok::<(), io::Error>(())
+    })();
+    if let Err(error) = setup {
+        let _ = crate::events::unwatch(id, &doc);
+        #[cfg(windows)]
+        let _ = doc.dispose_on_owner();
+        return Err(error);
+    }
     let mut docs = docs().lock().expect("the docs lock");
     docs.insert(id, doc);
     log::info!("lok-worker: {} documents open", docs.len());
@@ -333,14 +370,17 @@ fn load(lok: &Lok, url: &str, password: String, filter: &str) -> io::Result<u64>
 }
 
 /// Stops watching and frees document `id`.
-fn close(id: u64) {
-    let mut docs = docs().lock().expect("the docs lock");
-    if let Some(doc) = docs.get(&id) {
-        crate::events::unwatch(id, doc);
-    }
-    docs.remove(&id);
+fn close(id: u64) -> io::Result<()> {
+    let doc = docs().lock().unwrap_or_else(|p| p.into_inner()).remove(&id);
     revision::forget(id);
-    log::info!("lok-worker: {} documents open", docs.len());
+    if let Some(doc) = doc {
+        crate::events::unwatch(id, &doc)?;
+        #[cfg(windows)]
+        doc.dispose_on_owner()?;
+    }
+    let count = docs().lock().unwrap_or_else(|p| p.into_inner()).len();
+    log::info!("lok-worker: {count} documents open");
+    Ok(())
 }
 
 /// The live documents, freed on CLOSE_DOC.
@@ -355,6 +395,8 @@ fn verify(lok: &Lok, url: &str) -> io::Result<u64> {
     let doc = lok.load(url, LOAD_OPTIONS)?;
     let mut tile = vec![0xABu8; 64 * 64 * 4];
     doc.paint_tile(&mut tile, 64, 64);
+    #[cfg(windows)]
+    doc.dispose_on_owner()?;
     drop(doc);
     let gained = tile.iter().filter(|byte| **byte != 0xAB).count() as u64;
     log::info!("lok-worker: tile self-check gained {gained} bytes");
@@ -363,13 +405,22 @@ fn verify(lok: &Lok, url: &str) -> io::Result<u64> {
 
 /// Borrows a live document for a read call.
 fn with_doc<T>(id: u64, call: impl FnOnce(&Document) -> T) -> io::Result<T> {
+    #[cfg(windows)]
+    let doc = docs()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .get(&id)
+        .cloned()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no such document"))?;
+    #[cfg(not(windows))]
     let docs = docs().lock().expect("the docs lock");
+    #[cfg(not(windows))]
     let Some(doc) = docs.get(&id) else {
         return Err(io::Error::new(io::ErrorKind::NotFound, "no such document"));
     };
     // Calc reads the current view; every request uses its own.
     doc.activate();
-    Ok(call(doc))
+    Ok(call(&doc))
 }
 
 /// The shown part, then each part's name and info.
@@ -466,4 +517,186 @@ fn quit(code: i32) -> ! {
         fn _exit(code: i32) -> !;
     }
     unsafe { _exit(code) };
+}
+
+#[cfg(windows)]
+pub(super) fn terminate_if_owner_failed(failed_closed: bool) {
+    if failed_closed {
+        // The owner retains native contexts and the Kit in quarantine. Exit
+        // without writing a reply or running Lok/Document destructors; the
+        // client-owned Job reaps us.
+        quit(1);
+    }
+}
+
+#[cfg(all(test, windows))]
+mod owner_exit_tests {
+    use super::terminate_if_owner_failed;
+    use std::{
+        os::windows::io::AsRawHandle,
+        process::{Command, Stdio},
+    };
+    use windows_sys::Win32::{
+        Foundation::{CloseHandle, FILETIME, HANDLE},
+        System::JobObjects::{
+            AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+            JOBOBJECT_BASIC_ACCOUNTING_INFORMATION, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+            JobObjectBasicAccountingInformation, JobObjectExtendedLimitInformation,
+            QueryInformationJobObject, SetInformationJobObject,
+        },
+        System::Threading::{
+            CreateEventW, EVENT_ALL_ACCESS, GetProcessTimes, INFINITE, OpenEventW, SetEvent,
+            WaitForSingleObject,
+        },
+    };
+
+    const CHILD_ENV: &str = "ELY_LOK_TEST_OWNER_EXIT_CHILD";
+    const GATE_ENV: &str = "ELY_LOK_TEST_OWNER_EXIT_GATE";
+    const DROP_MARKER: &str = "ELY_LOK_DROP_MARKER";
+
+    struct DropMarker;
+    impl Drop for DropMarker {
+        fn drop(&mut self) {
+            println!("{DROP_MARKER}");
+        }
+    }
+
+    #[test]
+    fn owner_failure_exit_child() {
+        if std::env::var_os(CHILD_ENV).is_none() {
+            return;
+        }
+        let gate_name = std::env::var(GATE_ENV).expect("parent supplied fatal-exit gate");
+        let gate_name: Vec<u16> = gate_name.encode_utf16().chain(Some(0)).collect();
+        let gate = unsafe { OpenEventW(EVENT_ALL_ACCESS, 0, gate_name.as_ptr()) };
+        assert!(!gate.is_null(), "open parent fatal-exit gate");
+        let _marker = DropMarker;
+        assert_eq!(
+            unsafe { WaitForSingleObject(gate, INFINITE) },
+            0,
+            "wait for parent gate"
+        );
+        unsafe { CloseHandle(gate) };
+        terminate_if_owner_failed(true);
+        panic!("quarantined owner did not terminate the process");
+    }
+
+    #[test]
+    fn quarantined_owner_exits_without_reply_or_native_drop_and_job_empties() {
+        let job = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
+        assert!(!job.is_null(), "create isolated test Job Object");
+        let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { std::mem::zeroed() };
+        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        let configured = unsafe {
+            SetInformationJobObject(
+                job,
+                JobObjectExtendedLimitInformation,
+                (&limits as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
+                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            )
+        };
+        assert_ne!(configured, 0, "configure kill-on-close test Job");
+
+        let gate_id = std::process::id();
+        let gate_env = format!("Local\\ElyLokOwnerExitGate-{gate_id}");
+        let gate_name: Vec<u16> = gate_env.encode_utf16().chain(Some(0)).collect();
+        let gate = unsafe { CreateEventW(std::ptr::null(), 1, 0, gate_name.as_ptr()) };
+        assert!(!gate.is_null(), "create fatal-exit gate");
+
+        let executable = std::env::current_exe().expect("current test executable");
+        let child = Command::new(executable)
+            .args([
+                "worker::owner_exit_tests::owner_failure_exit_child",
+                "--exact",
+                "--nocapture",
+            ])
+            .env(CHILD_ENV, "1")
+            .env(GATE_ENV, &gate_env)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("start controlled fatal-exit child");
+        let assigned = unsafe { AssignProcessToJobObject(job, child.as_raw_handle() as HANDLE) };
+        assert_ne!(assigned, 0, "assign fatal-exit child to Job");
+        let child_pid = child.id();
+        let mut creation = FILETIME {
+            dwLowDateTime: 0,
+            dwHighDateTime: 0,
+        };
+        let mut exit = FILETIME {
+            dwLowDateTime: 0,
+            dwHighDateTime: 0,
+        };
+        let mut kernel = FILETIME {
+            dwLowDateTime: 0,
+            dwHighDateTime: 0,
+        };
+        let mut user = FILETIME {
+            dwLowDateTime: 0,
+            dwHighDateTime: 0,
+        };
+        assert_ne!(
+            unsafe {
+                GetProcessTimes(
+                    child.as_raw_handle() as HANDLE,
+                    &mut creation,
+                    &mut exit,
+                    &mut kernel,
+                    &mut user,
+                )
+            },
+            0,
+            "record child process start time"
+        );
+        let started = ((creation.dwHighDateTime as u64) << 32) | creation.dwLowDateTime as u64;
+        assert_ne!(started, 0, "recorded child process start timestamp");
+        assert_ne!(unsafe { SetEvent(gate) }, 0, "release fatal-exit child");
+        let output = child
+            .wait_with_output()
+            .expect("fatal-exit child is reaped");
+        unsafe { CloseHandle(gate) };
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(
+            output.status.code(),
+            Some(1),
+            "fatal worker exit code; child stdout={stdout}; stderr={stderr}"
+        );
+        assert!(child_pid != 0, "recorded fatal child PID");
+        assert!(!stdout.contains(DROP_MARKER), "fatal exit skips Rust Drop");
+        assert!(
+            !stdout.contains("ERR"),
+            "quarantine emits no worker ERR reply"
+        );
+
+        let mut accounting: JOBOBJECT_BASIC_ACCOUNTING_INFORMATION = unsafe { std::mem::zeroed() };
+        let queried = unsafe {
+            QueryInformationJobObject(
+                job,
+                JobObjectBasicAccountingInformation,
+                (&mut accounting as *mut JOBOBJECT_BASIC_ACCOUNTING_INFORMATION).cast(),
+                std::mem::size_of::<JOBOBJECT_BASIC_ACCOUNTING_INFORMATION>() as u32,
+                std::ptr::null_mut(),
+            )
+        };
+        assert_ne!(queried, 0, "query test Job after child exit");
+        assert_eq!(accounting.ActiveProcesses, 0, "fatal worker Job is empty");
+        unsafe { CloseHandle(job) };
+    }
+
+    #[test]
+    fn non_quarantined_request_error_keeps_reply_path_available() {
+        terminate_if_owner_failed(false);
+        let mut reply = Vec::new();
+        crate::ipc::write_frame(
+            &mut reply,
+            crate::ipc::tag::ERR,
+            17,
+            &crate::ipc::Pack::new()
+                .str("ordinary request timed out")
+                .bytes(),
+        )
+        .expect("ordinary request errors still produce a reply frame");
+        assert!(!reply.is_empty(), "ordinary ERR frame was written");
+    }
 }

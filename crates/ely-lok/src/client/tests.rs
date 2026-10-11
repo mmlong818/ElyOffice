@@ -25,8 +25,12 @@ mod rules;
 mod sheet;
 pub(crate) mod show;
 mod slides;
+#[cfg(all(windows, feature = "supervisor-test"))]
+mod supervise;
 mod tools;
 mod workbook;
+#[cfg(windows)]
+mod windows_real_flow;
 
 /// The pinned LibreOffice commit the build must report.
 const PINNED_BUILD: &str = "8221e31";
@@ -249,7 +253,7 @@ fn a_macro_never_writes_its_marker() {
     std::fs::write(&source, macro_fodt(&marker)).expect("the macro fodt writes");
     let doc = worker
         .load(&format!("file://{}", source.display()))
-        .expect("the macro document loads");
+        .expect("the document loads");
     std::thread::sleep(std::time::Duration::from_millis(800));
     assert!(
         !marker.try_exists().expect("the marker check"),
@@ -319,9 +323,11 @@ fn shutdown_leaves_no_locks_or_temp() {
     let mut worker = Worker::spawn(&install, &profile).expect("the worker");
     let source = dir.path().join("note.fodt");
     write(&source, FODT);
-    let doc = worker
-        .load(&format!("file://{}", source.display()))
-        .expect("the document loads");
+    #[cfg(windows)]
+    let url = crate::file_url(&source);
+    #[cfg(not(windows))]
+    let url = format!("file://{}", source.display());
+    let doc = worker.load(&url).expect("the document loads");
     let lock = dir.path().join(".~lock.note.fodt#");
     worker.close_doc(doc).expect("the document closes");
     worker.shutdown().expect("the worker shuts down");

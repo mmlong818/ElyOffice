@@ -20,4 +20,4 @@ pub mod update;
 pub mod user;
 
 pub use app_id::AppId;
-pub use dirs::{data_dir, omarchy_current_dir};
+pub use dirs::{data_dir, data_root, omarchy_current_dir};

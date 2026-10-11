@@ -63,20 +63,35 @@ impl Default for Shared {
 }
 
 impl Appearance {
-    pub const ALL: [(Self, &'static str); 3] = [(Self::System, "system"), (Self::Light, "light"), (Self::Dark, "dark")];
+    pub const ALL: [(Self, &'static str); 3] = [
+        (Self::System, "system"),
+        (Self::Light, "light"),
+        (Self::Dark, "dark"),
+    ];
 }
 
 impl Language {
-    pub const ALL: [(Self, &'static str); 3] = [(Self::System, "system"), (Self::English, "en-US"), (Self::Chinese, "zh-CN")];
+    pub const ALL: [(Self, &'static str); 3] = [
+        (Self::System, "system"),
+        (Self::English, "en-US"),
+        (Self::Chinese, "zh-CN"),
+    ];
 }
 
 impl Motion {
-    pub const ALL: [(Self, &'static str); 3] = [(Self::System, "system"), (Self::Reduced, "reduce"), (Self::Full, "full")];
+    pub const ALL: [(Self, &'static str); 3] = [
+        (Self::System, "system"),
+        (Self::Reduced, "reduce"),
+        (Self::Full, "full"),
+    ];
 }
 
 /// The stored word for `choice` among `all`.
 pub fn word<T: PartialEq>(all: &[(T, &'static str)], choice: &T) -> &'static str {
-    all.iter().find(|(each, _)| each == choice).map(|(_, word)| *word).expect("every choice has a word")
+    all.iter()
+        .find(|(each, _)| each == choice)
+        .map(|(_, word)| *word)
+        .expect("every choice has a word")
 }
 
 impl Shared {
@@ -106,7 +121,11 @@ impl Shared {
     }
 }
 
-fn pick<T: Copy>(fields: &Map<String, Value>, key: &str, all: &[(T, &'static str)]) -> io::Result<Option<T>> {
+fn pick<T: Copy>(
+    fields: &Map<String, Value>,
+    key: &str,
+    all: &[(T, &'static str)],
+) -> io::Result<Option<T>> {
     match fields.get(key) {
         None => Ok(None),
         Some(Value::String(word)) => match all.iter().find(|(_, each)| each == word) {
@@ -118,5 +137,8 @@ fn pick<T: Copy>(fields: &Map<String, Value>, key: &str, all: &[(T, &'static str
 }
 
 fn wrong(key: &str, value: &Value) -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidData, format!("settings: {key} cannot be {value}"))
+    io::Error::new(
+        io::ErrorKind::InvalidData,
+        format!("settings: {key} cannot be {value}"),
+    )
 }
