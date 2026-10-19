@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Storage: sizes shown; log cleared now, cache at restart.
+# Storage: sizes shown; log cleared now, copies at restart.
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/../.." && pwd)
@@ -48,18 +48,19 @@ quit() {
   for _ in $(seq 40); do kill -0 "$pid" 2>/dev/null || break; sleep 0.25; done
   wait "$pid" 2>/dev/null || true
 }
-mkdir -p "$data/web"
-# A known 2 MiB in the cache for the row.
-dd if=/dev/zero of="$data/web/ely-sample" bs=1024 count=2048 2>/dev/null
+# A crash: the session's copies stay on disk.
+crash() {
+  kill -9 "$pid"
+  wait "$pid" 2>/dev/null || true
+}
+mkdir -p "$data"
 # A log long enough that clearing it shows.
 head -c 8192 /dev/zero | tr '\0' 'x' >"$data/ely.log"
 start
 keys 'keystroke "," using command down'
 seen "title=Storage" || fail "no settings window"
 "$work/ax-press" "$pid" Storage >/dev/null
-seen "title=Web content cache" || fail "the storage page lists no cache"
-shown=$(kb "Web content cache")
-[ "${shown:-0}" -ge 2048 ] || fail "the cache shows ${shown:-nothing} KB, not at least 2048"
+seen "title=Recovery copies" || fail "the storage page lists no copies"
 shown=$(kb "This app's log")
 [ "${shown:-0}" -ge 8 ] || fail "the log shows ${shown:-nothing} KB, not at least 8"
 # Each clear asks first; nothing goes before the yes.
@@ -70,11 +71,11 @@ seen "title=Delete" || fail "clearing the log did not ask"
 sleep 1
 [ "$(wc -c <"$data/ely.log")" -lt 4096 ] || fail "the log was not cleared"
 "$work/ax-press" "$pid" "Clear at next start" AXButton >/dev/null
-seen "title=Delete" || fail "clearing the cache did not ask"
-[ ! -e "$data/.clear-web" ] || fail "the cache was marked before the yes"
+seen "title=Delete" || fail "clearing the copies did not ask"
+[ ! -e "$data/.clear-recovery" ] || fail "the copies were marked before the yes"
 "$work/ax-press" "$pid" Delete AXButton >/dev/null
-seen "Clears at next start" || fail "the cache clear is not shown as pending"
-[ -e "$data/ely-sample" ] || [ -d "$data/web" ] || fail "the cache went while in use"
+seen "Clears at next start" || fail "the copies clear is not shown as pending"
+[ -e "$data/.clear-recovery" ] || fail "the copies clear was not marked"
 # Ten points kept per document, once twelve were made.
 "$work/ax-press" "$pid" 10 >/dev/null
 for _ in $(seq 20); do grep -q '"keep": 10' "$data/settings.json" 2>/dev/null && break; sleep 0.25; done
@@ -82,8 +83,11 @@ grep -q '"keep": 10' "$data/settings.json" || fail "the recovery limit is not ke
 osascript -e "tell application \"System Events\" to click button 1 of (first window of (first process whose unix id is $pid) whose name is \"Settings\")" >/dev/null
 sleep 1
 # An untitled document: never autosaved, so it keeps recovery points.
+tabs=$(grep -c "as tab" "$data/ely.log" || true)
 keys 'keystroke "n" using command down'
-for _ in $(seq 40); do grep -q "mark: shown" "$data/ely.log" && break; sleep 0.25; done
+for _ in $(seq 40); do [ "$(grep -c "as tab" "$data/ely.log")" -gt "$tabs" ] && break; sleep 0.25; done
+# Source mode takes typing in an empty file.
+keys 'keystroke "2" using command down'
 sleep 2
 # Twelve points written, one edit each.
 written() { grep -c "recovery: a point at" "$data/ely.log" || true; }
@@ -145,23 +149,26 @@ for _ in $(seq 40); do grep -q '"keep": 20' "$data/settings.json" && break; slee
 grep -q '"keep": 20' "$data/settings.json" || fail "the retried limit is not kept"
 sleep 0.5
 "$work/ax-values" "$pid" | grep -q "Not done" && fail "the failure stays after a good save"
-quit
-touch "$data/web/ely-marker"
+# After a crash only the mark clears the copies.
+crash
+[ -n "$(find "$data/recovery" -type f)" ] || fail "the crash left no copies"
+touch "$data/recovery/ely-marker"
 start
-[ ! -e "$data/web/ely-marker" ] || fail "the cache was not cleared at the start"
+[ ! -e "$data/recovery/ely-marker" ] || fail "the copies were not cleared at the start"
+[ ! -e "$data/.clear-recovery" ] || fail "the mark was not spent"
 quit
 # A failed clear stops the start; the mark stays.
-mkdir -p "$data/web/locked"
-touch "$data/web/locked/kept" "$data/.clear-web"
-chmod 555 "$data/web/locked"
+mkdir -p "$data/recovery/locked"
+touch "$data/recovery/locked/kept" "$data/.clear-recovery"
+chmod 555 "$data/recovery/locked"
 status=0
 ELY_SMOKE=hold ELY_LOCALE=en ELY_NO_DIALOG=1 HOME="$home" perl -e 'alarm 60; exec @ARGV' "$root/target/debug/ely-mark" >"$work/out" 2>&1 || status=$?
-chmod 755 "$data/web/locked"
+chmod 755 "$data/recovery/locked"
 [ "$status" = 1 ] || fail "a failed clear started anyway ($status)"
 grep -q "could not be deleted" "$work/out" || fail "the failed clear is not told: $(tail -3 "$work/out")"
-grep -q "web: CEF" "$work/out" && fail "the cache opened after a failed clear"
-[ -e "$data/.clear-web" ] && [ -e "$data/web/locked/kept" ] || fail "the failed clear lost its mark or data"
+[ -e "$data/.clear-recovery" ] && [ -e "$data/recovery/locked/kept" ] || fail "the failed clear lost its mark or data"
 start
-[ ! -e "$data/web/locked/kept" ] || fail "the clear was not tried again"
+[ ! -e "$data/.clear-recovery" ] || fail "the clear was not tried again"
+[ ! -e "$data/recovery/locked/kept" ] || fail "the clear left the data"
 quit
 echo "ok: storage"

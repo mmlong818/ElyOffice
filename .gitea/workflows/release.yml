@@ -5,7 +5,8 @@ on:
     tags: ['v*']
 jobs:
   macos:
-    runs-on: macos-arm64
+    # A GUI-session agent: daemons see no login keychain.
+    runs-on: macos-signing
     timeout-minutes: 720
     steps:
       - name: Build, package and upload for macOS
@@ -15,6 +16,9 @@ jobs:
           # The dev clone's engines: LibreOffice from scratch outlasts the runner.
           ELY_SHARE: /Users/zacharyzhang/Documents/GitHub/ElyOfficeSuite
           ELY_PATH: /Users/zacharyzhang/.cargo/bin:/opt/homebrew/bin
+          # Repository variables; both live in the runner's keychain.
+          ELY_SIGN_IDENTITY: ${{ vars.ELY_SIGN_IDENTITY }}
+          ELY_NOTARY_PROFILE: ${{ vars.ELY_NOTARY_PROFILE }}
         run: |
           dir=$HOME/ely-ci/ElyOffice
           [ -d "$dir/.git" ] || git clone https://git.zacharyzhang.com/ZacharyZhang-NY/ElyOffice.git "$dir"

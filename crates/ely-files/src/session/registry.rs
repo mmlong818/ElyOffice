@@ -83,7 +83,7 @@ impl Sessions {
     /// The key of an existing file; missing fails loud.
     fn key(path: &Path) -> io::Result<Key> {
         Ok(Key {
-            canonical: std::fs::canonicalize(path)?,
+            canonical: dunce::canonicalize(path)?,
             id: file_id(path)?,
         })
     }

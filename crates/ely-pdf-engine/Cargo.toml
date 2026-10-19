@@ -20,6 +20,7 @@ cc = "1"
 
 [dev-dependencies]
 ely-pdf-engine = { path = ".", features = ["test-support"] }
+lopdf.workspace = true
 tempfile.workspace = true
 
 [lints]

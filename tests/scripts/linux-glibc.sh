@@ -17,7 +17,7 @@ done
 release=$root/target/ubuntu/release
 lo=$root/engines/lo-src/instdir/program
 required=("$release"/ely-{doc,table,show,pdf,tree,mark,lok-worker,pdf-worker} "$lo/libmergedlo.so"
-  "$root/engines/git/bin/git" "$root/engines/cef/libcef.so")
+  "$root/engines/git/bin/git")
 for file in "${required[@]}"; do
   [ -f "$file" ] || fail "no $file; build in packaging/linux/container.sh"
   magic=$(head -c 4 "$file" | od -An -c | tr -d ' ') || fail "cannot read $file"
@@ -26,7 +26,7 @@ done
 list=$(mktemp)
 trap 'rm -f "$list"' EXIT
 find -L "$release"/ely-{doc,table,show,pdf,tree,mark,lok-worker,pdf-worker} "$lo" "$root/engines/git" \
-  "$root/engines/cef" -type f -print0 >"$list" || fail "cannot list every file"
+  -type f -print0 >"$list" || fail "cannot list every file"
 checked=0
 while IFS= read -r -d '' file; do
   magic=$(head -c 4 "$file" | od -An -c | tr -d ' ') || fail "cannot read $file"

@@ -24,10 +24,10 @@ Ely Office 提供八个桌面应用。用户可以写文档、计算表格、制
 | ElyPDF | PDF 阅读、编辑、批注、表单和页面处理 | MuPDF；OCR 复用 Tesseract | PDF |
 | ElyMail | 邮件收发、本地存储和搜索 | MailCore 2，加本地同步与存储 | 邮件、附件、草稿 |
 | ElyTree | Git 图形化版本管理 | Git CLI | 本地 Git 仓库 |
-| ElyMark | 本地 Markdown 编辑 | Milkdown 与 CodeMirror 6；参考 MarkText、ColaMD 的编辑与文件处理方式 | Markdown 与本地附件 |
+| ElyMark | 本地 Markdown 编辑 | Ely-GPUI-Components 的 Markdown 文档组件，markdown-rs 解析；参考 MarkText、ColaMD、Markion | Markdown 与本地附件 |
 | ElyAgent | 独立的 Agent 配置与会话管理 | 嵌入的 Kigi CLI Rust 代码 | 配置、会话记录、运行状态 |
 
-LOK、MuPDF 和 GPUI 是已确定的方向。MailCore 2、Markdown 编辑框架、本地 HTML 宿主和下文的发行默认值，是本 PRD 采用的工程基线，仍须通过三端接入验收。不得把未测试的接口写成已支持功能。
+LOK、MuPDF 和 GPUI 是已确定的方向。MailCore 2、Markdown 文档组件、邮件正文渲染和下文的发行默认值，是本 PRD 采用的工程基线，仍须通过三端接入验收。不得把未测试的接口写成已支持功能。
 
 ElyAgent 参考 Magpie 的独立工具定位，但不要求复制其全部功能。它不是其他七个应用的聊天侧栏，也不是整个套件的控制中枢。[S19]
 
@@ -35,7 +35,7 @@ ElyAgent 参考 Magpie 的独立工具定位，但不要求复制其全部功能
 
 1. 首个正式版交付全部八个应用及本文定义的功能，不发布只有入口和占位界面的套件。
 2. Doc、Table、Show 共用 LOK 适配实现。PDF 使用 MuPDF。不开设替代内核路线。
-3. GPUI 负责应用界面。专业内容区域可以使用内核渲染结果或本地 Web 内容区域，但外观和行为必须遵守 Ely 规范。
+3. GPUI 负责应用界面。专业内容区域可以使用内核渲染结果，但外观和行为必须遵守 Ely 规范；不用 CEF 与 Electron。
 4. 应用可以独立启动、更新和卸载。安装 ElyMark、ElyTree 或 ElyAgent 不得强制安装 LOK。
 5. 用户文件采用通用格式。应用数据库只保存索引、配置和运行记录，不取代用户文件。
 6. 不建设云端文档平台、微服务系统、统一业务数据库或跨应用 Agent 编排系统。
@@ -377,7 +377,7 @@ XFA 动态表单、任意嵌入脚本执行、专业印前分色及 PDF 到 Offi
 
 提供多账号邮件客户端，不建设邮件托管服务。MailCore 2 负责 IMAP、POP、SMTP 和邮件解析等能力。Ely 负责账号流程、本地存储、搜索、同步队列和界面。MailCore 2 官方列出 C++ API 与三端支持，但发行前仍须验证实际构建和依赖。[S10]
 
-默认布局为账号与文件夹、邮件列表、阅读区。写信可在独立窗口打开。HTML 正文和富文本撰写区使用本地内容宿主，不能把正文 HTML 解析当成完整页面渲染。
+默认布局为账号与文件夹、邮件列表、阅读区。写信可在独立窗口打开。HTML 正文和富文本撰写区不用 CEF 与 Electron，渲染方式随 ElyMail 任务另定；不能把正文 HTML 解析当成完整页面渲染。
 
 ### 12.2 功能要求
 
@@ -474,9 +474,11 @@ Git 托管、PR 审核平台、Issue 系统、CI 平台和远程开发环境不�
 
 提供以本地 Markdown 文件为中心的编辑器。支持可视化编辑、源码编辑和只读预览。文件可由其他编辑器、Git 或 Agent 修改，不要求导入专有知识库。
 
-默认使用 Milkdown 承担可视化编辑，CodeMirror 6 承担源码编辑。两者接入同一个文件会话，只允许当前模式提交修改，不同时维护两份独立可写文档。Milkdown 的 Markdown 与编辑模型转换需要单独处理源码保留，不能把序列化输出默认视为无损原文。[S14][S15][S16]
+界面用 Ely-GPUI-Components 的 Markdown 文档组件，全部原生 GPUI：全文只在一个源码编辑器里，可视模式按块渲染，按下的块以原文编辑；源码与预览共用同一份文本。解析用 markdown-rs，公式用 RaTeX，Mermaid 用 mermaid-rs-renderer。文本即文件原文，不经编辑模型序列化。[S14][S15][S16]
 
-参考 MarkText 的 Markdown 编辑行为、ColaMD 的本地文件同步和内容保留规则，不复制其整个应用窗口，不把 Electron 作为 Ely 的桌面外壳。当前 ColaMD 仍包含 Milkdown 与 CodeMirror 相关依赖，但具体实现必须按选定提交核对，不凭包名推断编辑行为。[S17][S18]
+参考 MarkText 的 Markdown 编辑行为、ColaMD 的本地文件同步和内容保留规则、Markion 的 GPUI 原生 Markdown 编辑，不复制其整个应用窗口。不用 Electron，不用 CEF 或其他网页内容宿主。[S17][S18]
+
+解析、渲染、编辑命令与右键菜单以 Typora 1.14.10 的默认设置为对照，不输于它；可视模式仍是按下的块以原文编辑，不改为所见即所得的行内编辑（用户 2026-10-13 定）。Typora 是参照，不求一一相同：验收看每项功能可用，缺 Typora 的某项、次序或措辞不同不算缺陷（用户 2026-10-14 定）。[S25]
 
 ### 14.2 功能要求
 
@@ -485,7 +487,7 @@ Git 托管、PR 审核平台、Issue 系统、CI 平台和远程开发环境不�
 | MARK-01 | 本地文件 | 新建、打开、保存、重命名和另存；支持直接打开文件或文件夹 |
 | MARK-02 | 编辑模式 | 可视化、源码和只读预览可切换；切换本身不修改文件内容 |
 | MARK-03 | Markdown | 支持 CommonMark 与 GFM 常用语法：标题、列表、任务、引用、链接、图片、表格和代码块 |
-| MARK-04 | 扩展语法 | 支持脚注、数学公式、Mermaid 与 YAML front matter；资源随包提供 |
+| MARK-04 | 扩展语法 | 支持脚注、数学公式、Mermaid 与 YAML front matter；照 Typora 默认显示 `:表情:`、行内与块级 HTML 的常用标签、GitHub 提示块与 `[toc]` 目录；`==`、`^`、单个 `~` 照 GFM，不作高亮、上下标；Typora 与 GitHub 读法不同处随 GitHub（表情名与转义、标签与强调交叉）；资源随包提供 |
 | MARK-05 | 导航 | 提供文件树、文档大纲、多标签、最近文件和按标题跳转 |
 | MARK-06 | 编辑工具 | 支持查找替换、源码正则搜索、缩进、列表续写、表格行列操作和代码高亮 |
 | MARK-07 | 附件 | 支持拖放和粘贴图片，默认复制到文档旁的资源目录并写入相对路径 |
@@ -496,6 +498,8 @@ Git 托管、PR 审核平台、Issue 系统、CI 平台和远程开发环境不�
 | MARK-12 | 会话恢复 | 恢复打开标签、未保存内容、光标、滚动和视图设置 |
 | MARK-13 | Git 配合 | 在仓库内显示文件是否有改动，并可调用 ElyTree 查看；不内置第二套 Git 客户端 |
 | MARK-14 | 大文件 | 大文件采用延迟渲染或源码视图，说明限制，不截断保存内容 |
+| MARK-15 | 格式命令 | 段落与格式菜单照 Typora 的项与快捷键：标题与段落、引用与列表、插入块、行内格式与清除格式；每条命令一步撤销，用不了的地方说明原因 |
+| MARK-16 | 右键菜单 | 右键处的块、链接、图片、表格或代码决定菜单内容，照 Typora 的布局（剪贴板与格式为图标行）；预览只读时只留复制类 |
 
 数学与 Mermaid 默认仅渲染文档中已保存的源代码，不执行任意本地命令。语法错误显示原文与错误位置，不清空代码块。
 
@@ -605,7 +609,6 @@ ely-office/
     ely-lok/         # LOK 接入；仅 Doc/Table/Show 使用
     ely-pdf-engine/  # MuPDF 与 OCR 接入
     ely-mail-engine/ # 邮件协议、同步和本地存储
-    ely-web-content/ # 本地 HTML 与 Markdown 内容宿主
   assets/
   tests/
   packaging/
@@ -625,23 +628,19 @@ C/C++ 异常、原生错误与资源释放在 FFI 边界处理，不能跨 Rust 
 
 邮件同步、Git 命令、OCR、缩略图与索引构建在后台任务中执行，不阻塞 UI 事件循环。后台指应用运行期间的本地任务，不表示默认安装常驻系统服务。
 
-### 17.3 本地 Web 内容宿主
+### 17.3 内容渲染
 
-Mail 的 HTML 正文和富文本撰写、Mark 的编辑与预览需要成熟 Web 内容渲染。本 PRD 的默认实现采用 CEF 离屏内容区域，只在这两个应用引入。CEF 提供离屏画面和输入事件接口，适合接入自绘界面，但 GPUI 的实际接入仍须三端验证。[S22]
+不用 CEF，不用 Electron（用户 2026-10-11 定）。Mark 的编辑与预览全部由 GPUI 绘制（§14.1）。Mail 的 HTML 正文和富文本撰写的渲染方式随 ElyMail 任务另定，定前不写成已有。
 
-CEF 只处理内容区域，不绘制应用标题栏、菜单、文件树和设置页面。不引入 Electron 应用外壳，不运行面向浏览器的本地文档服务器。CEF 必需的辅助进程随应用发行。
+Ely 主题 token 用于内容区。键盘、焦点、选择、缩放、右键菜单和输入法进入统一适配规则。对话框和应用菜单由 GPUI 展示。
 
-Ely 主题 token 同步到内容区样式。键盘、焦点、选择、缩放、右键菜单和输入法进入统一适配规则。对话框和应用菜单由 GPUI 展示，不出现框架默认主题。
-
-邮件阅读环境禁用脚本及文件桥接。Markdown 编辑环境只运行随包代码，通过受限桥接访问当前用户打开的文件与资源。外部文档内容不能调用任意本地命令。
-
-不同时维护 CEF、系统 WebView 和全原生 Markdown 三种路线。若 CEF 原型不能满足三端要求，先修订该接入决策并更新 PRD，不能在应用内部临时混用多套未验收宿主。
+邮件阅读不运行正文脚本。Markdown 文档里的 HTML 不运行；数学与图只渲染保存的源码。外部文档内容不能调用任意本地命令。
 
 ### 17.4 不建设的技术设施
 
 不引入 Kubernetes、Docker 运行依赖、远程数据库、消息中间件、事件溯源系统、通用插件市场、统一知识图谱、分布式搜索或独立账号中心。
 
-应用间不做 RPC 服务发现。Agent 不以独立后台服务器为前提。Git 不同时接入多个 Git 内核。Markdown 不叠加第三个编辑内核。新抽象必须服务于已有的重复需求。
+应用间不做 RPC 服务发现。Agent 不以独立后台服务器为前提。Git 不同时接入多个 Git 内核。Markdown 只有一个解析内核（markdown-rs）。新抽象必须服务于已有的重复需求。
 
 ## 18. 数据、配置与隐私
 
@@ -735,7 +734,7 @@ Doc、Table、Show 的 PDF 输出由 LOK 完成，不要求安装 ElyPDF。ElyMa
 | PERF-08 | 资源释放 | 连续打开关闭 20 次后，活动文档对象与句柄回到基线，内存无持续单向增长 |
 | PERF-09 | 多会话 | 4 个 Agent 会话同时流式输出时，其他会话选择和日志滚动仍满足交互目标 |
 
-不提前宣传固定内存占用或比其他 Office 更快。发布报告列出单应用、内核子进程及内容宿主的总内存，不能只测 GPUI 主进程。
+不提前宣传固定内存占用或比其他 Office 更快。发布报告列出单应用与内核子进程的总内存，不能只测 GPUI 主进程。
 
 ### 20.2 稳定性
 
@@ -769,7 +768,7 @@ Doc、Table、Show 的 PDF 输出由 LOK 完成，不要求安装 ElyPDF。ElyMa
 | LibreOffice/LOK | 保留 MPL 2.0 及附带依赖的相应声明；发布对受约束文件的修改与所需资料 [S5] |
 | MailCore 2 | 保留其许可、版权和免责条款，并检查其传递依赖 [S24] |
 | Git | 作为独立程序分发并遵守其 GPLv2 等实际适用条款；提供所发行版本的源码取得方式 [S23] |
-| Markdown 与内容宿主 | 保留 Milkdown、CodeMirror、CEF 及其依赖的通知；逐项检查实际发行包 [S14][S16][S22] |
+| Markdown | 保留 markdown-rs、RaTeX（含随带字体）、mermaid-rs-renderer 及其依赖的许可；逐项检查实际发行包 [S14][S15][S16] |
 | OCR、字体、词典和媒体组件 | 记录每个资源的来源、版本和再分发条件，不从系统目录随意拷贝受限资源 |
 
 MuPDF 的 AGPL 路线允许符合条件的开源集成；“项目开源”本身不足以证明整个发行包已经符合条件。是否收费与源码义务分开处理。[S8][S9]
@@ -843,13 +842,13 @@ UI 自动测试、内核测试和手工交互测试互相补充。三端的输�
 | LOK 高级功能 | 母版、放映、图表、修订、输入法、打印和无障碍的接口映射及用例 | 补齐桥接或维护必要上游补丁，不跳回上游原生 UI |
 | MuPDF 编辑 | 字体、对象修改、表单、删除及保存的样本结果 | 修复对象编辑与输出；不得改为视觉覆盖冒充编辑 |
 | MailCore 2 | 三端可重复构建、TLS、OAuth、同步和 MIME 测试 | 处理依赖及适配问题；替换后端必须显式修订选型 |
-| 本地 Web 内容 | CEF 与 GPUI 的输入、焦点、缩放、弹层和辅助技术测试 | 接入未通过不能以独立 Electron 窗口代替 |
+| Markdown 原生编辑 | 可视、源码、预览的输入、焦点、缩放、输入法和辅助技术测试 | 未通过不能以 CEF、WebView 或 Electron 代替 |
 | Markdown 原文保留 | 无编辑保存、模式切换、局部修改和外部冲突的字节级差异 | 修复映射与保存；未知语法回到原文模式，不删除 |
 | 邮箱服务注册 | 正式 OAuth 配置、适用审核状态与用户流程 | 不将未获许可的内置登录描述为可用 |
 | Agent 后端差异 | 每个预设后端的版本、启动、控制、日志和恢复能力表 | 按真实能力显示，禁止模拟未提供的接口 |
 | 打包与许可 | 三端依赖清单、源码对应关系、资源再分发检查 | 发行前解决，不以“整个项目开源”代替检查 |
 
-选择版本时记录源码提交、编译选项和补丁。升级 LOK、MuPDF、GPUI、CEF 或编辑框架后运行相关回归测试。不要跟随默认分支自动升级正式构建。
+选择版本时记录源码提交、编译选项和补丁。升级 LOK、MuPDF、GPUI 或 Markdown 解析与渲染库后运行相关回归测试。不要跟随默认分支自动升级正式构建。
 
 ## 24. 交付物与完成定义
 
@@ -908,14 +907,14 @@ UI 自动测试、内核测试和手工交互测试互相补充。三端的输�
 [S13] Git 官方文档，git-status 与 porcelain 输出格式。  
 `https://git-scm.com/docs/git-status`
 
-[S14] Milkdown 官方仓库，框架结构与许可证。  
-`https://github.com/Milkdown/milkdown`
+[S14] markdown-rs 官方仓库，CommonMark、GFM 与扩展语法解析，许可证。  
+`https://github.com/wooorm/markdown-rs`
 
-[S15] Milkdown 官方 Transformer 文档，编辑模型与 Markdown AST 转换。  
-`https://milkdown.dev/docs/api/transformer`
+[S15] RaTeX 官方仓库，LaTeX 公式排版与许可证。  
+`https://github.com/erweixin/RaTeX`
 
-[S16] CodeMirror 官方开发入口与仓库迁移说明；应用依赖按实际发布包锁定。  
-`https://github.com/codemirror/dev`
+[S16] mermaid-rs-renderer 官方仓库，Mermaid 图的 Rust 渲染与许可证。  
+`https://github.com/1jehuang/mermaid-rs-renderer`
 
 [S17] MarkText 官方仓库，编辑模式、格式能力与许可证。  
 `https://github.com/marktext/marktext`
@@ -933,12 +932,11 @@ UI 自动测试、内核测试和手工交互测试互相补充。三端的输�
 [S21] Tesseract 官方 API 示例与本地 OCR 接入。  
 `https://tesseract-ocr.github.io/tessdoc/APIExample.html`
 
-[S22] Chromium Embedded Framework 官方说明与离屏渲染接入。  
-`https://github.com/chromiumembedded/cef`  
-`https://chromiumembedded.github.io/cef/general_usage.html`
-
 [S23] Git 官方 COPYING 文件。  
 `https://raw.githubusercontent.com/git/git/master/COPYING`
 
 [S24] MailCore 2 官方 LICENSE 文件。  
 `https://raw.githubusercontent.com/MailCore/mailcore2/master/LICENSE`
+
+[S25] Typora 官方快捷键说明；对照的程序为 Typora 1.14.10 Windows 安装包（本机 `TyporaRef`，不入库）。  
+`https://support.typora.io/Shortcut-Keys/`

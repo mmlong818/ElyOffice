@@ -31,7 +31,7 @@ docker build -q -t ely-smoke-fedora - >/dev/null <<'EOF'
 FROM fedora:44@sha256:43b29f65a41eb9c35e1cd5323e3bdf3b655c2357a9f4f1ff2f9c2798e5045d80
 RUN dnf install -y -q xorg-x11-server-Xvfb mesa-vulkan-drivers xwd xwininfo && dnf clean all
 EOF
-# As the work dir's owner: Git and CEF refuse root.
+# As the work dir's owner: Git refuses others' repos.
 inside='set -euo pipefail
 slug=$1 work=$2 file=$3
 shift 3

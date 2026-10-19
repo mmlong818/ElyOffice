@@ -11,6 +11,10 @@ version=$(awk -F'"' '/^version = / { print $2; exit }' "$root/Cargo.toml")
   exit 1
 }
 : "${ELY_RELEASE_TOKEN:?the Gitea token that uploads}"
+if [ "$os" = macos ]; then
+  : "${ELY_SIGN_IDENTITY:?the Developer ID Application certificate}"
+  : "${ELY_NOTARY_PROFILE:?the notarytool keychain profile}"
+fi
 [ -z "${ELY_PATH:-}" ] || PATH=$ELY_PATH:$PATH
 cd "$root"
 # Linux builds and packages in the Ubuntu 26.04 container.
@@ -40,11 +44,9 @@ if [ -n "${ELY_SHARE:-}" ]; then
 else
   scripts/fetch-references.sh
   ${inside[@]+"${inside[@]}"} scripts/build-mupdf.sh
-  ${inside[@]+"${inside[@]}"} scripts/fetch-cef.sh
   ${inside[@]+"${inside[@]}"} scripts/build-git.sh
   ${inside[@]+"${inside[@]}"} scripts/fetch-git-lfs.sh
   ${inside[@]+"${inside[@]}"} scripts/fetch-tessdata.sh
-  ${inside[@]+"${inside[@]}"} scripts/build-mark-content.sh
   ${inside[@]+"${inside[@]}"} scripts/build-libreoffice.sh
 fi
 
@@ -53,7 +55,10 @@ rm -rf "$dist"
 batch=$(awk -F'\t' '$4 == 1 { print $1 }' packaging/apps.tsv)
 case $os in
   macos) packaging/macos/release.sh 1 ;;
-  windows) for slug in $batch; do packaging/windows/installer.sh "$slug"; done ;;
+  windows)
+    for slug in $batch; do packaging/windows/installer.sh "$slug"; done
+    packaging/windows/bundle.sh
+    ;;
   linux) for slug in $batch; do ${inside[@]+"${inside[@]}"} packaging/linux/package.sh "$slug"; done ;;
   *)
     echo "ci.sh: no release for $os" >&2
@@ -61,8 +66,10 @@ case $os in
     ;;
 esac
 
-# macOS's release.sh writes its own source archives.
-[ "$os" = macos ] || packaging/source.sh "$dist"
+# Windows checkouts flatten symlinks; Linux and macOS write source.
+if [ "$os" = linux ]; then
+  packaging/source.sh "$dist"
+fi
 
 # The tag's release, made by whichever platform comes first.
 api=https://git.zacharyzhang.com/api/v1/repos/ZacharyZhang-NY/ElyOffice
@@ -74,9 +81,29 @@ if ! id=$(release_id 2>/dev/null); then
   curl -fsS -H "$auth" -H "Content-Type: application/json" -d "$body" "$api/releases" >/dev/null || true
   id=$(release_id)
 fi
+names=()
 for file in "$dist"/*; do
   [ -f "$file" ] || continue
   name=$(basename "$file")
+  # Linux alone publishes the source pair.
+  if [ "$os" != linux ] && [[ $name == *-source.tar.gz ]]; then
+    echo "ci.sh: $name is Linux's to upload"
+    continue
+  fi
+  names+=("$name")
+done
+# Rebuilt bytes differ; never mix them with earlier uploads.
+have=$(curl -fsS -H "$auth" "$api/releases/$id/assets" | python3 -c 'import json, sys; print("\n".join(a["name"] for a in json.load(sys.stdin)))')
+taken=()
+for name in "${names[@]}"; do
+  if grep -qxF "$name" <<<"$have"; then taken+=("$name"); fi
+done
+if [ ${#taken[@]} -gt 0 ]; then
+  echo "ci.sh: already on $tag; delete them, then rerun: ${taken[*]}" >&2
+  exit 1
+fi
+for name in "${names[@]}"; do
+  file=$dist/$name
   echo "ci.sh: uploading $name"
   curl -fsS -H "$auth" -F "attachment=@$file" "$api/releases/$id/assets?name=$name" >/dev/null
 done

@@ -20,8 +20,7 @@ put() { # into, files...
 put . "$root/LICENSE"
 case $slug in
   ely-doc | ely-table | ely-show) crates=(ely-lok) ;;
-  ely-pdf) crates=(ely-pdf-engine) ;;
-  ely-mark) crates=(ely-web-content) ;;
+  ely-pdf | ely-mark) crates=(ely-pdf-engine) ;;
   *) crates=() ;;
 esac
 python3 "$root/packaging/crates.py" "$slug" ${crates[@]+"${crates[@]}"} >"$out/rust-crates.txt"
@@ -36,7 +35,7 @@ case $slug in
   ely-doc | ely-table | ely-show)
     put LibreOffice "$lo_licence" "$lo/LICENSE.html" "$lo/NOTICE" "$lo/CREDITS.fodt"
     ;;
-  ely-pdf)
+  ely-pdf | ely-mark)
     put MuPDF "$root/engines/mupdf-src/COPYING"
     # Every third party the MuPDF build compiled in.
     case $(uname) in
@@ -77,16 +76,20 @@ case $slug in
       Darwin) put OpenSSL "$(pkg-config --variable=prefix libcrypto)/LICENSE.txt" ;;
       *) put OpenSSL /usr/share/doc/libssl-dev/copyright /usr/share/common-licenses/Apache-2.0 ;;
     esac
-    put tessdata "${ELY_TESSDATA:-$root/engines/tessdata}/LICENSE"
     put GreatVibes "$root/crates/ely-pdf-engine/fonts/OFL.txt"
     ;;
+esac
+case $slug in
+  ely-pdf) put tessdata "${ELY_TESSDATA:-$root/engines/tessdata}/LICENSE" ;;
   ely-mark)
-    put CEF "$root/reference/cef/LICENSE.txt" "${ELY_CEF:-$root/engines/cef}/CREDITS.html"
-    put content "$root/engines/content/ely-mark/THIRD-PARTY-NOTICES.txt"
+    # RaTeX embeds KaTeX's fonts.
+    katex=$(cargo metadata --format-version 1 --locked --manifest-path "$root/Cargo.toml" |
+      python3 -c 'import json, pathlib, sys; print(next(pathlib.Path(p["manifest_path"]).parent for p in json.load(sys.stdin)["packages"] if p["name"] == "ratex-katex-fonts"))')
+    put KaTeX "$katex/fonts/OFL.txt" "$katex/fonts/FONT_NOTICE.txt"
     ;;
 esac
-# ElyTree carries Git; on Windows and Linux ElyMark does too.
-if [ "$slug" = ely-tree ] || { [ "$slug" = ely-mark ] && [ "$(uname)" != Darwin ]; }; then
+# ElyTree carries Git; on Linux ElyMark does too.
+if [ "$slug" = ely-tree ] || { [ "$slug" = ely-mark ] && [ "$(uname)" = Linux ]; }; then
   case $(uname) in
     MINGW* | MSYS*) put Git "$root/engines/git/LICENSE.txt" ;;
     *) put Git "$root/engines/git-src/COPYING" "$root/engines/git-src/LGPL-2.1" ;;

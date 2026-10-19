@@ -1,6 +1,6 @@
 use super::input::{open, saved};
 use super::*;
-use crate::review;
+use crate::{menu, review};
 
 const TEXT: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 <office:document xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" office:version="1.3" office:mimetype="application/vnd.oasis.opendocument.text">
@@ -125,8 +125,9 @@ fn spelling_suggests_and_ignores() {
     );
     let (x, y, _, h) = seen.found[0];
     let json = menu(&mut worker, &doc, &mut seen, (x + 60, y + h / 2)).expect("a menu");
-    let spelling = review::spelling(&json)
+    let spelling = menu::read(&json)
         .expect("the menu parses")
+        .spelling
         .expect("a spelling menu");
     let (_, rule) = spelling
         .suggestions
@@ -145,13 +146,13 @@ fn spelling_suggests_and_ignores() {
     );
     let (x, y, _, h) = seen.found[0];
     let json = menu(&mut worker, &doc, &mut seen, (x + 60, y + h / 2)).expect("a menu");
-    assert!(review::spelling(&json).expect("parses").is_some());
+    assert!(menu::read(&json).expect("parses").spelling.is_some());
     worker
         .run(&doc, "spell.ignore_all", &["Spelling"])
         .expect("ignore all");
     let json = menu(&mut worker, &doc, &mut seen, (x + 60, y + h / 2)).expect("a menu");
     assert_eq!(
-        review::spelling(&json).expect("parses"),
+        menu::read(&json).expect("parses").spelling,
         None,
         "an ignored word is no longer wrong"
     );

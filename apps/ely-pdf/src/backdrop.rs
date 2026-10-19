@@ -36,7 +36,7 @@ fn fraction(key: &TileKey, size: (f32, f32)) -> [f32; 4] {
 
 impl PdfView {
     /// The pages in view and the tiles each needs.
-    pub fn showing(&self, sf: f32, dark: bool) -> Vec<Showing> {
+    pub fn showing(&self, sf: f32) -> Vec<Showing> {
         let laid = self.laid_out();
         let (room_w, room_h) = (f32::from(self.room.size.width), f32::from(self.room.size.height));
         let (left, top) = (-f32::from(self.scroll.offset().x), -f32::from(self.scroll.offset().y));
@@ -50,7 +50,7 @@ impl PdfView {
                 let keys = ys
                     .flat_map(|ty| xs.clone().map(move |tx| (tx, ty)))
                     .map(|(tx, ty)| {
-                        let key = TileKey { page: place.page, scale, rotate: self.rotate, dark, tx, ty };
+                        let key = TileKey { page: place.page, scale, rotate: self.rotate, tx, ty };
                         (key, [tx * TILE, ty * TILE, TILE.min(dw - tx * TILE), TILE.min(dh - ty * TILE)])
                     })
                     .collect();
@@ -123,7 +123,7 @@ mod tests {
 
     #[test]
     fn a_tile_keeps_its_place_as_a_fraction_of_its_page() {
-        let key = TileKey { page: 0, scale: 2000, rotate: 0, dark: false, tx: 1, ty: 0 };
+        let key = TileKey { page: 0, scale: 2000, rotate: 0, tx: 1, ty: 0 };
         // A 612 by 792 page at 2x: 1224 by 1584.
         assert_eq!(fraction(&key, (612.0, 792.0)), [512.0 / 1224.0, 0.0, 512.0 / 1224.0, 512.0 / 1584.0]);
         let turned = TileKey { rotate: 90, ..key };

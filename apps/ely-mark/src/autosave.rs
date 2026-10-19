@@ -10,7 +10,7 @@ use crate::desk::Desk;
 use crate::outside::Outside;
 
 impl Desk {
-    /// A page change restarts the wait; finished saves report.
+    /// A text change restarts the wait; finished saves report.
     pub fn autosave(&mut self, id: u64, changed: u64, cx: &mut Context<Self>) {
         let Some(tab) = self.tab_mut(id) else {
             return;
@@ -24,7 +24,7 @@ impl Desk {
         if tab.session.path().is_some() {
             tab.extra.policy.set_has_path();
         }
-        // A page reload restarts its count: any difference is news.
+        // Any count other than the last heard is news.
         if changed == tab.extra.heard {
             return;
         }

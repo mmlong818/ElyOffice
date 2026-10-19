@@ -7,6 +7,7 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+dunce.workspace = true
 ely-ipc.workspace = true
 base64.workspace = true
 serde_json.workspace = true
@@ -32,6 +33,7 @@ windows-sys.workspace = true
 tempfile.workspace = true
 ely-ui.workspace = true
 gpui = { workspace = true, features = ["test-support"] }
+ely-gpui-component = { workspace = true, features = ["test-support"] }
 
 [[example]]
 name = "lokview"

@@ -2,7 +2,7 @@
 
 use std::{io, path::Path};
 
-use ely_ipc::Unpack;
+use ely_ipc::{Pack, Unpack};
 
 use crate::client::{Doc, Worker};
 use crate::proto::tag;
@@ -40,6 +40,12 @@ impl Worker {
     /// The document as it is now, written to print.
     pub fn print_copy(&mut self, doc: Doc, out: &Path) -> io::Result<()> {
         self.request(tag::PRINT_COPY, &self.whole(&doc)?.str(utf8(out)?).bytes()).map(|_| ())
+    }
+
+    /// HTML `page` in `dir`, with its pictures, as a PDF.
+    pub fn html_pdf(&mut self, dir: &Path, page: &str, out: &Path) -> io::Result<()> {
+        let ask = Pack::new().str(utf8(dir)?).str(page).str(utf8(out)?);
+        self.request(tag::HTML_PDF, &ask.bytes()).map(|_| ())
     }
 
     /// Decodes every picture; true if any failed.

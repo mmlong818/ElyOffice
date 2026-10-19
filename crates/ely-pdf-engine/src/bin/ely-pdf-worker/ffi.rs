@@ -31,7 +31,6 @@ unsafe extern "C" {
         scale: f32,
         rotate: c_int,
         tile: *const c_int,
-        dark: c_int,
         bgra: *mut u8,
     ) -> c_int;
     fn ely_text(
@@ -143,7 +142,6 @@ impl Mupdf {
         number: usize,
         (scale, rotate): (f32, i32),
         tile: [i32; 4],
-        dark: bool,
     ) -> io::Result<Vec<u8>> {
         let (w, h) = (usize::try_from(tile[2]), usize::try_from(tile[3]));
         let (Ok(w), Ok(h)) = (w, h) else {
@@ -158,7 +156,6 @@ impl Mupdf {
                 scale,
                 rotate,
                 tile.as_ptr(),
-                c_int::from(dark),
                 pixels.as_mut_ptr(),
             )
         };

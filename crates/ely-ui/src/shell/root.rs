@@ -379,7 +379,7 @@ mod tests {
             })
             .expect("the window lives");
         cx.run_until_parked();
-        // Save without a document is blocked; so is Print unbuilt.
+        // Save without a document is blocked.
         window
             .update(cx, |_, window, cx| root.update(cx, |root, cx| root.run_from_palette("file.save", window, cx)))
             .expect("the window lives");

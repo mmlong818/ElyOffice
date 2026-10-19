@@ -14,15 +14,14 @@ use serde::{Deserialize, Serialize};
 
 use crate::desk::Desk;
 use crate::engine::mark;
-use crate::page::Mode;
-use crate::view::Place;
+use crate::view::{Mode, Place};
 
 /// A kept tab: file, mode, place, recovery folder.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Kept {
     path: Option<PathBuf>,
     name: String,
-    mode: String,
+    mode: Mode,
     place: Option<Place>,
     slot: String,
 }
@@ -47,6 +46,8 @@ pub struct Keeping {
     crash: Option<Crash>,
     waiting: Vec<Waiting>,
     written: Option<String>,
+    /// The kind of session write failure last shown.
+    unwritten: Option<io::ErrorKind>,
     /// A quit began: the kept list stays as then.
     pub leaving: bool,
     /// The list as kept when the quit began.
@@ -90,7 +91,7 @@ impl Keeping {
                 Marker::Clean | Marker::Discarded => None,
             };
             if let Some(path) = &kept.path {
-                match std::fs::canonicalize(path) {
+                match dunce::canonicalize(path) {
                     // The file reopens as it is on disk.
                     Ok(real) => waiting.push(Waiting {
                         kept: Kept {
@@ -130,6 +131,7 @@ impl Keeping {
             crash: Some(crash),
             waiting,
             written: None,
+            unwritten: None,
             leaving: false,
             frozen: Vec::new(),
         };
@@ -139,8 +141,11 @@ impl Keeping {
     /// The untitled tabs to make: their place here and name.
     pub fn untitled(&self) -> Vec<(usize, String)> {
         let waiting = self.waiting.iter().enumerate();
-        let untitled = waiting.filter(|(_, waiting)| waiting.kept.path.is_none() && waiting.tab.is_none());
-        untitled.map(|(at, waiting)| (at, waiting.kept.name.clone())).collect()
+        let untitled =
+            waiting.filter(|(_, waiting)| waiting.kept.path.is_none() && waiting.tab.is_none());
+        untitled
+            .map(|(at, waiting)| (at, waiting.kept.name.clone()))
+            .collect()
     }
 
     /// Entry `at` belongs to untitled tab `tab`.
@@ -150,11 +155,14 @@ impl Keeping {
 
     /// What tab `id` takes: its file or its copy.
     fn take(&mut self, real: Option<&PathBuf>, id: u64) -> Option<Waiting> {
-        let at = self.waiting.iter().position(|waiting| match (&waiting.real, real) {
-            (Some(kept), Some(open)) => kept == open,
-            (None, None) => waiting.tab == Some(id),
-            _ => false,
-        })?;
+        let at = self
+            .waiting
+            .iter()
+            .position(|waiting| match (&waiting.real, real) {
+                (Some(kept), Some(open)) => kept == open,
+                (None, None) => waiting.tab == Some(id),
+                _ => false,
+            })?;
         Some(self.waiting.remove(at))
     }
 
@@ -213,18 +221,20 @@ impl Desk {
         let real = tab
             .session
             .path()
-            .and_then(|path| std::fs::canonicalize(path).ok());
+            .and_then(|path| dunce::canonicalize(path).ok());
         let Some(Waiting {
             kept, text: back, ..
         }) = self.keeping.take(real.as_ref(), id)
         else {
             return;
         };
-        let mode = Mode::parse(&kept.mode).unwrap_or(Mode::Visual);
+        let mode = kept.mode;
         log::info!("mark: restores tab {id} as {}", mode.name());
         let tab = self.tab_mut(id).expect("open");
         // A recovered copy keeps writing to the same points.
         tab.extra.slot = kept.slot.clone();
+        // Its point stands until a newer lands.
+        tab.extra.pointed_at = back.as_ref().map(|(_, at)| *at);
         let view = tab.view.clone();
         if let Some((_, at)) = &back {
             let at = humantime(*at);
@@ -236,7 +246,18 @@ impl Desk {
             self.toast(said, ely_gpui_component::primitives::Severity::Info, cx);
         }
         let back = back.map(|(back, _)| back);
-        view.update(cx, |view, cx| view.reopen(mode, kept.place, back, cx));
+        // Modes take focus: in the window, after this update.
+        cx.spawn(async move |desk, cx| {
+            let shown = ely_office::in_window(&desk, cx, |_, window, cx| {
+                view.update(cx, |view, cx| {
+                    view.reopen(mode, kept.place, back, window, cx)
+                })
+            });
+            if let Err(error) = shown {
+                log::warn!("mark: tab {id} did not restore: {error:#}");
+            }
+        })
+        .detach();
     }
 
     /// Every ten seconds: unsaved text to points, tabs to disk.
@@ -254,8 +275,8 @@ impl Desk {
             kept.push(Kept {
                 path: tab.session.path().map(Path::to_path_buf),
                 name: tab.name.to_string(),
-                mode: view.mode.name().to_owned(),
-                place: view.place,
+                mode: view.mode,
+                place: Some(view.place(cx)),
                 slot: tab.extra.slot.clone(),
             });
             let current = tab.doc.lock().expect("the text lock").current.clone();
@@ -272,11 +293,12 @@ impl Desk {
                     .spawn(async move {
                         let now = SystemTime::now();
                         let limits = ely_platform::storage::limits(ely_platform::AppId::Mark)?;
-                        let mut recovery = Recovery::new(folder).with_limits(limits.keep, limits.megabytes * 1024 * 1024);
+                        let mut recovery = Recovery::new(folder)
+                            .with_limits(limits.keep, limits.megabytes * 1024 * 1024);
                         recovery.write_once(current.as_bytes(), None, now)
                     })
                     .await;
-                desk.update(cx, |desk, _| desk.pointed(id, point, wrote, &slot))
+                desk.update(cx, |desk, cx| desk.pointed(id, point, wrote, &slot, cx))
                     .ok();
             })
             .detach();
@@ -296,11 +318,18 @@ impl Desk {
         }
         if !self.keeping.leaving {
             self.keeping.frozen = kept.clone();
-            self.write_session(Saved { tabs: kept });
+            self.write_session(Saved { tabs: kept }, cx);
         }
     }
 
-    fn pointed(&mut self, id: u64, point: String, wrote: io::Result<Option<PathBuf>>, slot: &Path) {
+    fn pointed(
+        &mut self,
+        id: u64,
+        point: String,
+        wrote: io::Result<Option<PathBuf>>,
+        slot: &Path,
+        cx: &mut Context<Self>,
+    ) {
         // The tab closed while it wrote: the point goes too.
         let Some(tab) = self.tab_mut(id) else {
             if let Err(error) = clear(slot) {
@@ -309,21 +338,55 @@ impl Desk {
             return;
         };
         tab.extra.pointing = false;
-        match wrote {
-            Ok(_) => tab.extra.pointed = Some(point),
-            Err(error) => log::error!("mark: a recovery point for tab {id} failed: {error}"),
+        let error = match wrote {
+            Ok(_) => {
+                tab.extra.pointed = Some(point);
+                tab.extra.pointed_at = Some(SystemTime::now());
+                tab.extra.point_failed = None;
+                return;
+            }
+            Err(error) => error,
+        };
+        log::error!("mark: a recovery point for tab {id} failed: {error}");
+        // Each kind of failure shows once; the next tick retries.
+        if tab.extra.point_failed == Some(error.kind()) {
+            return;
         }
+        tab.extra.point_failed = Some(error.kind());
+        let error = error.to_string();
+        let at = match tab.extra.pointed_at {
+            Some(at) => humantime(at),
+            None => text(cx, "office.stopped.never", &[]).to_string(),
+        };
+        let name = tab.name.to_string();
+        let said = text(
+            cx,
+            "mark.recovery.failed",
+            &[("name", &name), ("error", &error), ("at", &at)],
+        );
+        self.toast_unlogged(said, ely_gpui_component::primitives::Severity::Danger, cx);
     }
 
-    fn write_session(&mut self, saved: Saved) {
+    fn write_session(&mut self, saved: Saved, cx: &mut Context<Self>) {
         let json = serde_json::to_string_pretty(&saved).expect("the session serializes");
         if self.keeping.written.as_ref() == Some(&json) {
             return;
         }
         let file = self.keeping.dir.join("session.json");
-        match ely_files::save_atomic(&file, json.as_bytes(), 0) {
-            Ok(_) => self.keeping.written = Some(json),
-            Err(error) => log::error!("mark: the session did not save: {error}"),
+        let error = match ely_files::save_atomic(&file, json.as_bytes(), 0) {
+            Ok(_) => {
+                self.keeping.written = Some(json);
+                self.keeping.unwritten = None;
+                return;
+            }
+            Err(error) => error,
+        };
+        log::error!("mark: the session did not save: {error}");
+        // Each kind of failure shows once; the next tick retries.
+        if self.keeping.unwritten != Some(error.kind()) {
+            self.keeping.unwritten = Some(error.kind());
+            let said = text(cx, "mark.session.failed", &[("error", &error.to_string())]);
+            self.toast(said, ely_gpui_component::primitives::Severity::Danger, cx);
         }
     }
 
@@ -371,7 +434,7 @@ impl Desk {
             }
         }
         let tabs = self.keeping.frozen.clone();
-        self.write_session(Saved { tabs });
+        self.write_session(Saved { tabs }, cx);
     }
 
     /// A quit or close begins: the tabs now stay kept.
@@ -397,66 +460,4 @@ fn humantime(at: SystemTime) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    #[test]
-    fn a_place_without_a_column_reads_zero() {
-        let kept: super::Kept = serde_json::from_str(
-            r#"{"path":null,"name":"a.md","mode":"source","place":{"line":3,"scroll":0},"slot":"s"}"#,
-        )
-        .expect("an older place reads");
-        let place = kept.place.expect("a place");
-        assert_eq!((place.line, place.column), (3, 0));
-    }
-
-    #[test]
-    fn each_untitled_copy_goes_to_the_tab_made_for_it() {
-        let dir = tempfile::tempdir().expect("a temp dir");
-        let kept = |name: &str, mode: &str, slot: &str| super::Kept {
-            path: None,
-            name: name.into(),
-            mode: mode.into(),
-            place: Some(super::Place { line: slot.len() as u64, column: 1, scroll: 0.0 }),
-            slot: slot.into(),
-        };
-        let tabs = vec![kept("Untitled1", "visual", "a"), kept("Untitled2", "source", "bb")];
-        for (slot, text) in [("a", "first"), ("bb", "second")] {
-            let mut points = super::Recovery::new(super::recovery(dir.path(), slot));
-            points.write_once(text.as_bytes(), None, std::time::SystemTime::now()).expect("a point");
-        }
-        let saved = serde_json::to_vec(&super::Saved { tabs: tabs.clone() }).expect("a list");
-        std::fs::write(dir.path().join("session.json"), saved).expect("the list");
-        // A pid no process has: the last run crashed.
-        std::fs::write(dir.path().join("session.lock"), "open 4294967295").expect("a lock");
-        let (mut keeping, ..) = super::Keeping::start(dir.path()).expect("a session");
-        let made: Vec<_> = keeping.untitled();
-        assert_eq!(made, [(0, "Untitled1".to_string()), (1, "Untitled2".to_string())]);
-        for (at, _) in made {
-            keeping.made(at, 10 + at as u64);
-        }
-        assert!(keeping.take(None, 12).is_none(), "a new tab takes nothing");
-        // The second tab shows first: each still takes its own.
-        for (id, want, text) in [(11, &tabs[1], "second"), (10, &tabs[0], "first")] {
-            let got = keeping.take(None, id).expect("its copy");
-            assert_eq!((&got.kept, got.text.map(|(text, _)| text)), (want, Some(text.to_string())));
-        }
-    }
-
-    #[test]
-    fn an_unasked_end_keeps_the_lock_and_points_past_release() {
-        let dir = tempfile::tempdir().expect("a temp dir");
-        let point = dir.path().join("recovery/s/point");
-        let (lock, slot) = (dir.path().join("session.lock"), point.parent().expect("a slot"));
-        let (mut held, ..) = super::Keeping::start(dir.path()).expect("a session");
-        std::fs::create_dir_all(slot).expect("a slot");
-        std::fs::write(&point, "unsaved").expect("a point");
-        held.hold();
-        held.close();
-        assert!(lock.exists() && point.exists(), "release after quit wiped them");
-        drop(held);
-        let (mut clean, ..) = super::Keeping::start(dir.path()).expect("a session");
-        std::fs::create_dir_all(slot).expect("a slot");
-        std::fs::write(&point, "unsaved").expect("a point");
-        clean.close();
-        assert!(!lock.exists() && !point.exists(), "a clean end clears");
-    }
-}
+mod tests;

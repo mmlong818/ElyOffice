@@ -353,6 +353,7 @@ impl Render for SettingsView {
             })
             .collect();
         Shell::new(text(cx, "settings.title", &[]), &self.focus)
+            .secondary()
             .child(div().size_full().p_6().flex().flex_col().gap_4().children(unreadable).children(app_error).children(unsaved).child(layout))
             .children(dialog)
     }

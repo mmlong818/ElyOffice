@@ -146,4 +146,16 @@ P0 次序：W-01、K-01、L-01、O-01、W-02、L-02、W-03、L-03、W-04、L-04�
 - [ ] P3-03 Windows：放映图层大于一帧时分片缺行（`motion::a_layer_larger_than_one_frame_arrives_in_pieces`）
 - [ ] P3-04 Windows：放映的页脚字段文字不在占位处（`playlist::field_text_lands_where_its_placeholder_is`）
 - [ ] P3-05 Windows：辅助功能的段落选区不桥接（`commands::a11y_follows_the_focused_paragraph`）
+- [ ] P3-06 Windows：删不掉内核仍开着文件的标签工作目录（错误 32），写入失败无从模拟（`tests::more::a_kernel_write_failure_stays_visible`）
+- [ ] P3-07 Windows：测试以 `kill -9` 杀 worker，Git Bash 的 kill 不认 Windows 进程号，worker 不死（`view::tests::commands::a_dead_worker_reaches_apps_while_idle`）
+- [ ] P3-08 Windows（AMD）：多个 worker 同时启动时内核的 OpenCL 探测卡在驱动的 `clCreateCommandQueue` 里数分钟（`openclwrapper::switchOpenCLDevice`）；测试以 `SAL_DISABLE_OPENCL=1` 绕开；是否在 `ely.xcd` 关掉 `UseOpenCL` 待用户定
+- [ ] P3-09 Windows：内核给的选区文字与文本导出以 CRLF 换行，三个 ElyTable 单测按 LF 比对（`tests::data::sort_filter_duplicates_and_columns_run_from_their_dialogs`、`a_column_button_sorts_its_own_block_not_the_cursors`、`tests::output::exports_write_the_shown_sheet_as_text`）；导出该用哪种换行待定
+- [ ] P3-10 Windows：`crates/ely-office/tests/restart.rs` 设 `HOME` 想用临时目录，但 Windows 上 `data_dir` 取已知文件夹（不看 `HOME`），测试在真实的 ElyDoc 配置里运行；中途被杀即留下挡路的 `lok-verify.fodt` 文件夹，真实 ElyDoc 的内核核对随之失败（2026-10-14 审查中出现，已手动删去）
+- [ ] P3-11 ElyShow：正编辑表格单元格时在幻灯片空白处右键，内核（Impress）只结束编辑、不发 `LOK_CALLBACK_CONTEXT_MENU`，再右键一次才有幻灯片菜单；Windows 实测，他端未核；修需内核补丁
+- [ ] P3-12 Windows：`output::tests::targets_skip_hidden_slides_and_pad_numbers` 以 `/` 拼的路径比对，Windows 的 `join` 用 `\`，单测恒失败（代码无误）
+- [ ] P3-13 Windows：ElyPDF 三个单测恒失败（2026-10-14 组件 6b033f3 下实测，与组件无关）：`reads::a_failed_read_is_not_asked_again` 用 `kill -9` 杀 worker（同 P3-07）；`sign::a_signed_file_lists_its_checks_and_saves_as_a_copy` 报 “self-signed”（证书信任在 Windows 未构建，未细查）；`organize::a_save_writes_the_edits_and_undo_after_it_is_unsaved_again` 报状态未落定（原因未查）
+- [ ] P3-14 Windows：ElyTree 九个单测恒失败：五个比对 Git 写出的文字，本机 Git 的 `core.autocrlf` 写成 CRLF（测试仓库未设 `core.autocrlf false`）；其余写 Windows 不许的文件名（os error 123）。代码行为未见错，未修
+- [ ] P3-15 Windows：全量并行单测中偶有一个 LOK worker 读到的 BuildId 为 `development`（`desktop/source/app/app.cxx` 读不到 bootstrap 的 buildid 时的默认值），握手照规则拒绝；同一时刻别的 worker 读到正确的 8221e31，内核与 worker 都未重建，单独重跑即过（2026-10-14 ElyDoc `review::tests::one_unreadable_time_spares_the_other_notes`，三次重跑皆过）。疑为并发时读 `version.ini` 偶发失败，原因未查
+- [ ] P3-16 发布：`ci.sh` 在三端各自调用 `packaging/source.sh` 并上传同名的源码包与上游源码包，发布里同名文件出现三份（Gitea 允许重名）；上游源码包打的是各机的 `engines/mupdf-src`，含构建留下的文件，三份大小不同（v0.1.5：Linux 108 MB，macOS 161 MB）。v0.1.5 手动删去后到的两份，留 Linux 的一份。应只出一份，且上游包只含源码
+- [ ] P3-17 ElyTable（Windows，0.1.5 安装版，2026-10-15 录视频时见）：A1 选中后按两次 Ctrl+= 缩放到 150%，网格停在半滚动处：第 5 行被表头截去一半，第 1–4 行看不见，Ctrl+Home 也回不到 A1。应保持首行与首列在视图内（同 R2.7 的按键缩放）
 

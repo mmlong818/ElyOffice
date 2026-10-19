@@ -23,9 +23,9 @@ This repository currently provides source code; no Windows installer or binary r
 
 ## 开发 | Development
 
-ElyOffice 使用 Rust 与 GPUI 构建界面。ElyDoc、ElyTable 和 ElyShow 通过 LibreOfficeKit 使用 LibreOffice 文档引擎；ElyPDF 使用 MuPDF 和 Tesseract。Windows 构建条件与当前限制见 [Windows 整合说明](docs/WINDOWS_INTEGRATION.md)。贡献入口见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+ElyOffice 使用 Rust 与 GPUI 构建界面。ElyDoc、ElyTable 和 ElyShow 通过 LibreOfficeKit 使用 LibreOffice 文档引擎；ElyPDF 使用 MuPDF 和 Tesseract。本源码整合以原作者上游 `main` 的固定提交 [`0d991e1`](https://git.zacharyzhang.com/ZacharyZhang-NY/ElyOffice/commit/0d991e1c715859abd1282981fd46989e7e2319c7) 为截止点；验证范围与限制见[本次上游整合报告](docs/UPSTREAM_V018_INTEGRATION.md)及 [Windows 整合说明](docs/WINDOWS_INTEGRATION.md)。贡献入口见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
-ElyOffice uses Rust and GPUI for its interface. ElyDoc, ElyTable, and ElyShow use the LibreOffice document engine through LibreOfficeKit; ElyPDF uses MuPDF and Tesseract. See the [Windows integration notes](docs/WINDOWS_INTEGRATION.md) for Windows build requirements and current limitations. See [CONTRIBUTING.md](CONTRIBUTING.md) to get started contributing.
+ElyOffice uses Rust and GPUI for its interface. ElyDoc, ElyTable, and ElyShow use the LibreOffice document engine through LibreOfficeKit; ElyPDF uses MuPDF and Tesseract. This source integration is fixed at the original author's upstream `main` commit [`0d991e1`](https://git.zacharyzhang.com/ZacharyZhang-NY/ElyOffice/commit/0d991e1c715859abd1282981fd46989e7e2319c7); see the [upstream integration report](docs/UPSTREAM_V018_INTEGRATION.md) and the [Windows integration notes](docs/WINDOWS_INTEGRATION.md) for its validation scope and limits. See [CONTRIBUTING.md](CONTRIBUTING.md) to get started contributing.
 
 ## 来源与许可 | Credits and licence
 

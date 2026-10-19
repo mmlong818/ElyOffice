@@ -49,21 +49,43 @@ pub struct Hit {
     pub file: PathBuf,
     /// Counted from one.
     pub line: usize,
+    /// The first match, in characters from zero.
+    pub column: usize,
     pub text: String,
+}
+
+/// `ch` without case; final sigma folds as Unicode does.
+fn fold(ch: char) -> impl Iterator<Item = char> {
+    ch.to_lowercase()
+        .map(|low| if low == 'ς' { 'σ' } else { low })
+}
+
+/// Where folded `query` starts in `line`, in characters.
+fn column_of(line: &str, query: &str) -> Option<usize> {
+    // Each folded byte keeps its character's place.
+    let (mut folded, mut places) = (String::new(), Vec::new());
+    for (place, ch) in line.chars().enumerate() {
+        for low in fold(ch) {
+            folded.push(low);
+            places.extend(std::iter::repeat_n(place, low.len_utf8()));
+        }
+    }
+    folded.find(query).map(|at| places[at])
 }
 
 /// Lines of `text` holding `query`, any case.
 pub fn lines_with(file: &Path, text: &str, query: &str, hits: &mut Vec<Hit>) {
-    let query = query.to_lowercase();
+    let query: String = query.chars().flat_map(fold).collect();
     for (at, line) in text.lines().enumerate() {
         if hits.len() == MOST_HITS {
             return;
         }
-        if line.to_lowercase().contains(&query) {
+        if let Some(column) = column_of(line, &query) {
             let shown: String = line.trim().chars().take(160).collect();
             hits.push(Hit {
                 file: file.to_path_buf(),
                 line: at + 1,
+                column,
                 text: shown,
             });
         }
@@ -108,8 +130,27 @@ mod tests {
         );
         let lines: Vec<_> = hits
             .iter()
-            .map(|hit| (hit.line, hit.text.as_str()))
+            .map(|hit| (hit.line, hit.column, hit.text.as_str()))
             .collect();
-        assert_eq!(lines, [(2, "some Words here"), (4, "WORDS")]);
+        assert_eq!(lines, [(2, 5, "some Words here"), (4, 0, "WORDS")]);
+    }
+
+    #[test]
+    fn the_column_counts_characters_through_case_changes() {
+        // İ lowers to two characters.
+        assert_eq!(super::column_of("İİ née Word", "word"), Some(7));
+        assert_eq!(super::column_of("中文 搜索", "搜索"), Some(3));
+        assert_eq!(super::column_of("none", "word"), None);
+    }
+
+    #[test]
+    fn sigma_matches_in_every_form() {
+        for line in ["ΟΣ", "οσ", "ος"] {
+            for query in ["ΟΣ", "οσ", "ος"] {
+                let mut hits = Vec::new();
+                super::lines_with(Path::new("a.md"), line, query, &mut hits);
+                assert_eq!(hits.len(), 1, "{query} in {line}");
+            }
+        }
     }
 }

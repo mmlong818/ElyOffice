@@ -234,6 +234,7 @@ impl Render for Strip {
                 let label = format!("{} {}", part + 1, slide.name);
                 div()
                     .id(("show-slide", part))
+                    .debug_selector(move || format!("show-slide-{part}"))
                     .tab_index(0)
                     .focus_ring(cx)
                     .flex()
@@ -301,6 +302,7 @@ impl Render for Strip {
             .children(slides);
         div()
             .size_full()
-            .child(ContextMenu::new("show-strip-menu", popup(cx)).child(list))
+            // A sized host lets the list overflow and scroll.
+            .child(ContextMenu::new("show-strip-menu", popup(cx)).size_full().child(list))
     }
 }

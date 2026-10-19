@@ -4,21 +4,15 @@ use std::{
     convert::Infallible,
     hash::{DefaultHasher, Hash as _, Hasher as _},
     io,
-    path::{Path, PathBuf},
+    path::Path,
     sync::{Arc, Mutex},
 };
 
-use ely_office::{Engine, Host, Load};
-use ely_web_content::WebView;
+use ely_office::{Engine, Host, Load, Tabs as _};
 use gpui::{App, AppContext as _, Context, Entity, FocusHandle, Window};
 
 use crate::text::Source;
-use crate::view::{Failed, MarkView, Reported};
-
-/// The bundled page every tab shows.
-pub struct Pages {
-    pub dir: PathBuf,
-}
+use crate::view::{Failed, MarkView, Refused, Reported};
 
 /// A file as read, and its text now.
 pub struct Text {
@@ -28,13 +22,19 @@ pub struct Text {
     written: Option<String>,
 }
 
-pub type Doc = Arc<Mutex<Text>>;
-
-/// A load: the file as read, and where it is.
-pub struct Opened {
-    pub source: Source,
-    pub path: PathBuf,
+impl Text {
+    /// A file as read, not yet edited.
+    pub fn new(source: Source) -> Text {
+        let current = source.text.clone();
+        Text {
+            source,
+            current,
+            written: None,
+        }
+    }
 }
+
+pub type Doc = Arc<Mutex<Text>>;
 
 /// The history mark: this text's length and hash.
 pub fn mark(text: &str) -> String {
@@ -46,13 +46,14 @@ pub fn mark(text: &str) -> String {
 pub struct Mark;
 
 impl Engine for Mark {
-    type Worker = Pages;
+    /// Files read and written in place: no worker.
+    type Worker = ();
     type Doc = Doc;
     type View = MarkView;
-    type Loaded = Opened;
+    type Loaded = Source;
     type Import = Infallible;
 
-    fn load(_: &mut Pages, from: Load<Infallible>) -> io::Result<Opened> {
+    fn load(_: &mut (), from: Load<Infallible>) -> io::Result<Source> {
         let path = match from {
             Load::File(path, _) => path,
             Load::Import(_, never) => match *never {},
@@ -62,50 +63,29 @@ impl Engine for Mark {
             io::ErrorKind::PermissionDenied => io::Error::other(error),
             _ => error,
         })?;
-        Ok(Opened {
-            source: Source::decode(bytes)?,
-            path: path.to_path_buf(),
-        })
+        Source::decode(bytes)
     }
 
     fn open(
-        worker: &Arc<Mutex<Pages>>,
-        loaded: Opened,
+        _: &Arc<Mutex<()>>,
+        loaded: Source,
         window: &mut Window,
         cx: &mut App,
     ) -> io::Result<(Doc, Entity<MarkView>, String)> {
-        let Opened {
-            source: loaded,
-            path,
-        } = loaded;
-        let folder = path
-            .parent()
-            .expect("a file sits in a folder")
-            .to_path_buf();
-        let dir = worker.lock().expect("the pages lock").dir.clone();
-        let web =
-            WebView::open(&dir.join("index.html"), &dir, window, cx).map_err(io::Error::other)?;
         let mark = mark(&loaded.text);
-        let current = loaded.text.clone();
-        let doc = Arc::new(Mutex::new(Text {
-            source: loaded,
-            current,
-            written: None,
-        }));
-        web.read(cx)
-            .allow_images(&folder)
-            .map_err(io::Error::other)?;
-        let view = cx.new(|cx| MarkView::new(web, Arc::clone(&doc), mark.clone(), folder, cx));
+        let doc = Arc::new(Mutex::new(Text::new(loaded)));
+        let saved = mark.clone();
+        let view = cx.new(|cx| MarkView::new(Arc::clone(&doc), saved, window, cx));
         Ok((doc, view, mark))
     }
 
     /// After a write, what it wrote: later edits stay unsaved.
-    fn history(_: &mut Pages, doc: &Doc) -> io::Result<String> {
+    fn history(_: &mut (), doc: &Doc) -> io::Result<String> {
         let mut text = doc.lock().expect("the text lock");
         Ok(text.written.take().unwrap_or_else(|| mark(&text.current)))
     }
 
-    fn write(_: &mut Pages, doc: &Doc, path: &Path, format: &str) -> io::Result<()> {
+    fn write(_: &mut (), doc: &Doc, path: &Path, format: &str) -> io::Result<()> {
         if !matches!(format, "md" | "markdown") {
             return Err(io::Error::new(
                 io::ErrorKind::Unsupported,
@@ -118,13 +98,13 @@ impl Engine for Mark {
         Ok(())
     }
 
-    fn close(_: &mut Pages, _: Doc) -> io::Result<()> {
+    fn close(_: &mut (), _: Doc) -> io::Result<()> {
         Ok(())
     }
 
-    fn retire(view: &Entity<MarkView>, cx: &mut App) -> ely_gpui_component::primitives::Retired {
-        let web = view.read(cx).web.clone();
-        web.update(cx, |web, _| web.retire_all())
+    /// Pictures leave with their elements; nothing to hand back.
+    fn retire(_: &Entity<MarkView>, _: &mut App) -> ely_gpui_component::primitives::Retired {
+        ely_gpui_component::primitives::Retired::default()
     }
 
     fn settled(view: &MarkView) -> bool {
@@ -135,8 +115,8 @@ impl Engine for Mark {
         view.changed()
     }
 
-    fn edit_pending(view: &MarkView) -> bool {
-        !view.settled()
+    fn edit_pending(_: &MarkView) -> bool {
+        false
     }
 
     fn focus(view: &MarkView) -> FocusHandle {
@@ -157,6 +137,11 @@ impl Engine for Mark {
             failed(host, &error.0, cx)
         })
         .detach();
+        cx.subscribe(view, |host, _, refused: &Refused, cx| {
+            let said = crate::blocks::refusal(refused.0, cx);
+            host.toast(said, ely_gpui_component::primitives::Severity::Info, cx)
+        })
+        .detach();
         cx.subscribe(view, move |host, view, _: &Reported, cx| {
             let modified = view.read(cx).modified();
             reported(host, &view, modified, cx)
@@ -171,30 +156,22 @@ mod tests {
 
     use ely_office::Engine as _;
 
-    use super::{Mark, Pages, Text, mark};
+    use super::{Mark, Text, mark};
     use crate::text::Source;
 
     #[test]
     fn a_save_marks_the_text_it_wrote() {
         let dir = tempfile::tempdir().expect("a temp dir");
         let source = Source::decode(b"Alpha.\n".to_vec()).expect("reads");
-        let current = source.text.clone();
-        let doc = Arc::new(Mutex::new(Text {
-            source,
-            current,
-            written: None,
-        }));
-        let mut pages = Pages {
-            dir: dir.path().to_path_buf(),
-        };
+        let doc = Arc::new(Mutex::new(Text::new(source)));
         let path = dir.path().join("save.md");
-        Mark::write(&mut pages, &doc, &path, "md").expect("writes");
+        Mark::write(&mut (), &doc, &path, "md").expect("writes");
         // An edit lands between the write and the history read.
         doc.lock().expect("the text lock").current = "xAlpha.\n".into();
-        let saved = Mark::history(&mut pages, &doc).expect("a mark");
+        let saved = Mark::history(&mut (), &doc).expect("a mark");
         assert_eq!(saved, mark("Alpha.\n"));
         assert_eq!(
-            Mark::history(&mut pages, &doc).expect("a mark"),
+            Mark::history(&mut (), &doc).expect("a mark"),
             mark("xAlpha.\n")
         );
     }

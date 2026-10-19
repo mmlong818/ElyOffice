@@ -144,7 +144,7 @@ impl Book {
         self.run_in(Some(tab), id, &[&size.to_string()], cx);
     }
 
-    fn ask_size(&mut self, column: bool, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn ask_size(&mut self, column: bool, window: &mut Window, cx: &mut Context<Self>) {
         let Some(tab) = self.core.active else {
             let text = Book::text(cx, "command.blocked.no_document", &[]);
             return self.toast(text, ely_gpui_component::primitives::Severity::Warning, cx);

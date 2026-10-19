@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ElyTable's grid follows the app's dark and light mode.
+# ElyTable's cells stay white in dark and light mode.
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/../.." && pwd)
@@ -46,6 +46,6 @@ check dark "$(shade_of dark)"
 dark=$shade
 check light "$(shade_of light)"
 light=$shade
-[ "$dark" -lt 80 ] || fail "the dark grid paints at $dark"
-[ "$light" -gt 200 ] || fail "the light grid paints at $light"
+[ "$dark" -gt 200 ] || fail "the dark app's grid paints at $dark"
+[ "$light" -gt 200 ] || fail "the light app's grid paints at $light"
 echo "ok: theme (dark $dark, light $light)"

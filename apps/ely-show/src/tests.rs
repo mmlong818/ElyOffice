@@ -8,6 +8,7 @@ use gpui::{AppContext as _, Entity, TestAppContext};
 
 use crate::deck::Deck;
 
+mod menu;
 mod motion;
 mod notes;
 mod objects;
@@ -17,6 +18,8 @@ mod play_more;
 mod play_time;
 mod review;
 mod slides;
+mod strip;
+mod turn;
 
 /// An unrendered Deck over a fresh worker, if LOK exists.
 pub(super) fn deck(cx: &mut TestAppContext, dir: &Path) -> Option<Entity<Deck>> {

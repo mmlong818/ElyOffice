@@ -7,7 +7,7 @@
 
 int ely_fail(fz_context *ctx);
 const char *ely_error(void);
-int ely_render(fz_context *ctx, fz_document *doc, int number, float scale, int rotate, const int tile[4], int dark,
+int ely_render(fz_context *ctx, fz_document *doc, int number, float scale, int rotate, const int tile[4],
 	unsigned char *bgra);
 void ely_fail_also(fz_context *ctx, const char *what);
 pdf_document *ely_pdf_of(fz_context *ctx, fz_document *doc);

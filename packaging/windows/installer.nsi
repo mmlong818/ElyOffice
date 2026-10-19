@@ -1,6 +1,7 @@
-; Per-user installer; pass APP_NAME, APP_SLUG, VERSION, STAGE, ICON, TYPES.
+﻿; Per-user installer; pass each define the checks below name.
 Unicode true
 !include "MUI2.nsh"
+!include "LogicLib.nsh"
 
 !ifndef APP_NAME
   !error "pass -DAPP_NAME"
@@ -21,6 +22,9 @@ Unicode true
   !error "pass -DTYPES, from packaging/windows/types.sh"
 !endif
 !include "${TYPES}"
+!ifndef LIST
+  !error "pass -DLIST, from packaging/windows/files.sh"
+!endif
 !ifndef OUTFILE
   !define OUTFILE "${APP_SLUG}-${VERSION}-setup.exe"
 !endif
@@ -34,6 +38,8 @@ RequestExecutionLevel user
 InstallDir "$LOCALAPPDATA\Programs\Ely Office\${APP_NAME}"
 InstallDirRegKey HKCU "Software\Ely Office\${APP_NAME}" "InstallDir"
 SetCompressor /SOLID lzma
+!include "manifest-paths.nsh"
+AllowSkipFiles off
 
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
@@ -45,15 +51,345 @@ SetCompressor /SOLID lzma
 LangString DeleteData ${LANG_SIMPCHINESE} "同时删除 ${APP_NAME} 的缓存、账号与本地历史吗？你的文档不受影响。"
 LangString DeleteData ${LANG_ENGLISH} "Also delete the cache, accounts and local history of ${APP_NAME}? Your documents stay."
 
+LangString Busy ${LANG_SIMPCHINESE} "${APP_NAME} 的文件正被占用，未作任何改动。请关闭 ${APP_NAME} 后重试："
+LangString Busy ${LANG_ENGLISH} "A file of ${APP_NAME} is in use; nothing was changed. Close ${APP_NAME} and try again:"
+LangString Stuck ${LANG_SIMPCHINESE} "旧版的文件放回原处失败，留在："
+LangString Stuck ${LANG_ENGLISH} "Could not put the old files back; they are in:"
+LangString Left ${LANG_SIMPCHINESE} "新版已装好，旧版的文件删不掉，留在："
+LangString Left ${LANG_ENGLISH} "The new version is installed; the old files could not be deleted from:"
+LangString NoList ${LANG_SIMPCHINESE} "找不到安装清单，未删除任何文件："
+LangString NoList ${LANG_ENGLISH} "No install list found; nothing was deleted:"
+
+LangString Taken ${LANG_SIMPCHINESE} "安装位置已有不属于 ${APP_NAME} 的文件，未作任何改动："
+LangString Taken ${LANG_ENGLISH} "A file ${APP_NAME} did not install is in the way; nothing was changed:"
+
+; Lists a legacy folder's files and folders to $R2.
+Function ElyWalk
+  Push "|"
+  Push $R1
+walk:
+  Pop $R1
+  StrCmp $R1 "|" done
+  FileWrite $R2 "$R1\$\r$\n"
+  FindFirst $R3 $R4 "$INSTDIR\$R1\*"
+entry:
+  StrCmp $R4 "" closed
+  StrCmp $R4 "." skip
+  StrCmp $R4 ".." skip
+  IfFileExists "$INSTDIR\$R1\$R4\*.*" 0 file
+  Push "$R1\$R4"
+  Goto skip
+file:
+  FileWrite $R2 "$R1\$R4$\r$\n"
+skip:
+  FindNext $R3 $R4
+  Goto entry
+closed:
+  FindClose $R3
+  Goto walk
+done:
+FunctionEnd
+
+!macro ElyLegacyDir NAME
+  IfFileExists "$INSTDIR\${NAME}\*.*" 0 +3
+    StrCpy $R1 "${NAME}"
+    Call ElyWalk
+!macroend
+
+!macro ElyLegacy ID PATTERN
+  FindFirst $R3 $R4 "$INSTDIR\${PATTERN}"
+  ely_legacy_${ID}:
+    StrCmp $R4 "" ely_legacy_end_${ID}
+    FileWrite $R2 "$R4$\r$\n"
+    FindNext $R3 $R4
+    Goto ely_legacy_${ID}
+  ely_legacy_end_${ID}:
+  FindClose $R3
+!macroend
+
+; Sets $R0 to the list an earlier install owns.
+Function ElyOwned
+  StrCpy $R0 ""
+  StrCpy $R7 ""
+  ; A copy, as this install rewrites the list.
+  IfFileExists "$INSTDIR\.ely-installed" 0 unlisted
+  StrCpy $R0 "$PLUGINSDIR\owned.txt"
+  StrCpy $R7 "listed"
+  CopyFiles /SILENT "$INSTDIR\.ely-installed" "$R0"
+  Goto done
+unlisted:
+  ; Older releases: only the folder our key names.
+  ReadRegStr $R1 HKCU "Software\Ely Office\${APP_NAME}" "InstallDir"
+  StrCmp $R1 "$INSTDIR" 0 done
+  IfFileExists "$INSTDIR\${APP_SLUG}.exe" 0 done
+  StrCpy $R0 "$PLUGINSDIR\legacy.txt"
+  FileOpen $R2 "$R0" w
+  !insertmacro ElyLegacyDir libreoffice
+  !insertmacro ElyLegacyDir tessdata
+  !insertmacro ElyLegacyDir git
+  !insertmacro ElyLegacyDir content
+  !insertmacro ElyLegacyDir locales
+  !insertmacro ElyLegacyDir licenses
+  FileWrite $R2 "${APP_SLUG}.ico$\r$\n"
+  !insertmacro ElyLegacy exe "*.exe"
+  !insertmacro ElyLegacy dll "*.dll"
+  !insertmacro ElyLegacy pak "*.pak"
+  !insertmacro ElyLegacy bin "*.bin"
+  !insertmacro ElyLegacy dat "*.dat"
+  !insertmacro ElyLegacy json "*.json"
+  FileClose $R2
+done:
+FunctionEnd
+
+!macro ElyAside UN
+; Removes the empty folders $R0 lists under $R1.
+Function ${UN}ElyPrune
+pass:
+  StrCpy $8 ""
+  FileOpen $R2 "$R0" r
+next:
+  Call ${UN}ElyNext
+  StrCmp $R6 "" passed
+  StrCmp $R6 "x" invalid
+  StrCmp $R6 "f" next
+  IfFileExists "$R1\$R3\*.*" 0 next
+  ClearErrors
+  RMDir "$R1\$R3"
+  IfErrors next
+  StrCpy $8 "again"
+  Goto next
+passed:
+  FileClose $R2
+  StrCmp $8 "again" pass
+  Return
+invalid:
+  StrCpy $R5 "$R1\$R3"
+  FileClose $R2
+FunctionEnd
+
+; Moves $R0's files to numbered .ely-old entries; $R5: blocker.
+Function ${UN}ElyAside
+  StrCpy $R5 ""
+  StrCpy $R9 "$INSTDIR\.ely-old"
+  ; Validate every copied manifest entry before touching the backup or files.
+  Call ${UN}ElyPreflightList
+  StrCmp $R5 "" 0 aside_done
+  Call ${UN}ElyOldSafe
+  StrCmp $R5 "" 0 aside_done
+  RMDir /r "$R9"
+  IfFileExists "$R9" 0 +3
+    StrCpy $R5 "$R9"
+    Return
+  ClearErrors
+  FileOpen $R2 "$R0" r
+  IfErrors 0 check
+    StrCpy $R5 "$R0"
+    Return
+check:
+  ; Every file first: running or locked ones refuse writing.
+  Call ${UN}ElyNext
+  StrCmp $R6 "" checked
+  StrCmp $R6 "x" invalid_list
+  StrCmp $R6 "d" check
+  IfFileExists "$INSTDIR\$R3\*.*" check
+  IfFileExists "$INSTDIR\$R3" 0 check
+  ClearErrors
+  FileOpen $R4 "$INSTDIR\$R3" a
+  IfErrors refused
+  FileClose $R4
+  Goto check
+checked:
+  CreateDirectory "$R9"
+  FileSeek $R2 0 SET
+  ; Numbered names keep backup paths short.
+  StrCpy $9 0
+move:
+  Call ${UN}ElyNext
+  StrCmp $R6 "" moved
+  StrCmp $R6 "x" invalid_list
+  StrCmp $R6 "d" move
+  IntOp $9 $9 + 1
+  IfFileExists "$INSTDIR\$R3\*.*" move
+  IfFileExists "$INSTDIR\$R3" 0 move
+  ClearErrors
+  Rename "$INSTDIR\$R3" "$R9\$9"
+  IfErrors 0 move
+  StrCpy $R5 "$INSTDIR\$R3"
+  FileClose $R2
+  Call ${UN}ElyBack
+  Return
+moved:
+  FileClose $R2
+  Goto aside_done
+refused:
+  StrCpy $R5 "$INSTDIR\$R3"
+  FileClose $R2
+  Goto aside_done
+invalid_list:
+  StrCpy $R5 "$R0"
+  FileClose $R2
+  Goto aside_done
+aside_done:
+FunctionEnd
+
+; Puts $R0's files back from .ely-old.
+Function ${UN}ElyBack
+  ; Keep the caller's blocker unless rollback itself finds a more serious error.
+  Push $0
+  Push $1
+  Push $R5
+  StrCpy $R5 ""
+  Call ${UN}ElyPreflightList
+  StrCmp $R5 "" 0 back_return
+  Call ${UN}ElyOldSafe
+  StrCmp $R5 "" 0 back_return
+  ClearErrors
+  FileOpen $R2 "$R0" r
+  IfErrors back_open_failed
+  StrCpy $9 0
+back:
+  Call ${UN}ElyNext
+  StrCmp $R6 "" back_done
+  StrCmp $R6 "x" back_invalid_open
+  StrCmp $R6 "d" back
+  IntOp $9 $9 + 1
+  IfFileExists "$R9\$9" 0 back
+  ClearErrors
+  Rename "$R9\$9" "$INSTDIR\$R3"
+  IfErrors back_rename_failed
+  Goto back
+back_rename_failed:
+  ; Keep the first rollback error while continuing to restore other entries.
+  StrCmp $R5 "" 0 back
+  StrCpy $R5 "$INSTDIR\$R3"
+  Goto back
+back_done:
+  FileClose $R2
+  StrCmp $R5 "" 0 back_return
+  RMDir "$R9"
+  IfFileExists "$R9" back_old_left
+  Goto back_return
+back_old_left:
+  StrCpy $R5 "$R9"
+  MessageBox MB_ICONSTOP "$(Stuck)$\r$\n$R9" /SD IDOK
+  Goto back_return
+back_open_failed:
+  StrCpy $R5 "$R0"
+  Goto back_return
+back_invalid_open:
+  FileClose $R2
+  StrCmp $R5 "" 0 back_return
+  StrCpy $R5 "$R0"
+  Goto back_return
+back_return:
+  Pop $1
+  StrCmp $R5 "" 0 +2
+  StrCpy $R5 $1
+  Pop $1
+  Pop $0
+FunctionEnd
+!macroend
+!insertmacro ElyAside ""
+!insertmacro ElyAside "un."
+
+; Sets $R5 to a path in the way.
+Function ElyClear
+  StrCpy $R5 ""
+  FileOpen $R2 "$PLUGINSDIR\new.txt" r
+  FileOpen $7 "$PLUGINSDIR\made.txt" w
+next:
+  Call ElyNext
+  StrCmp $R6 "" done
+  StrCmp $R6 "x" taken
+  StrCmp $R6 "d" folder
+  IfFileExists "$INSTDIR\$R3" taken next
+folder:
+  IfFileExists "$INSTDIR\$R3\*.*" next
+  IfFileExists "$INSTDIR\$R3" taken
+  FileWrite $7 "$R3\$\r$\n"
+  Goto next
+taken:
+  StrCpy $R5 "$INSTDIR\$R3"
+done:
+  FileClose $7
+  FileClose $R2
+FunctionEnd
+
+; Removes what this install wrote, then restores the old.
+Function .onInstFailed
+  StrCmp $R8 "copying" 0 done
+  FileOpen $R2 "$PLUGINSDIR\new.txt" r
+drop:
+  Call ElyNext
+  StrCmp $R6 "" dropped
+  StrCmp $R6 "x" drop_invalid
+  StrCmp $R6 "d" drop
+  Delete "$INSTDIR\$R3"
+  Goto drop
+dropped:
+  FileClose $R2
+  Delete "$INSTDIR\.ely-installed"
+  Push $R0
+  StrCpy $R0 "$PLUGINSDIR\made.txt"
+  StrCpy $R1 "$INSTDIR"
+  Call ElyPrune
+  Pop $R0
+  StrCmp $R0 "" done
+  Call ElyBack
+  StrCmp $R7 "listed" 0 done
+  CopyFiles /SILENT "$R0" "$INSTDIR\.ely-installed"
+  Return
+drop_invalid:
+  FileClose $R2
+done:
+FunctionEnd
+
 Section "Install"
+  InitPluginsDir
+  SetOutPath "$PLUGINSDIR"
+  File "/oname=new.txt" "${LIST}"
+  ; An earlier install moves aside whole, or nothing changes.
+  Call ElyOwned
+  StrCmp $R0 "" clear
+  Call ElyAside
+  StrCmp $R5 "" clear
+  MessageBox MB_ICONSTOP "$(Busy)$\r$\n$R5" /SD IDOK
+  SetErrorLevel 2
+  Quit
+clear:
+  ; Never write over a file this app did not install.
+  Call ElyClear
+  StrCmp $R5 "" copy
+  StrCmp $R0 "" +2
+    Call ElyBack
+  MessageBox MB_ICONSTOP "$(Taken)$\r$\n$R5" /SD IDOK
+  SetErrorLevel 2
+  Quit
+copy:
+  StrCpy $R8 "copying"
+  ; A file that cannot be written fails the install.
+  ClearErrors
   SetOutPath "$INSTDIR"
   File /r "${STAGE}\*.*"
   File "/oname=${APP_SLUG}.ico" "${ICON}"
-!ifdef GIT_DIR
-  SetOutPath "$INSTDIR\git"
-  File /r "${GIT_DIR}\*.*"
-!endif
   WriteUninstaller "$INSTDIR\uninstall.exe"
+  CopyFiles /SILENT "$PLUGINSDIR\new.txt" "$INSTDIR\.ely-installed"
+  IfErrors 0 +2
+    Abort
+  StrCpy $R8 ""
+  ; Old folders the new release leaves empty.
+  StrCmp $R0 "" +3
+    StrCpy $R1 "$INSTDIR"
+    Call ElyPrune
+  StrCpy $R9 "$INSTDIR\.ely-old"
+  Call ElyOldSafe
+  StrCmp $R5 "" 0 install_old_left
+  RMDir /r "$R9"
+  IfFileExists "$R9" install_old_left
+  Goto install_old_clean
+install_old_left:
+  MessageBox MB_ICONEXCLAMATION "$(Left)$\r$\n$R9" /SD IDOK
+install_old_clean:
   CreateShortcut "$SMPROGRAMS\${APP_NAME}.lnk" "$INSTDIR\${APP_SLUG}.exe" "" "$INSTDIR\${APP_SLUG}.ico"
   WriteRegStr HKCU "Software\Ely Office\${APP_NAME}" "InstallDir" "$INSTDIR"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayName" "${APP_NAME}"
@@ -67,27 +403,55 @@ Section "Install"
 SectionEnd
 
 Section "Uninstall"
-  ; What stage.sh lays out, and nothing else.
-  RMDir /r "$INSTDIR\libreoffice"
-  RMDir /r "$INSTDIR\tessdata"
-  RMDir /r "$INSTDIR\git"
-  RMDir /r "$INSTDIR\content"
-  RMDir /r "$INSTDIR\locales"
-  RMDir /r "$INSTDIR\licenses"
-  Delete "$INSTDIR\*.exe"
-  Delete "$INSTDIR\*.dll"
-  Delete "$INSTDIR\*.pak"
-  Delete "$INSTDIR\*.bin"
-  Delete "$INSTDIR\*.dat"
-  Delete "$INSTDIR\*.json"
-  Delete "$INSTDIR\${APP_SLUG}.ico"
-  Delete "$INSTDIR\uninstall.exe"
+  StrCpy $R5 "$INSTDIR\.ely-installed"
+  IfFileExists "$R5" listed
+  MessageBox MB_ICONSTOP "$(NoList)$\r$\n$INSTDIR" /SD IDOK
+  SetErrorLevel 2
+  Quit
+listed:
+  ; Copy and validate the complete list before even opening it for append.
+  InitPluginsDir
+  StrCpy $R0 "$PLUGINSDIR\owned.txt"
+  CopyFiles /SILENT "$R5" "$R0"
+  Call un.ElyPreflightList
+  StrCmp $R5 "" 0 busy
+  StrCpy $R5 "$INSTDIR\.ely-installed"
+  ClearErrors
+  FileOpen $R4 "$INSTDIR\.ely-installed" a
+  IfErrors busy
+  FileClose $R4
+  Call un.ElyAside
+  StrCmp $R5 "" gone busy
+  StrCpy $R9 "$INSTDIR\.ely-old"
+  Call un.ElyOldSafe
+  StrCmp $R5 "" gone busy
+gone:
+  ClearErrors
+  Delete "$INSTDIR\.ely-installed"
+  IfErrors 0 deleted
+  Call un.ElyBack
+  StrCpy $R5 "$INSTDIR\.ely-installed"
+busy:
+  MessageBox MB_ICONSTOP "$(Busy)$\r$\n$R5" /SD IDOK
+  SetErrorLevel 2
+  Quit
+deleted:
+  StrCpy $R9 "$INSTDIR\.ely-old"
+  Call un.ElyOldSafe
+  StrCmp $R5 "" 0 old_left
+  RMDir /r "$R9"
+  IfFileExists "$R9" old_left
+  StrCpy $R1 "$INSTDIR"
+  Call un.ElyPrune
   RMDir "$INSTDIR"
   Delete "$SMPROGRAMS\${APP_NAME}.lnk"
   DeleteRegKey HKCU "Software\Ely Office\${APP_NAME}"
   DeleteRegKey HKCU "${UNINSTALL_KEY}"
   !insertmacro ElyTypesUninstall
-  MessageBox MB_YESNO|MB_DEFBUTTON2 "$(DeleteData)" IDNO done
+  MessageBox MB_YESNO|MB_DEFBUTTON2 "$(DeleteData)" /SD IDNO IDNO done
   RMDir /r "$LOCALAPPDATA\ElyOffice\${APP_SLUG}"
+  Goto done
+old_left:
+  MessageBox MB_ICONEXCLAMATION "$(Left)$\r$\n$R9" /SD IDOK
 done:
 SectionEnd

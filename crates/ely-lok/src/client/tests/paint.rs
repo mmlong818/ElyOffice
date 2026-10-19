@@ -350,7 +350,7 @@ fn brightness(tile: &Tile) -> u32 {
 }
 
 #[test]
-fn the_page_follows_a_dark_theme_and_back() {
+fn ely_scheme_paints_the_page_white() {
     let Some(install) = install() else {
         eprintln!("SKIP: no pinned LOK build");
         return;
@@ -363,23 +363,11 @@ fn the_page_follows_a_dark_theme_and_back() {
         let doc = worker
             .load(&crate::file_url(&source))
             .expect("the document loads");
-        let area = (1440, 1440, 3840, 3840);
-        let seen = poll_until(&mut worker, &doc, &Events::default(), QUIET, |_| false);
-        let light = brightness(&doc.paint_tile(&mut worker, area, (64, 64)).expect("a tile"));
-        let paint = |worker: &mut Worker, scheme: &str, seen: &Events| {
-            worker.run(&doc, "view.theme", &[scheme]).expect("a theme");
-            let repainted = poll_until(worker, &doc, seen, SETTLE, |seen| seen.all);
-            assert!(repainted.all, "{name}: {scheme} repaints the view");
-            let tile = doc.paint_tile(worker, area, (64, 64)).expect("a tile");
-            (brightness(&tile), repainted)
-        };
-        let (dark, seen) = paint(&mut worker, "COLOR_SCHEME_ELY_DARK", &seen);
-        let (back, _) = paint(&mut worker, "COLOR_SCHEME_ELY_LIGHT", &seen);
-        eprintln!("THEME {name} light {light} dark {dark} back {back}");
-        assert!(
-            light > 200 && dark < 100 && back > 200,
-            "{name}: {light} {dark} {back}"
-        );
+        poll_until(&mut worker, &doc, &Events::default(), QUIET, |_| false);
+        worker.run(&doc, "view.theme", &["COLOR_SCHEME_ELY_LIGHT"]).expect("the scheme");
+        let tile = doc.paint_tile(&mut worker, (1440, 1440, 3840, 3840), (64, 64)).expect("a tile");
+        let shade = brightness(&tile);
+        assert!(shade > 200, "{name}: the page is light, {shade}");
         worker.close_doc(doc).expect("the document closes");
     }
 }

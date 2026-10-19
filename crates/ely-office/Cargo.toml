@@ -7,6 +7,7 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+dunce.workspace = true
 anyhow.workspace = true
 directories.workspace = true
 ely-files.workspace = true

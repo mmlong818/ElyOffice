@@ -149,11 +149,13 @@ features = [
 version = "0.62"
 features = [
     "Data_Xml_Dom",
+    "Foundation_Collections",
     "Foundation_Numerics",
     "Globalization_DateTimeFormatting",
     "Storage_Search",
     "Storage_Streams",
     "System_Threading",
+    "System_UserProfile",
     "UI_Notifications",
     "UI_ViewManagement",
     "Wdk_System_SystemServices",

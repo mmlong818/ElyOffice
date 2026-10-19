@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./fixtures.ts";
 
 const PAGE = "/";
 const DESK = { light: "rgb(230, 230, 226)", dark: "rgb(58, 58, 58)" };

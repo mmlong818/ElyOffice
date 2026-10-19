@@ -10,26 +10,21 @@ root = pathlib.Path(__file__).resolve().parent.parent
 standard = root / "packaging" / "licenses"
 host = next(line.split()[1] for line in subprocess.run(
     ["rustc", "-vV"], check=True, capture_output=True, text=True).stdout.splitlines() if line.startswith("host:"))
-# Only what this machine's build links.
 meta = json.loads(subprocess.run(
-    ["cargo", "metadata", "--format-version", "1", "--locked", "--filter-platform", host,
+    ["cargo", "metadata", "--format-version", "1", "--locked",
      "--manifest-path", str(root / "Cargo.toml")],
     check=True, capture_output=True, text=True).stdout)
 by_id = {package["id"]: package for package in meta["packages"]}
 own = set(meta["workspace_members"])
-nodes = {node["id"]: node for node in meta["resolve"]["nodes"]}
-# What links in: normal edges, for this machine's target.
-wanted, stack = set(), [pid for pid in own if by_id[pid]["name"] in sys.argv[1:]]
-if len(stack) != len(sys.argv) - 1:
+if len([pid for pid in own if by_id[pid]["name"] in sys.argv[1:]]) != len(sys.argv) - 1:
     sys.exit(f"crates.py: unknown package among {sys.argv[1:]}")
-while stack:
-    pid = stack.pop()
-    if pid in wanted:
-        continue
-    wanted.add(pid)
-    for dep in nodes[pid]["deps"]:
-        if any(kind["kind"] is None for kind in dep["dep_kinds"]):
-            stack.append(dep["pkg"])
+# Cargo decides which normal edges link on this target.
+tree = subprocess.run(
+    ["cargo", "tree", "--locked", "-e", "normal", "--target", host, "--prefix", "none", "-f", "{p}",
+     "--manifest-path", str(root / "Cargo.toml"), *[arg for name in sys.argv[1:] for arg in ("-p", name)]],
+    check=True, capture_output=True, text=True).stdout
+linked = {tuple(line.split()[:2]) for line in tree.splitlines() if line.strip()}
+wanted = {pid for pid, package in by_id.items() if (package["name"], "v" + package["version"]) in linked}
 
 out, missing = [], []
 for pid in sorted(wanted - own, key=lambda pid: (by_id[pid]["name"], by_id[pid]["version"])):

@@ -2,7 +2,9 @@
 
 use std::{io, path::Path};
 
-use gpui::{Context, actions};
+use ely_gpui_component::{documents::DocumentLook, primitives::Severity, theme::ActiveTheme as _};
+use ely_office::prelude::*;
+use gpui::{App, Context, actions, rems};
 use serde::{Deserialize, Serialize};
 
 use crate::desk::Desk;
@@ -53,6 +55,36 @@ impl Default for Look {
     }
 }
 
+/// A serif face each system carries.
+const SERIF: &str = if cfg!(target_os = "linux") {
+    "DejaVu Serif"
+} else {
+    "Georgia"
+};
+
+impl Look {
+    /// How the document shows text by this look.
+    pub fn document(&self, cx: &App) -> DocumentLook {
+        let measure = match self.width {
+            Width::Narrow => 36.0,
+            Width::Medium => 48.0,
+            Width::Wide => 64.0,
+        };
+        let font = match self.font {
+            Font::Sans => None,
+            Font::Serif => Some(SERIF.into()),
+            Font::Mono => Some(cx.theme().mono_family.clone()),
+        };
+        DocumentLook {
+            focus: self.focus,
+            typewriter: self.typewriter,
+            measure: Some(rems(measure)),
+            font,
+            scale: self.size as f32 / 100.0,
+        }
+    }
+}
+
 /// The kept look; none kept is the default.
 pub fn load(file: &Path) -> io::Result<Look> {
     match std::fs::read(file) {
@@ -66,16 +98,19 @@ pub fn load(file: &Path) -> io::Result<Look> {
 const SIZES: (u32, u32, u32) = (70, 200, 10);
 
 impl Desk {
-    /// Changes the look; pages, file and menus follow.
+    /// Changes the look; its file and menus follow.
     pub fn relook(&mut self, change: impl FnOnce(&mut Look), cx: &mut Context<Self>) {
         change(&mut self.look);
         self.look.size = self.look.size.clamp(SIZES.0, SIZES.1);
         log::info!("mark: the look is now {:?}", self.look);
-        self.show_look(cx);
         let json = serde_json::to_vec_pretty(&self.look).expect("a look serializes");
         if let Err(error) = ely_files::save_atomic(&self.look_file, &json, 0) {
             log::error!("mark: the look did not save: {error}");
+            let said =
+                ely_ui::i18n::text(cx, "office.error.engine", &[("error", &error.to_string())]);
+            self.toast(said, Severity::Danger, cx);
         }
+        self.apply_look(cx);
         let menus = crate::keys::menus(&self.look, cx);
         ely_ui::set_document_menus(
             ely_platform::AppId::Mark,
@@ -86,13 +121,29 @@ impl Desk {
         cx.notify();
     }
 
-    /// Every tab's page takes the look.
-    pub fn show_look(&mut self, cx: &mut Context<Self>) {
-        let look = serde_json::to_value(&self.look).expect("a look serializes");
-        for tab in &self.core.tabs {
-            let look = look.clone();
-            tab.view.update(cx, |view, cx| view.set_look(look, cx));
+    /// Every tab's document takes the look.
+    fn apply_look(&mut self, cx: &mut Context<Self>) {
+        let look = self.look.document(cx);
+        let documents: Vec<_> = self
+            .core
+            .tabs
+            .iter()
+            .map(|tab| tab.view.read(cx).document().clone())
+            .collect();
+        for document in documents {
+            document.update(cx, |document, cx| document.set_look(look.clone(), cx));
         }
+    }
+
+    /// A new tab's document takes the look once.
+    pub fn look_once(&mut self, id: u64, cx: &mut Context<Self>) {
+        let look = self.look.document(cx);
+        let Some(tab) = self.tab_mut(id).filter(|tab| !tab.extra.looked) else {
+            return;
+        };
+        tab.extra.looked = true;
+        let document = tab.view.read(cx).document().clone();
+        document.update(cx, |document, cx| document.set_look(look, cx));
     }
 
     pub fn look_actions(element: gpui::Div, cx: &mut Context<Self>) -> gpui::Div {
@@ -143,6 +194,70 @@ impl Desk {
 
 #[cfg(test)]
 mod tests {
+    use ely_gpui_component::documents::DocumentLook;
+    use gpui::{
+        Entity, Modifiers, ScrollDelta, ScrollWheelEvent, TestAppContext, VisualTestContext, point,
+        rems,
+    };
+
+    use crate::desk::{
+        Desk,
+        tests::{open, start},
+    };
+
+    fn document_look(desk: &Entity<Desk>, cx: &mut VisualTestContext) -> DocumentLook {
+        desk.read_with(cx, |desk, cx| {
+            let view = desk.active_view().expect("a tab");
+            view.read(cx).document().read(cx).look().clone()
+        })
+    }
+
+    #[gpui::test]
+    fn a_new_tab_takes_the_kept_look(cx: &mut TestAppContext) {
+        let (data, files) = (
+            tempfile::tempdir().expect("data"),
+            tempfile::tempdir().expect("files"),
+        );
+        let kept = r#"{"focus":true,"typewriter":true,"width":"narrow","font":"serif","size":120}"#;
+        std::fs::write(data.path().join("look.json"), kept).expect("a look");
+        let path = files.path().join("a.md");
+        std::fs::write(
+            &path, "a
+",
+        )
+        .expect("a file");
+        let (desk, cx) = start(cx, data.path());
+        open(&desk, &path, cx);
+        let look = document_look(&desk, cx);
+        assert!(look.focus && look.typewriter);
+        assert_eq!((look.measure, look.scale), (Some(rems(36.0)), 1.2));
+        assert_eq!(look.font.as_deref(), Some(super::SERIF));
+    }
+
+    #[gpui::test]
+    fn a_menu_change_reaches_open_tabs_and_is_kept(cx: &mut TestAppContext) {
+        let (data, files) = (
+            tempfile::tempdir().expect("data"),
+            tempfile::tempdir().expect("files"),
+        );
+        let path = files.path().join("a.md");
+        std::fs::write(
+            &path, "a
+",
+        )
+        .expect("a file");
+        let (desk, cx) = start(cx, data.path());
+        open(&desk, &path, cx);
+        let focus = desk.read_with(cx, |desk, _| desk.core.focus.clone());
+        cx.update(|window, cx| window.focus(&focus, cx));
+        cx.dispatch_action(super::Wide);
+        cx.dispatch_action(super::Larger);
+        let look = document_look(&desk, cx);
+        assert_eq!((look.measure, look.scale), (Some(rems(64.0)), 1.1));
+        let kept = std::fs::read_to_string(data.path().join("look.json")).expect("kept");
+        assert!(kept.contains("\"wide\"") && kept.contains("110"), "{kept}");
+    }
+
     #[test]
     fn a_kept_look_reads_back_and_none_is_default() {
         let dir = tempfile::tempdir().expect("a temp dir");
@@ -162,5 +277,54 @@ mod tests {
             (look.width, look.font, look.size),
             (super::Width::Wide, super::Font::Serif, 120)
         );
+    }
+
+    #[gpui::test]
+    fn ctrl_and_the_wheel_size_the_text(cx: &mut TestAppContext) {
+        let (data, files) = (
+            tempfile::tempdir().expect("data"),
+            tempfile::tempdir().expect("files"),
+        );
+        let path = files.path().join("a.md");
+        std::fs::write(
+            &path, "a
+",
+        )
+        .expect("a file");
+        let (desk, cx) = start(cx, data.path());
+        open(&desk, &path, cx);
+        let focus = desk.read_with(cx, |desk, _| desk.core.focus.clone());
+        cx.update(|window, cx| window.focus(&focus, cx));
+        let at = cx.update(|window, _| window.viewport_size()).center();
+        let wheel = |modifiers, y| ScrollWheelEvent {
+            position: at,
+            delta: ScrollDelta::Lines(point(0.0, y)),
+            modifiers,
+            ..Default::default()
+        };
+        let other = match cfg!(target_os = "macos") {
+            true => Modifiers {
+                control: true,
+                ..Default::default()
+            },
+            false => Modifiers {
+                platform: true,
+                ..Default::default()
+            },
+        };
+        cx.simulate_event(wheel(other, 3.0));
+        cx.run_until_parked();
+        assert_eq!(
+            document_look(&desk, cx).scale,
+            1.0,
+            "only Ctrl, or Cmd on macOS"
+        );
+        cx.simulate_event(wheel(Modifiers::secondary_key(), 3.0));
+        cx.run_until_parked();
+        assert_eq!(document_look(&desk, cx).scale, 1.1, "a notch is one step");
+        cx.simulate_event(wheel(Modifiers::secondary_key(), -1.0));
+        cx.simulate_event(wheel(Modifiers::secondary_key(), -1.0));
+        cx.run_until_parked();
+        assert_eq!(document_look(&desk, cx).scale, 0.9);
     }
 }

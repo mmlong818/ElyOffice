@@ -7,13 +7,13 @@ mod compare;
 mod docs;
 mod files;
 mod insert;
+mod menu;
 mod merge;
 mod navigate;
 mod output;
 mod props;
 mod refs;
 mod review;
-mod spell;
 
 use ely_platform::AppId;
 

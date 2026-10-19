@@ -52,7 +52,7 @@ pub fn run(
     output: impl Write + Send + 'static,
 ) -> io::Result<()> {
     set_output(Box::new(output));
-    let profile_dir = std::fs::canonicalize(profile_dir)?;
+    let profile_dir = dunce::canonicalize(profile_dir)?;
     let profile_url = profile_url_of(&profile_dir);
     let _ = teardown::PROFILE.set(profile_dir.clone());
     let lok = Lok::hook(Path::new(install), &profile_url)?;
@@ -197,6 +197,8 @@ fn answer(lok: &Lok, tag: u8, id: u64, payload: &[u8]) {
             &body,
         );
         log::info!("lok-worker: shutdown");
+        #[cfg(windows)]
+        messages::finish_shutdown_request();
         quit(if outcome.is_ok() { 0 } else { 1 });
     }
     // Bumped first: events it causes carry the new revision.
@@ -244,6 +246,7 @@ fn answer(lok: &Lok, tag: u8, id: u64, payload: &[u8]) {
             }
         }),
         tag::POST_KEY => input::key(unpack),
+        tag::TURN => input::turn(unpack),
         tag::POST_MOUSE => input::mouse(unpack),
         tag::GRAPHIC => input::graphic(unpack),
         tag::POST_TEXT => input::text(unpack),

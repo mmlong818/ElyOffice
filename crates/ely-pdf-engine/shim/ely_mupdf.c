@@ -56,10 +56,21 @@ typedef struct
 	void *user;
 } passing;
 
+/* MuPDF draws an unembedded font with another. */
+static const char notice[] = "non-embedded font using identity encoding:";
+
+/* 1 while the last warning was that notice. */
+static int substituted;
+
 static void keep_warning(void *user, const char *message)
 {
 	passing *p = user;
-	if (strlen(warned) + strlen(message) + 2 < sizeof warned)
+	/* An unembedded font drawn by another is no damage. */
+	if (!strncmp(message, notice, sizeof notice - 1))
+		substituted = 1;
+	else if (strncmp(message, "... repeated ", 13))
+		substituted = 0;
+	if (!substituted && strlen(warned) + strlen(message) + 2 < sizeof warned)
 	{
 		fz_strlcat(warned, message, sizeof warned);
 		fz_strlcat(warned, "\n", sizeof warned);
@@ -74,6 +85,8 @@ static int watched;
 /* Collects MuPDF's warnings until `ely_watch_end`. */
 void ely_watch_begin(fz_context *ctx)
 {
+	/* A pending repeat is of MuPDF's last warning. */
+	substituted = !strncmp(ctx->warn.message, notice, sizeof notice - 1);
 	watching.next = fz_warning_callback(ctx, &watching.user);
 	warned[0] = 0;
 	watched = 1;
@@ -211,7 +224,7 @@ static fz_matrix placed(fz_rect box, float scale, int rotate)
 
 /* Paints device pixels x, y, w, h as BGRA. */
 int ely_render(fz_context *ctx, fz_document *doc, int number, float scale, int rotate,
-	const int tile[4], int dark, unsigned char *bgra)
+	const int tile[4], unsigned char *bgra)
 {
 	fz_page *page = NULL;
 	fz_pixmap *pix = NULL;
@@ -229,8 +242,6 @@ int ely_render(fz_context *ctx, fz_document *doc, int number, float scale, int r
 		dev = fz_new_draw_device(ctx, fz_identity, pix);
 		fz_run_page(ctx, page, dev, ctm, NULL);
 		fz_close_device(ctx, dev);
-		if (dark)
-			fz_invert_pixmap_luminance(ctx, pix);
 		int stride = (int)fz_pixmap_stride(ctx, pix);
 		unsigned char *rows = fz_pixmap_samples(ctx, pix);
 		for (int y = 0; y < tile[3]; y++)

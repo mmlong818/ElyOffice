@@ -2,7 +2,7 @@
 
 use ely_gpui_component::{buttons::Button, data_display::PropertyGroup, theme::ControlSize};
 use ely_office::panel::{button, color_state, palette, row, send, toggle};
-use gpui::{AnyElement, Context, IntoElement, SharedString};
+use gpui::{AnyElement, Context, InteractiveElement, IntoElement, ParentElement, SharedString, div};
 
 use super::Props;
 use crate::docs::Docs;
@@ -14,11 +14,13 @@ impl Props {
         PropertyGroup::new(tip("doc.props.table"))
             .row(
                 tip("doc.props.rows"),
-                row([
-                    button(self, "table.row_above", "doc.props.above_row", why, cx),
-                    button(self, "table.row_below", "doc.props.below_row", why, cx),
-                    button(self, "table.delete_rows", "doc.props.delete", why, cx),
-                ]),
+                div()
+                    .debug_selector(|| "doc-props-table".into())
+                    .child(row([
+                        button(self, "table.row_above", "doc.props.above_row", why, cx),
+                        button(self, "table.row_below", "doc.props.below_row", why, cx),
+                        button(self, "table.delete_rows", "doc.props.delete", why, cx),
+                    ])),
             )
             .row(
                 tip("doc.props.columns"),

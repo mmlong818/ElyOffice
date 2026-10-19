@@ -2,7 +2,7 @@
 
 use ely_gpui_component::{data_display::PropertyGroup, primitives::IconName};
 use ely_office::panel::{Panel, color_state, font_box, palette, row, size_menu, toggle};
-use gpui::{App, Context, SharedString, Window};
+use gpui::{App, Context, InteractiveElement, ParentElement, SharedString, Window, div};
 
 use super::Props;
 use crate::docs::Docs;
@@ -77,7 +77,12 @@ impl Props {
         PropertyGroup::new(tip("doc.props.text"))
             .row(tip("doc.props.font"), font)
             .row(tip("doc.props.size"), size_menu(self, "doc-props-size", cx))
-            .row(tip("doc.props.effects"), effects)
+            .row(
+                tip("doc.props.effects"),
+                div()
+                    .debug_selector(|| "doc-props-text".into())
+                    .child(effects),
+            )
             .row(
                 tip("doc.props.color"),
                 palette(&this, "format.color", (color, AUTOMATIC), None, cx),

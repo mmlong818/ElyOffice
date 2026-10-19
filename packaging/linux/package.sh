@@ -106,20 +106,9 @@ for helper in ely-lok-worker ely-pdf-worker; do
     deployed+=(--executable "$bin/$helper")
   fi
 done
-if [ -f "$bin/libcef.so" ]; then
-  # Binaries here load from usr/lib; CEF's data sits with libcef.
-  cef=${ELY_CEF:-$root/engines/cef}
-  mkdir -p "$appdir/usr/lib"
-  for item in "$bin"/*; do
-    if [ -e "$cef/${item##*/}" ]; then
-      mv "$item" "$appdir/usr/lib/"
-    fi
-  done
-  deployed+=(--library "$appdir/usr/lib/libcef.so")
-fi
 
 # linuxdeploy bundles libraries and fails on a missing one.
-LD_LIBRARY_PATH=$appdir/usr/lib "$deploy" --appimage-extract-and-run --appdir "$appdir" "${deployed[@]}" \
+"$deploy" --appimage-extract-and-run --appdir "$appdir" "${deployed[@]}" \
   --desktop-file "$work/$slug.desktop" --icon-file "$icon"
 
 mkdir -p "$dist"

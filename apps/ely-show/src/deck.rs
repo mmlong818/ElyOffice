@@ -57,6 +57,8 @@ pub struct Deck {
     pub remarks_pane: Entity<crate::remarks::Pane>,
     /// What the menus last checked: grid, guides, comments.
     pub snap_menus: Option<(bool, bool, bool)>,
+    /// The canvas's right-click menu.
+    pub menu: Option<ely_office::menu::Offer<crate::menu::What>>,
     /// Pictures of closed tabs and ended previews, freed later.
     pub retired: ely_gpui_component::primitives::Retired,
 }
@@ -93,16 +95,20 @@ impl Host for Deck {
             && !tab.extra.fitted
         {
             tab.extra.fitted = true;
-            view.update(cx, |view, cx| view.fit_page(cx));
+            view.update(cx, |view, cx| {
+                view.fit_page(cx);
+                view.turn_parts();
+            });
         }
-        // Pictures follow the kernel's light or dark scheme.
-        let dark = view.read(cx).dark();
+        // Pictures before the scheme landed are repainted.
+        let lit = view.read(cx).lit();
         if let Some(tab) = self.tab_mut(id)
-            && tab.extra.dark != dark
+            && tab.extra.lit != lit
         {
-            tab.extra.dark = dark;
+            tab.extra.lit = lit;
             self.repaint_all(id, cx);
         }
+        self.offer_menu(id, view, cx);
         self.reread(id, view, cx);
     }
 }
@@ -172,6 +178,7 @@ impl Deck {
             reading_fonts: false,
             guide_drag: None,
             snap_menus: Some((false, false, false)),
+            menu: None,
             notes: Default::default(),
             remarks_open: false,
             preview: None,
@@ -259,7 +266,12 @@ impl Deck {
                     Ok(((slides, at), (design, objects, notes, remarks, (motion, media)), size, history)) => {
                         tab.extra.read_at = Some(at);
                         log::info!("show: tab {id} has {} parts", slides.list.len());
-                        view.update(cx, |view, _| view.set_part(slides.current));
+                        // A queued turn or part outranks an earlier read.
+                        view.update(cx, |view, _| {
+                            if view.settled() {
+                                view.set_part(slides.current)
+                            }
+                        });
                         let names: HashSet<&String> =
                             slides.list.iter().map(|slide| &slide.name).collect();
                         tab.extra.keep_pictures(&names);
@@ -379,7 +391,7 @@ impl Deck {
         self.paint_next(id, cx);
     }
 
-    fn body(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    pub(crate) fn body(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let Some(tab) = self.active_tab() else {
             let title = match self.core.loading.first() {
                 Some((_, name)) => Self::text(cx, "office.loading", &[("name", name)]),
@@ -447,7 +459,8 @@ impl Render for Deck {
             .on_action(cx.listener(Self::on_close_tab))
             .child(shell)
             .children(self.core_dialog(cx))
-            .children(self.dialog_element(cx));
+            .children(self.dialog_element(cx))
+            .children(self.context_menu(cx));
         let root = crate::slideshow::bind(crate::insert::bind(crate::slides::bind(root, cx), cx), cx);
         Self::bind_zoom(root, cx)
     }

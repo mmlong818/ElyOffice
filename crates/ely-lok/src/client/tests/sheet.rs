@@ -182,16 +182,38 @@ pub(super) fn open_book(text: &str) -> (tempfile::TempDir, Worker, Doc) {
 }
 
 #[test]
-fn a_theme_switch_is_no_edit() {
+fn the_scheme_is_no_edit() {
     if install().is_none() {
         eprintln!("SKIP: no pinned LOK build");
         return;
     }
     let (_dir, mut worker, doc) = open_book(FODS);
-    for scheme in ["COLOR_SCHEME_ELY_DARK", "COLOR_SCHEME_ELY_LIGHT"] {
-        worker.run(&doc, "view.theme", &[scheme]).expect("the theme runs");
-        let undo = worker.values(&doc, ".uno:Undo").expect("the undo stack");
-        let undo: serde_json::Value = serde_json::from_str(&undo).expect("undo JSON");
-        assert_eq!(undo["actions"], "", "{scheme} left undo steps");
+    worker.run(&doc, "view.theme", &["COLOR_SCHEME_ELY_LIGHT"]).expect("the scheme runs");
+    let undo = worker.values(&doc, ".uno:Undo").expect("the undo stack");
+    let undo: serde_json::Value = serde_json::from_str(&undo).expect("undo JSON");
+    assert_eq!(undo["actions"], "", "the scheme left undo steps");
+}
+
+#[test]
+fn the_pointer_is_text_only_while_a_cell_edits() {
+    if install().is_none() {
+        eprintln!("SKIP: no pinned LOK build");
+        return;
     }
+    let (_dir, mut worker, doc) = open_book(FODS);
+    let hover = |worker: &mut Worker, x| {
+        let at = Mouse { kind: 2, x, y: 120, count: 1, buttons: 0, modifiers: 0 };
+        worker.post_mouse(&doc, at).expect("hovers");
+    };
+    hover(&mut worker, 400);
+    let reading = poll_until(&mut worker, &doc, &Events::default(), SETTLE, |seen| {
+        !seen.pointer.is_empty()
+    });
+    assert_eq!(reading.pointer, "default", "a cell shows the arrow");
+    worker.post_key(&doc, 0, 769).expect("F2 edits A1");
+    hover(&mut worker, 500);
+    let editing = poll_until(&mut worker, &doc, &reading, SETTLE, |seen| {
+        seen.pointer == "text"
+    });
+    assert_eq!(editing.pointer, "text", "the edited cell shows the text pointer");
 }

@@ -9,6 +9,7 @@ pub mod engine;
 pub mod files;
 mod find;
 pub mod lok;
+pub mod menu;
 mod open;
 mod recover;
 pub mod panel;
@@ -245,7 +246,7 @@ pub fn in_window<H: Host, R>(
 pub fn print_later<H: Tabs>(pdf: std::path::PathBuf, cx: &mut Context<H>) {
     // The panel's modal loop calls back into GPUI.
     cx.spawn(async move |this, cx| {
-        let printed = ely_platform::print::print_pdf(&pdf);
+        let printed = ely_platform::print::print_pdf(&pdf).await;
         // The copy may hold what a password guarded.
         if let Err(error) = std::fs::remove_file(&pdf) {
             log::error!("office: the print copy {} stays: {error}", pdf.display());

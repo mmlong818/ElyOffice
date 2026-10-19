@@ -51,7 +51,7 @@ pub fn expect(unpack: &mut Unpack) -> io::Result<Vec<u8>> {
 pub fn bump(request: u8, payload: &[u8]) {
     let changes = matches!(
         request,
-        tag::POST_KEY | tag::POST_MOUSE | tag::GRAPHIC | tag::POST_TEXT | tag::POST_UNO | tag::PASTE | tag::CUT | tag::COMPLETE_FUNCTION
+        tag::POST_KEY | tag::TURN | tag::POST_MOUSE | tag::GRAPHIC | tag::POST_TEXT | tag::POST_UNO | tag::PASTE | tag::CUT | tag::COMPLETE_FUNCTION
     );
     let mut unpack = Unpack::new(payload);
     let Ok(id) = unpack.u64() else {

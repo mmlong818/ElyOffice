@@ -1,10 +1,12 @@
 use super::*;
 
+mod borders;
 mod clip;
 mod commands;
 mod fit;
 mod input;
 mod large;
+mod show_borders;
 mod theme;
 use gpui::{App, Bounds, Entity, point, size};
 
@@ -422,6 +424,46 @@ fn zooming_keeps_the_pointed_spot_and_walks_the_steps() {
             assert_eq!(view.zoom(), 4.0);
             view.fit_page(cx);
             assert!(view.fitting());
+        });
+    });
+}
+
+#[test]
+fn ctrl_and_a_notch_zoom_one_step_about_the_pointer() {
+    let Some(install) = crate::client::tests::install() else {
+        eprintln!("SKIP: no pinned LOK build");
+        return;
+    };
+    let cx = gpui::TestAppContext::single();
+    cx.update(|app| {
+        let (view, _) = live_view(app, &install);
+        view.update(app, |view, cx| {
+            view.viewport = (800.0, 600.0);
+            view.origin = gpui::point(gpui::px(0.0), gpui::px(0.0));
+            view.doc_size = (60_000, 80_000);
+            view.scroll = (3_000, 9_000);
+            view.set_zoom(1.0, cx);
+            let at = gpui::point(gpui::px(300.0), gpui::px(200.0));
+            let wheel = |modifiers, y| gpui::ScrollWheelEvent {
+                position: at,
+                delta: gpui::ScrollDelta::Lines(gpui::point(0.0, y)),
+                modifiers,
+                ..Default::default()
+            };
+            let other = match cfg!(target_os = "macos") {
+                true => gpui::Modifiers { control: true, ..Default::default() },
+                false => gpui::Modifiers { platform: true, ..Default::default() },
+            };
+            assert!(!view.wheel_zoom(&wheel(other, 3.0), cx), "only Ctrl, or Cmd on macOS");
+            assert_eq!(view.zoom(), 1.0);
+            let spot = |view: &LokView| view.scroll.1 + view.geom.twips_of(200.0);
+            let before = spot(view);
+            assert!(view.wheel_zoom(&wheel(gpui::Modifiers::secondary_key(), 3.0), cx));
+            assert_eq!(view.zoom(), 1.25, "a three-line notch is one step");
+            assert!((spot(view) - before).abs() <= 1, "the pointed spot stays");
+            view.wheel_zoom(&wheel(gpui::Modifiers::secondary_key(), -1.0), cx);
+            view.wheel_zoom(&wheel(gpui::Modifiers::secondary_key(), -1.0), cx);
+            assert_eq!(view.zoom(), 0.8);
         });
     });
 }

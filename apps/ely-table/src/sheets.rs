@@ -109,18 +109,12 @@ impl Book {
         let Some(tab) = self.active_tab() else {
             return div().into_any_element();
         };
-        let Some(choices) = visible(&tab.extra.sheets) else {
+        let Some(tabs) = strip(tab.id, &tab.extra.sheets) else {
             return div().into_any_element();
         };
         let this = cx.entity();
         let picked = this.clone();
-        let tabs = SheetTabs::new(
-            "table-sheets",
-            choices,
-            tab.extra.sheets.current.to_string(),
-        )
-        .placement(TabPlacement::Bottom)
-        .on_change(move |value, _, cx| {
+        let tabs = tabs.on_change(move |value, _, cx| {
             let index: usize = value.parse().expect("sheet tabs are indexes");
             picked.update(cx, |book, cx| book.show_sheet(index, cx));
         })
@@ -310,6 +304,15 @@ impl Book {
     }
 }
 
+/// Workbook `id`'s sheet tabs; each workbook keeps its own scroll.
+fn strip(id: u64, sheets: &ely_lok::Sheets) -> Option<SheetTabs> {
+    let choices = visible(sheets)?;
+    Some(
+        SheetTabs::new(("table-sheets", id), choices, sheets.current.to_string())
+            .placement(TabPlacement::Bottom),
+    )
+}
+
 /// Visible sheets as tabs, once the shown one is known.
 fn visible(sheets: &ely_lok::Sheets) -> Option<Vec<Choice>> {
     let shown = sheets.list.get(sheets.current)?;
@@ -326,6 +329,10 @@ fn visible(sheets: &ely_lok::Sheets) -> Option<Vec<Choice>> {
             .collect(),
     )
 }
+
+#[cfg(test)]
+#[path = "tests/strip.rs"]
+mod strip_tests;
 
 #[cfg(test)]
 mod tests {

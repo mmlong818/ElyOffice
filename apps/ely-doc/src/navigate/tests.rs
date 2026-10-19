@@ -332,3 +332,39 @@ fn an_outline_click_goes_where_its_row_was_drawn() {
     });
     assert_eq!(target(vcx), Some((0, 300, 10, 10)), "the click goes where its row was");
 }
+
+/// A bundled font spelled otherwise, and one nowhere.
+const SPELLED: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<office:document xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:svg="urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0" office:version="1.3" office:mimetype="application/vnd.oasis.opendocument.text">
+ <office:font-face-decls>
+  <style:font-face style:name="DEJAVU SANS" svg:font-family="&apos;DEJAVU SANS&apos;"/>
+  <style:font-face style:name="Nowhere Sans" svg:font-family="&apos;Nowhere Sans&apos;"/>
+ </office:font-face-decls>
+ <office:automatic-styles>
+  <style:style style:name="T1" style:family="text"><style:text-properties style:font-name="DEJAVU SANS"/></style:style>
+  <style:style style:name="T2" style:family="text"><style:text-properties style:font-name="Nowhere Sans"/></style:style>
+ </office:automatic-styles>
+ <office:body><office:text>
+  <text:p><text:span text:style-name="T1">found</text:span> <text:span text:style-name="T2">lost</text:span></text:p>
+ </office:text></office:body>
+</office:document>"#;
+
+#[test]
+fn a_font_found_by_its_search_name_is_not_missing() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let mut cx = TestAppContext::single();
+    let Some(docs) = docs(&mut cx, dir.path()) else {
+        eprintln!("SKIP: no LOK build");
+        return;
+    };
+    open_text(&mut cx, &docs, &dir.path().join("spelled.fodt"), SPELLED);
+    settle(&cx, |app| {
+        let tab = docs.read(app).active_tab().expect("a tab");
+        !tab.view.read(app).missing_fonts().is_empty()
+    });
+    let missing = cx.update(|app| {
+        let tab = docs.read(app).active_tab().expect("a tab");
+        tab.view.read(app).missing_fonts().to_vec()
+    });
+    assert_eq!(missing, ["Nowhere Sans"], "the lookup found DejaVu Sans");
+}

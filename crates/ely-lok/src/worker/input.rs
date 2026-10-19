@@ -99,6 +99,21 @@ pub(super) fn key(unpack: &mut Unpack) -> io::Result<Vec<u8>> {
     Ok(Vec::new())
 }
 
+/// Turns `step` parts in order, or posts the arrow (-1).
+pub(super) fn turn(unpack: &mut Unpack) -> io::Result<Vec<u8>> {
+    let (id, step, char_code, key_code) = (unpack.u64()?, unpack.i64()?, unpack.i64()?, unpack.i64()?);
+    // Earlier input's callbacks already landed here.
+    if key_code != 0 && crate::events::picked(id) {
+        with_doc(id, |doc| {
+            doc.post_key(0, char_code as i32, key_code as i32);
+            doc.post_key(1, char_code as i32, key_code as i32);
+        })?;
+        return Ok(Pack::new().i64(-1).bytes());
+    }
+    let shown = with_doc(id, |doc| doc.turn_parts(step))??;
+    Ok(Pack::new().i64(i64::from(shown)).bytes())
+}
+
 /// One mouse event: kind, x, y, count, buttons, modifiers.
 pub(super) fn mouse(unpack: &mut Unpack) -> io::Result<Vec<u8>> {
     let id = unpack.u64()?;

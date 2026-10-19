@@ -359,6 +359,25 @@ impl Render for Updates {
     }
 }
 
+/// An offered release, for window tests.
+#[cfg(test)]
+pub(crate) fn offer_for_tests(cx: &mut App) {
+    let release = Release {
+        version: semver::Version::new(9, 0, 0),
+        url: "https://example.test/9.dmg".into(),
+        sha256: String::new(),
+    };
+    let updates = cx.new(|_| Updates {
+        app: AppId::Mark,
+        bundle: PathBuf::new(),
+        offer: Some((release, Phase::Offered)),
+        dismissed: false,
+        pending: None,
+        note: None,
+    });
+    cx.set_global(Updater(updates));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

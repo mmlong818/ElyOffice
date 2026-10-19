@@ -32,12 +32,7 @@ impl LokView {
 
     /// The next step in or out from the zoom now.
     pub fn zoom_step(&mut self, larger: bool, cx: &mut Context<Self>) {
-        let now = self.geom.zoom;
-        let next = match larger {
-            true => ZOOM_STEPS.into_iter().find(|step| *step > now + 0.001).unwrap_or(MOST),
-            false => ZOOM_STEPS.into_iter().rev().find(|step| *step < now - 0.001).unwrap_or(LEAST),
-        };
-        self.zoom_at(next, None, cx);
+        self.zoom_at(next_step(self.geom.zoom, larger), None, cx);
     }
 
     /// Zooms keeping `at` (window pixels) still; none keeps the middle.
@@ -70,22 +65,38 @@ impl LokView {
         cx.notify();
     }
 
-    /// Command with the wheel zooms; otherwise it scrolls.
+    /// Ctrl (macOS: Cmd) wheel zooms; else it turns or scrolls.
     pub(super) fn on_wheel(&mut self, event: &ScrollWheelEvent, window: &mut Window, cx: &mut Context<Self>) {
-        if !event.modifiers.platform {
-            return self.on_scroll(event, window, cx);
+        if !self.wheel_zoom(event, cx) && !self.turn_wheel(event) {
+            self.on_scroll(event, window, cx);
         }
-        let dy = match event.delta {
-            ScrollDelta::Pixels(point) => f32::from(point.y),
-            ScrollDelta::Lines(point) => point.y * 40.0,
+    }
+
+    /// A notch is one step; a trackpad zooms smoothly.
+    pub(super) fn wheel_zoom(&mut self, event: &ScrollWheelEvent, cx: &mut Context<Self>) -> bool {
+        if !event.modifiers.secondary() {
+            return false;
+        }
+        let zoom = match event.delta {
+            ScrollDelta::Lines(lines) if lines.y == 0.0 => return true,
+            ScrollDelta::Lines(lines) => next_step(self.geom.zoom, lines.y > 0.0),
+            ScrollDelta::Pixels(point) => self.geom.zoom * (f32::from(point.y) / 200.0).exp(),
         };
-        let zoom = self.geom.zoom * (dy / 200.0).exp();
         self.zoom_at(zoom, Some(event.position), cx);
+        true
     }
 
     /// A trackpad pinch zooms about its centre.
     pub(super) fn on_pinch(&mut self, event: &PinchEvent, _: &mut Window, cx: &mut Context<Self>) {
         let zoom = self.geom.zoom * (1.0 + event.delta);
         self.zoom_at(zoom, Some(event.position), cx);
+    }
+}
+
+/// The next step in or out from `now`.
+fn next_step(now: f32, larger: bool) -> f32 {
+    match larger {
+        true => ZOOM_STEPS.into_iter().find(|step| *step > now + 0.001).unwrap_or(MOST),
+        false => ZOOM_STEPS.into_iter().rev().find(|step| *step < now - 0.001).unwrap_or(LEAST),
     }
 }

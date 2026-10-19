@@ -64,6 +64,14 @@ pub(super) enum Input {
     Visible(Rect, (u32, i32)),
     /// Shows sheet or slide `part`, from 0.
     Part(usize),
+    /// Turns `step` parts; a picked object takes the arrow `key`.
+    Turn { step: i32, key: Option<(u32, i32)> },
+}
+
+/// What an input gives back.
+pub(super) enum Back {
+    Copied(String),
+    Shown(usize),
 }
 
 impl Input {
@@ -73,6 +81,7 @@ impl Input {
             // Arrows, Home, End, Page keys, Escape.
             Input::Key { key_code, .. } => !matches!(key_code & 0x0FFF, 1024..=1031 | 1281),
             Input::Mouse(_)
+            | Input::Turn { .. }
             | Input::Copy { cut: false }
             | Input::Visible(..)
             | Input::Part(_)
@@ -169,7 +178,7 @@ fn lok_button(button: MouseButton) -> Option<i32> {
 }
 
 /// Runs one input; gives a copy's mark and the revision.
-pub(super) fn run(worker: &Mutex<Worker>, doc: &Doc, input: Input) -> (io::Result<Option<String>>, Option<u64>) {
+pub(super) fn run(worker: &Mutex<Worker>, doc: &Doc, input: Input) -> (io::Result<Option<Back>>, Option<u64>) {
     let mut worker = worker.lock().expect("the worker lock");
     let counts = !matches!(input, Input::Visible(..));
     let copied = apply(&mut worker, doc, input);
@@ -181,12 +190,13 @@ pub(super) fn run(worker: &Mutex<Worker>, doc: &Doc, input: Input) -> (io::Resul
     (copied, now)
 }
 
-fn apply(worker: &mut Worker, doc: &Doc, input: Input) -> io::Result<Option<String>> {
+fn apply(worker: &mut Worker, doc: &Doc, input: Input) -> io::Result<Option<Back>> {
     let done = match input {
         Input::Key {
             char_code,
             key_code,
         } => worker.post_key(doc, char_code, key_code),
+        Input::Turn { step, key } => return Ok(worker.turn(doc, step, key)?.map(Back::Shown)),
         Input::Mouse(event) => worker.post_mouse(doc, event),
         Input::Drag { from, to } => worker.drag_graphic(doc, from, to),
         Input::Visible(area, scale) => doc.visible_area(worker, area, scale),
@@ -195,9 +205,8 @@ fn apply(worker: &mut Worker, doc: &Doc, input: Input) -> io::Result<Option<Stri
         Input::Theme(scheme) => worker.run(doc, "view.theme", &[scheme]),
         Input::Text { commit, text } => worker.post_text(doc, commit, &text),
         Input::Copy { cut } => {
-            return clip::copy_out(worker, doc, cut, |clip| {
-                clipboard::write(clip).map_err(io::Error::other)
-            });
+            let copied = clip::copy_out(worker, doc, cut, |clip| clipboard::write(clip).map_err(io::Error::other));
+            return copied.map(|copied| copied.map(Back::Copied));
         }
         Input::Run { commands, at } => {
             let values: Vec<Vec<&str>> =
@@ -298,7 +307,10 @@ impl LokView {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.walk(&event.keystroke, cx) || self.key_down(&event.keystroke) {
+        if self.walk(&event.keystroke, cx)
+            || self.turn_key(&event.keystroke)
+            || self.key_down(&event.keystroke)
+        {
             cx.stop_propagation();
         }
     }
@@ -313,7 +325,8 @@ impl LokView {
             return;
         };
         window.focus(&self.focus, cx);
-        if event.button == MouseButton::Left && self.grab(event.position) {
+        self.right_at = (event.button == MouseButton::Right).then_some(event.position);
+        if event.button == MouseButton::Left && (self.grab(event.position) || self.hold_border(event.position)) {
             cx.notify();
             return;
         }
@@ -333,6 +346,10 @@ impl LokView {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.drop_border(event.position, cx) {
+            cx.notify();
+            return;
+        }
         if let Some(grip) = self.grip.take() {
             let to = self.doc_point(event.position);
             log::info!("lok: handle released");
@@ -365,7 +382,7 @@ impl LokView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.dragging || self.grip.is_some() {
+        if self.dragging || self.grip.is_some() || self.holds_border() {
             self.on_mouse_up(event, window, cx);
         }
     }
@@ -382,13 +399,30 @@ impl LokView {
             cx.notify();
             return;
         }
+        if self.move_border(event.position) {
+            cx.notify();
+            return;
+        }
         if self.dragging && event.pressed_button == Some(MouseButton::Left) {
             self.mouse(2, event.position, 1, 1, &event.modifiers);
+        } else if event.pressed_button.is_none() {
+            // A hover: the kernel answers with its pointer.
+            self.mouse(2, event.position, 0, 1, &event.modifiers);
         }
     }
 
     pub(super) fn on_copy(&mut self, _: &Copy, _: &mut Window, _: &mut Context<Self>) {
-        self.send(Input::Copy { cut: false });
+        self.copy(false);
+    }
+
+    /// Copies the selection out, or cuts it.
+    pub fn copy(&mut self, cut: bool) {
+        self.send(Input::Copy { cut });
+    }
+
+    /// Pastes the system clipboard.
+    pub fn paste(&mut self) {
+        self.send(Input::Paste);
     }
 
     pub(super) fn on_next_field(&mut self, _: &NextField, _: &mut Window, _: &mut Context<Self>) {
@@ -407,11 +441,11 @@ impl LokView {
     }
 
     pub(super) fn on_cut(&mut self, _: &Cut, _: &mut Window, _: &mut Context<Self>) {
-        self.send(Input::Copy { cut: true });
+        self.copy(true);
     }
 
     pub(super) fn on_paste(&mut self, _: &Paste, _: &mut Window, _: &mut Context<Self>) {
-        self.send(Input::Paste);
+        self.paste();
     }
 
     /// Pastes values or formulas alone (TABLE-08).

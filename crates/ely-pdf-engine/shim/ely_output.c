@@ -143,6 +143,143 @@ int ely_write_repaired(fz_context *ctx, fz_document *doc, const char *path)
 	return 0;
 }
 
+/* Marked for print and not hidden. */
+static int prints(fz_context *ctx, pdf_annot *annot)
+{
+	int flags = pdf_annot_flags(ctx, annot);
+	return (flags & PDF_ANNOT_IS_PRINT) && !(flags & (PDF_ANNOT_IS_HIDDEN | PDF_ANNOT_IS_INVISIBLE));
+}
+
+/* Asks MuPDF to make and keep a printable annotation's look. */
+static void ask_look(fz_context *ctx, pdf_annot *annot)
+{
+	if (prints(ctx, annot))
+		pdf_annot_request_synthesis(ctx, annot);
+}
+
+/* Draws a printable look into `buf`, named in `xobj`. */
+static void draw_look(fz_context *ctx, pdf_annot *annot, int page, pdf_obj *xobj, fz_buffer *buf)
+{
+	pdf_obj *type = pdf_dict_get(ctx, pdf_annot_obj(ctx, annot), PDF_NAME(Subtype));
+	pdf_obj *ap;
+	fz_matrix m;
+	char name[32];
+	int n = 0;
+	/* Links and popups have no look of their own. */
+	if (!prints(ctx, annot) || type == PDF_NAME(Link) || type == PDF_NAME(Popup))
+		return;
+	if (!pdf_dict_getp(ctx, pdf_annot_obj(ctx, annot), "AP/N"))
+		fz_throw(ctx, FZ_ERROR_FORMAT, "a %s annotation on page %d cannot be drawn", pdf_to_name(ctx, type), page + 1);
+	/* A state with no look of its own draws nothing. */
+	ap = pdf_annot_ap(ctx, annot);
+	if (!ap)
+		return;
+	do
+		fz_snprintf(name, sizeof name, "ElyAnnot%d", n++);
+	while (pdf_dict_gets(ctx, xobj, name));
+	pdf_dict_puts(ctx, xobj, name, ap);
+	pdf_dict_put(ctx, ap, PDF_NAME(Type), PDF_NAME(XObject));
+	pdf_dict_put(ctx, ap, PDF_NAME(Subtype), PDF_NAME(Form));
+	m = pdf_annot_transform(ctx, annot);
+	fz_append_printf(ctx, buf, "q %g %g %g %g %g %g cm /%s Do Q\n", m.a, m.b, m.c, m.d, m.e, m.f, name);
+}
+
+/* Draws the printable looks in; drops all but links. */
+static void flatten(fz_context *ctx, pdf_document *pdf, pdf_page *page, int number)
+{
+	pdf_obj *annots = pdf_dict_get(ctx, page->obj, PDF_NAME(Annots));
+	pdf_obj *res, *xobj, *contents, *links = NULL, *prologue = NULL;
+	fz_buffer *buf = NULL;
+	pdf_annot *annot;
+	int prepend, append, i;
+	if (pdf_array_len(ctx, annots) == 0)
+		return;
+	res = pdf_dict_get(ctx, page->obj, PDF_NAME(Resources));
+	if (!res)
+	{
+		res = pdf_dict_get_inheritable(ctx, page->obj, PDF_NAME(Resources));
+		if (res)
+			pdf_dict_put(ctx, page->obj, PDF_NAME(Resources), res);
+		else
+			res = pdf_dict_put_dict(ctx, page->obj, PDF_NAME(Resources), 4);
+	}
+	xobj = pdf_dict_get(ctx, res, PDF_NAME(XObject));
+	if (!xobj)
+		xobj = pdf_dict_put_dict(ctx, res, PDF_NAME(XObject), 8);
+	fz_var(buf);
+	fz_var(links);
+	fz_var(prologue);
+	fz_try(ctx)
+	{
+		/* The page's own state is closed before the looks. */
+		contents = pdf_dict_get(ctx, page->obj, PDF_NAME(Contents));
+		pdf_count_q_balance(ctx, pdf, res, contents, &prepend, &append);
+		buf = fz_new_buffer(ctx, 1024);
+		while (prepend-- > 0)
+			fz_append_string(ctx, buf, "q\n");
+		prologue = pdf_add_stream(ctx, pdf, buf, NULL, 0);
+		fz_clear_buffer(ctx, buf);
+		while (append-- > 0)
+			fz_append_string(ctx, buf, "Q\n");
+		for (annot = pdf_first_annot(ctx, page); annot; annot = pdf_next_annot(ctx, annot))
+			draw_look(ctx, annot, number, xobj, buf);
+		for (annot = pdf_first_widget(ctx, page); annot; annot = pdf_next_widget(ctx, annot))
+			draw_look(ctx, annot, number, xobj, buf);
+		links = pdf_new_array(ctx, pdf, 4);
+		for (i = 0; i < pdf_array_len(ctx, annots); i++)
+			if (pdf_dict_get(ctx, pdf_array_get(ctx, annots, i), PDF_NAME(Subtype)) == PDF_NAME(Link))
+				pdf_array_push(ctx, links, pdf_array_get(ctx, annots, i));
+		pdf_dict_put(ctx, page->obj, PDF_NAME(Annots), links);
+		if (!pdf_is_array(ctx, contents))
+		{
+			pdf_obj *all = pdf_dict_put_array(ctx, page->obj, PDF_NAME(Contents), 3);
+			if (contents)
+				pdf_array_push(ctx, all, contents);
+			contents = all;
+		}
+		pdf_array_insert(ctx, contents, prologue, 0);
+		pdf_array_push_drop(ctx, contents, pdf_add_stream(ctx, pdf, buf, NULL, 0));
+	}
+	fz_always(ctx)
+	{
+		fz_drop_buffer(ctx, buf);
+		pdf_drop_obj(ctx, links);
+		pdf_drop_obj(ctx, prologue);
+	}
+	fz_catch(ctx)
+		fz_rethrow(ctx);
+}
+
+/* Every page as it prints; no form is left. */
+static void flatten_all(fz_context *ctx, fz_document *copy, void *arg)
+{
+	pdf_document *pdf = ely_pdf_of(ctx, copy);
+	pdf_page *page = NULL;
+	pdf_annot *annot;
+	int i, n = pdf_count_pages(ctx, pdf);
+	fz_var(page);
+	fz_try(ctx)
+	{
+		for (i = 0; i < n; i++)
+		{
+			page = pdf_load_page(ctx, pdf, i);
+			for (annot = pdf_first_annot(ctx, page); annot; annot = pdf_next_annot(ctx, annot))
+				ask_look(ctx, annot);
+			for (annot = pdf_first_widget(ctx, page); annot; annot = pdf_next_widget(ctx, annot))
+				ask_look(ctx, annot);
+			pdf_update_page(ctx, page);
+			flatten(ctx, pdf, page, i);
+			fz_drop_page(ctx, &page->super);
+			page = NULL;
+		}
+		pdf_dict_del(ctx, pdf_dict_get(ctx, pdf_trailer(ctx, pdf), PDF_NAME(Root)), PDF_NAME(AcroForm));
+	}
+	fz_always(ctx)
+		fz_drop_page(ctx, (fz_page *)page);
+	fz_catch(ctx)
+		fz_rethrow(ctx);
+}
+
 /* Leave to print was checked; the printer gets no lock. */
 int ely_print_copy(fz_context *ctx, fz_document *doc, const char *raw, const char *out, const char *password)
 {
@@ -150,7 +287,7 @@ int ely_print_copy(fz_context *ctx, fz_document *doc, const char *raw, const cha
 	{
 		pdf_write_options opts = pdf_default_write_options;
 		opts.do_encrypt = PDF_ENCRYPT_NONE;
-		ely_save_copy(ctx, ely_pdf_of(ctx, doc), raw, out, password, &opts, NULL, NULL);
+		ely_save_copy(ctx, ely_pdf_of(ctx, doc), raw, out, password, &opts, flatten_all, NULL);
 	}
 	fz_catch(ctx)
 		return ely_fail(ctx);

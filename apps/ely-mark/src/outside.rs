@@ -40,7 +40,7 @@ pub struct Extra {
     /// The text as last loaded or saved: the merge base.
     pub base: String,
     pub policy: PolicyEngine,
-    /// The page change autosave last heard.
+    /// The text change autosave last heard.
     pub heard: u64,
     /// The policy revision an autosave writes.
     pub writing: Option<u64>,
@@ -51,8 +51,15 @@ pub struct Extra {
     /// The last recovery point's mark, and one in flight.
     pub pointed: Option<String>,
     pub pointing: bool,
+    /// When a point last landed, and the failure last shown.
+    pub pointed_at: Option<std::time::SystemTime>,
+    pub point_failed: Option<std::io::ErrorKind>,
     /// A kept tab's mode, place and text came back once.
     pub restored: bool,
+    /// Disk reads started; only the newest lands.
+    pub reads: u64,
+    /// The writing view reached its document.
+    pub looked: bool,
 }
 
 impl Extra {
@@ -75,7 +82,11 @@ impl Default for Extra {
             slot: String::new(),
             pointed: None,
             pointing: false,
+            pointed_at: None,
+            point_failed: None,
             restored: false,
+            reads: 0,
+            looked: false,
         }
     }
 }
@@ -199,13 +210,18 @@ impl Desk {
 
     /// Changed: a clean tab follows, a dirty one asks.
     fn read_disk(&mut self, id: u64, path: PathBuf, cx: &mut Context<Self>) {
+        let Some(tab) = self.tab_mut(id) else {
+            return;
+        };
+        tab.extra.reads += 1;
+        let number = tab.extra.reads;
         let reading = path.clone();
         cx.spawn(async move |desk, cx| {
             let read = cx
                 .background_executor()
                 .spawn(async move { read_still(&reading) })
                 .await;
-            desk.update(cx, |desk, cx| desk.disk_read(id, path, read, cx))
+            desk.update(cx, |desk, cx| desk.disk_read(id, path, number, read, cx))
                 .ok();
         })
         .detach();
@@ -215,19 +231,24 @@ impl Desk {
         &mut self,
         id: u64,
         path: PathBuf,
+        number: u64,
         read: io::Result<(Fingerprint, Source)>,
         cx: &mut Context<Self>,
     ) {
         let Some(tab) = self.tab(id).filter(|tab| tab.session.path() == Some(&path)) else {
             return log::info!("mark: a read for a moved or closed tab was dropped");
         };
+        if tab.extra.reads != number {
+            return log::info!("mark: read {number} of tab {id} lapsed");
+        }
         let (fingerprint, disk) = match read {
             Ok(read) => read,
             Err(error) => return self.set_outside(id, Outside::Unread(error.to_string()), cx),
         };
-        // Keys the page has not sent yet count first.
-        if !self.settled(id, cx) {
-            return self.when_settled(id, move |desk, _, cx| desk.disk_read(id, path, Ok((fingerprint, disk)), cx));
+        // The disk moved on since the read: look again.
+        if Fingerprint::of(&path).ok() != Some(fingerprint) {
+            log::info!("mark: tab {id}'s file changed while read");
+            return self.look(id, cx);
         }
         let current = tab.doc.lock().expect("the text lock").current.clone();
         let kept = disk.text == tab.extra.base;
@@ -272,7 +293,13 @@ impl Desk {
     }
 
     /// A new file with the saved text; edits stay.
-    fn keep_edits(&mut self, id: u64, disk: Source, fingerprint: Fingerprint, cx: &mut Context<Self>) {
+    fn keep_edits(
+        &mut self,
+        id: u64,
+        disk: Source,
+        fingerprint: Fingerprint,
+        cx: &mut Context<Self>,
+    ) {
         let Some(tab) = self.tab_mut(id) else {
             return;
         };
@@ -377,7 +404,10 @@ fn watch(dirs: &[PathBuf], cx: &mut Context<Desk>) -> notify::Result<Recommended
     let (sender, mut changes) = mpsc::unbounded();
     let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
         // Reads, ours included, are no change.
-        if event.as_ref().is_ok_and(|event| ely_ui::watching::only_read(&event.kind)) {
+        if event
+            .as_ref()
+            .is_ok_and(|event| ely_ui::watching::only_read(&event.kind))
+        {
             return;
         }
         let _ = sender.unbounded_send(event.map(|_| ()).map_err(|error| error.to_string()));
@@ -407,27 +437,4 @@ fn watch(dirs: &[PathBuf], cx: &mut Context<Desk>) -> notify::Result<Recommended
 }
 
 #[cfg(test)]
-mod tests {
-    use std::time::{Duration, Instant};
-
-    use ely_files::Action;
-
-    use super::Extra;
-
-    #[test]
-    fn a_restarted_autosave_saves_the_next_edit() {
-        let mut extra = Extra::default();
-        extra.policy.set_has_path();
-        extra.policy.edit(Instant::now());
-        // A write was in flight when the disk changed.
-        extra.writing = Some(1);
-        extra.restart_autosave();
-        // As autosave settles a heard write, then edits.
-        if let Some(revision) = extra.writing.take() {
-            extra.policy.save_finished(revision, true);
-        }
-        let now = Instant::now();
-        extra.policy.edit(now);
-        assert!(matches!(extra.policy.tick(now + Duration::from_secs(5)), Action::SaveDue(_)));
-    }
-}
+pub(crate) mod tests;

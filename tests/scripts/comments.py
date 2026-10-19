@@ -20,7 +20,6 @@ PATTERNS = [
     "crates/**/*.h",
     "patches/**/*.patch",
     "tests/**/*.swift",
-    "apps/*/web/src/**/*.js",
     "site/src/**/*.ts",
     "site/src/**/*.css",
     "site/test/**/*.ts",
@@ -37,7 +36,7 @@ LINE_COMMENT = {
 }
 
 # Scanned by tokens: strings skipped, trailing comments found.
-SCANNED = {".js": True, ".ts": True, ".css": False}
+SCANNED = {".ts": True, ".css": False}
 
 
 def scan(text, slashes):

@@ -50,6 +50,7 @@ const FONTS: i32 = 57;
 const SIZE_CHANGED: i32 = 13;
 const SET_PART: i32 = 14;
 const CELL_CURSOR: i32 = 17;
+const MOUSE_POINTER: i32 = 18;
 const CELL_FORMULA: i32 = 19;
 const HEADER: i32 = 33;
 const GEOMETRY: i32 = 50;
@@ -57,6 +58,7 @@ const CELL_ADDRESS: i32 = 34;
 const REFERENCE_MARKS: i32 = 45;
 const FUNCTION_LIST: i32 = 47;
 const TOOLTIP: i32 = 71;
+const TABLE: i32 = 44;
 
 /// A mixed state; kernel values never hold NUL.
 pub const MIXED: &str = "\u{0}mixed";
@@ -77,6 +79,8 @@ pub struct Events {
     pub rects: Vec<Rect>,
     pub cursor: Option<Rect>,
     pub cursor_visible: bool,
+    /// The CSS pointer name; empty until the kernel says.
+    pub pointer: String,
     pub selection: Vec<Rect>,
     /// The selected object's frame, if any.
     pub graphic: Option<Rect>,
@@ -104,6 +108,7 @@ pub struct Events {
     /// The paragraph's own tab stops, in 1/100 mm.
     pub tabs: Vec<i32>,
     pub cell: Cell,
+    pub table: Option<crate::table::Table>,
 }
 
 #[derive(Default)]
@@ -217,7 +222,9 @@ fn signal() -> &'static Condvar {
     SIGNAL.get_or_init(Condvar::new)
 }
 
-const KINDS: [i32; 33] = [
+const KINDS: [i32; 35] = [
+    TABLE,
+    MOUSE_POINTER,
     REFERENCE_MARKS,
     FUNCTION_LIST,
     TOOLTIP,
@@ -391,6 +398,7 @@ fn record(slot: &mut Slot, kind: i32, text: &str) -> Option<u32> {
                 .collect();
         }
         CURSOR_VISIBLE => batch.cursor_visible = text == "true",
+        MOUSE_POINTER => batch.pointer = text.to_string(),
         GRAPHIC => {
             batch.graphic = rect_in(batch, "graphic selection", text);
             batch.cropping = batch.graphic.is_some() && text.contains("\"isCropMode\": true");
@@ -419,6 +427,7 @@ fn record(slot: &mut Slot, kind: i32, text: &str) -> Option<u32> {
                 .push(format!("an unreadable search result: {text}")),
         },
         MENU => batch.menu = Some(text.to_string()),
+        TABLE => crate::table::read(text).map_or_else(|fault| batch.faults.push(fault), |table| batch.table = table),
         CELL_CURSOR => batch.cell.cursor = rect_in(batch, "cell cursor", text),
         CELL_FORMULA => batch.cell.formula = text.to_string(),
         CELL_ADDRESS => batch.cell.address = text.to_string(),
@@ -589,11 +598,14 @@ pub fn stop_all(docs: &HashMap<u64, Document>) -> std::io::Result<()> {
 
 /// The current generation of `id`.
 pub fn generation(id: u64) -> u64 {
-    slots()
-        .lock()
-        .expect("the events lock")
-        .get(&id)
-        .map_or(0, |slot| slot.batch.generation)
+    slots().lock().expect("the events lock").get(&id).map_or(0, |slot| slot.batch.generation)
+}
+
+/// Whether `id` shows a selection, object or caret.
+pub fn picked(id: u64) -> bool {
+    let slots = slots().lock().expect("the events lock");
+    let Some(batch) = slots.get(&id).map(|slot| &slot.batch) else { return false };
+    batch.graphic.is_some() || !batch.selection.is_empty() || batch.cursor_visible && batch.cursor.is_some()
 }
 
 /// Blocks until documents have unpushed events.

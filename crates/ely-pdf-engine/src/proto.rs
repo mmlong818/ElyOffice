@@ -81,6 +81,8 @@ pub mod tag {
     pub const REPAIR_REPORT: u8 = 58;
     /// Decodes every picture; answers whether any failed.
     pub const CHECK_PICTURES: u8 = 59;
+    /// A folder's HTML page as a new PDF; no document.
+    pub const HTML_PDF: u8 = 60;
     pub const OK: u8 = 100;
     pub const ERR: u8 = 101;
 }

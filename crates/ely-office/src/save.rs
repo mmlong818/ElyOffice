@@ -14,17 +14,19 @@ use crate::{After, Closing, Dialog, Engine, Host, Opening, Tab, Tabs, in_window,
 
 /// The file a path names, links resolved.
 fn identity(path: &Path) -> io::Result<PathBuf> {
-    match std::fs::canonicalize(path) {
-        Ok(real) => Ok(real),
+    let real = match std::fs::canonicalize(path) {
+        Ok(real) => real,
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
             let parent = path.parent().unwrap_or(Path::new("."));
             let name = path
                 .file_name()
                 .ok_or_else(|| io::Error::other("no file name"))?;
-            Ok(std::fs::canonicalize(parent)?.join(name))
+            std::fs::canonicalize(parent)?.join(name)
         }
-        Err(error) => Err(error),
-    }
+        Err(error) => return Err(error),
+    };
+    // Whole path only: a name may need `\\?\`.
+    Ok(dunce::simplified(&real).to_path_buf())
 }
 
 pub trait Saving: Host {
@@ -478,3 +480,6 @@ pub fn folder<E, G: Engine>(tab: &Tab<E, G>) -> Option<PathBuf> {
                 .map(PathBuf::from)
         })
 }
+
+#[cfg(all(test, windows))]
+mod tests;

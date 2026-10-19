@@ -242,7 +242,6 @@ impl Worker {
         page: usize,
         (scale, rotate): (f32, i32),
         tile: [i32; 4],
-        dark: bool,
     ) -> io::Result<Tile> {
         let mut ask = self.on(&doc)?
             .u64(page as u64)
@@ -251,7 +250,7 @@ impl Worker {
         for value in tile {
             ask = ask.i64(i64::from(value));
         }
-        let reply = self.request(tag::RENDER, &ask.u64(u64::from(dark)).bytes())?;
+        let reply = self.request(tag::RENDER, &ask.bytes())?;
         let mut reply = Unpack::new(&reply);
         let (damaged, bgra) = (reply.u64()? != 0, reply.blob()?);
         match bgra.len() == tile[2] as usize * tile[3] as usize * 4 {

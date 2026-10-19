@@ -13,9 +13,14 @@ use crate::folder::{Folder, markdown_under};
 impl Desk {
     /// A folder lists beside; a file opens in a tab.
     pub fn open_path(&mut self, path: PathBuf, cx: &mut Context<Self>) {
-        match path.is_dir() {
-            true => self.open_folder(path, cx),
-            false => self.open_file(path, cx),
+        if path.is_dir() {
+            return self.open_folder(path, cx);
+        }
+        // A shown file only takes focus; the list still learns.
+        let shown = self.core.sessions.is_open(&path).unwrap_or(false);
+        self.open_file(path.clone(), cx);
+        if shown {
+            self.remember(&path, cx);
         }
     }
 
@@ -28,7 +33,7 @@ impl Desk {
             let files = cx
                 .background_executor()
                 .spawn(async move {
-                    let real = std::fs::canonicalize(&listed)?;
+                    let real = dunce::canonicalize(&listed)?;
                     Ok::<_, std::io::Error>((markdown_under(&real)?, real))
                 })
                 .await;
@@ -65,7 +70,7 @@ impl Desk {
     /// Puts `path` first in the recent list.
     pub fn remember(&mut self, path: &std::path::Path, cx: &mut Context<Self>) {
         // One spelling per file: its real path.
-        let remembered = std::fs::canonicalize(path)
+        let remembered = dunce::canonicalize(path)
             .and_then(|path| ely_files::recent::remember(&self.recent_file, &path));
         match remembered {
             Ok(list) => self.recent = list,
@@ -82,7 +87,7 @@ impl Desk {
 
     /// Tab `id` shows `path`; the recent list follows.
     pub fn track_recent(&mut self, id: u64, path: &std::path::Path, cx: &mut Context<Self>) {
-        let Ok(real) = std::fs::canonicalize(path) else {
+        let Ok(real) = dunce::canonicalize(path) else {
             return log::warn!("mark: {} is gone; the recent list keeps it", path.display());
         };
         if self.remembered.get(&id) == Some(&real) {
@@ -108,47 +113,62 @@ impl Desk {
         }
     }
 
-    /// `place` in `tab`, else in `file` once open.
+    /// Empties the recent list.
+    pub fn clear_recent(&mut self, cx: &mut Context<Self>) {
+        match ely_files::recent::clear(&self.recent_file) {
+            Ok(()) => {
+                log::info!("mark: the recent list is cleared");
+                self.recent.clear();
+                cx.notify();
+            }
+            Err(error) => {
+                log::error!("mark: the recent list did not clear: {error}");
+                let said = text(cx, "office.error.engine", &[("error", &error.to_string())]);
+                self.toast(said, Severity::Danger, cx);
+            }
+        }
+    }
+
+    /// Line and column `at` in a tab or file.
     pub fn open_at(
         &mut self,
         tab: Option<u64>,
         file: PathBuf,
-        place: serde_json::Value,
+        at: (usize, usize),
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let held = tab.or_else(|| self.tab_of(&file));
         if let Some(id) = held.filter(|id| self.tab(*id).is_some()) {
             self.core.active = Some(id);
-            let view = self.tab(id).map(|open| open.view.clone());
-            if let Some(view) = view {
-                view.update(cx, |view, cx| view.reveal(place, cx));
+            if let Some(view) = self.tab(id).map(|open| open.view.clone()) {
                 // After the list's own key handling, which keeps focus.
-                let focus = view.read(cx).focus.clone();
-                window.defer(cx, move |window, cx| window.focus(&focus, cx));
+                window.defer(cx, move |window, cx| {
+                    view.update(cx, |view, cx| view.reveal(at, window, cx))
+                });
             }
             return cx.notify();
         }
         // A file gone is reported by the open itself.
-        if let Ok(real) = std::fs::canonicalize(&file) {
-            self.going = Some((real, place));
+        if let Ok(real) = dunce::canonicalize(&file) {
+            self.going = Some((real, at));
         }
         self.open_file(file, cx);
     }
 
     /// The tab showing `path`, by real path.
     pub fn tab_of(&self, path: &std::path::Path) -> Option<u64> {
-        let real = std::fs::canonicalize(path).ok()?;
+        let real = dunce::canonicalize(path).ok()?;
         let held = |tab: &&ely_office::Tab<crate::outside::Extra, crate::engine::Mark>| {
             tab.session
                 .path()
-                .and_then(|open| std::fs::canonicalize(open).ok())
+                .and_then(|open| dunce::canonicalize(open).ok())
                 == Some(real.clone())
         };
         self.core.tabs.iter().find(held).map(|tab| tab.id)
     }
 
-    /// Tab `id`'s text as the page last sent it.
+    /// Tab `id`'s text now, unsaved edits included.
     pub fn text_of(&self, id: u64) -> Option<String> {
         Some(
             self.tab(id)?

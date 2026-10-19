@@ -244,7 +244,7 @@ static void preview(fz_context *ctx, pdf_document *pdf, int number, int block, c
 		tile[0] = (int)floorf(region.x0 * scale), tile[1] = (int)floorf(region.y0 * scale);
 		tile[2] = (int)ceilf(region.x1 * scale) - tile[0], tile[3] = (int)ceilf(region.y1 * scale) - tile[1];
 		*pixels = fz_malloc(ctx, (size_t)tile[2] * tile[3] * 4);
-		if (ely_render(ctx, copy, number, scale, 0, tile, 0, *pixels) < 0)
+		if (ely_render(ctx, copy, number, scale, 0, tile, *pixels) < 0)
 			fz_throw(ctx, FZ_ERROR_GENERIC, "%s", ely_error());
 		*w = tile[2], *h = tile[3];
 	}

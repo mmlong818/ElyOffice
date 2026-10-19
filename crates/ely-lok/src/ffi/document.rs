@@ -537,6 +537,24 @@ impl Document {
         });
     }
 
+    /// Moves by `step` parts and returns the part shown, in one owner task.
+    pub fn turn_parts(&self, step: i64) -> io::Result<i32> {
+        self.run(move |doc| {
+            let class = unsafe { (*doc).class };
+            type Read = unsafe extern "C" fn(*mut Doc) -> i32;
+            let part = i64::from(call!(class, 5, Read, doc));
+            let count = i64::from(call!(class, 3, Read, doc));
+            let next = part
+                .saturating_add(step)
+                .clamp(0, count.saturating_sub(1).max(0));
+            if next != part {
+                type Set = unsafe extern "C" fn(*mut Doc, i32);
+                call!(class, 6, Set, doc, next as i32);
+            }
+            next as i32
+        })
+    }
+
     /// The name of part `part`.
     pub fn part_name(&self, part: i32) -> io::Result<String> {
         #[cfg(windows)]

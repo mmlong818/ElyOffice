@@ -50,8 +50,8 @@ pub struct Extra {
     pub painting: bool,
     /// The parts are masters.
     pub masters: bool,
-    /// The scheme the pictures were painted with.
-    pub dark: Option<bool>,
+    /// The pictures were painted with Ely's scheme.
+    pub lit: bool,
     /// The view was fitted to the slide once.
     pub fitted: bool,
 }

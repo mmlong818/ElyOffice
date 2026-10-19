@@ -37,7 +37,7 @@ pub struct Docs {
     pub review: Entity<Review>,
     /// What the right column shows.
     pub side: Side,
-    pub offer: Option<crate::spell::Offer>,
+    pub offer: Option<ely_office::menu::Offer<ely_lok::menu::Offered>>,
     pub merge: Entity<crate::merge::Merge>,
     pub navigator: Entity<crate::navigate::Navigator>,
     /// The left column shows the navigator.
@@ -88,7 +88,7 @@ impl Host for Docs {
     fn observed(&mut self, id: u64, view: &Entity<LokView>, cx: &mut Context<Self>) {
         self.count(id, view, cx);
         self.found(id, view, cx);
-        self.offer_spelling(id, view, cx);
+        self.offer_menu(id, view, cx);
     }
 
     /// A dialog about a closed tab goes with it.

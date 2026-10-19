@@ -160,6 +160,16 @@ pub(super) const ROWS: &[Command] = &[
         Check::Undoable,
     ),
     command(
+        "table.border",
+        ".uno:TableChangeCurrentBorderPosition",
+        &[
+            Arg::Text("BorderType"),
+            Arg::Int("Index", "unsigned short", 0, 999),
+            Arg::Int("Offset", "long", -600_000, 600_000),
+        ],
+        Check::Undoable,
+    ),
+    command(
         "table.borders_all",
         ".uno:SetBorderStyle",
         &[

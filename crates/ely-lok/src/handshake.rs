@@ -53,7 +53,7 @@ impl Worker {
     pub(crate) fn tile_self_check(&mut self, profile_dir: &Path) -> io::Result<bool> {
         let doc = profile_dir.join("lok-verify.fodt");
         std::fs::write(&doc, VERIFY_DOC)?;
-        let url = ipc::file_url_of(&doc.canonicalize()?);
+        let url = ipc::file_url_of(&dunce::canonicalize(&doc)?);
         let payload = self.request(tag::VERIFY, &Pack::new().str(&url).bytes())?;
         let red = Unpack::new(&payload).u64()?;
         Ok(red > 0)

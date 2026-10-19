@@ -482,3 +482,19 @@ fn a_stale_load_callback_keeps_the_reloaded_state() {
 }
 
 mod failed;
+
+#[test]
+fn a_replace_with_the_same_time_and_size_is_a_new_fingerprint() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let (path, next) = (dir.path().join("a.md"), dir.path().join("a.md.new"));
+    write(&path, "old text\n");
+    let before = Fingerprint::of(&path).expect("the first fingerprint");
+    write(&next, "new text\n");
+    let file = std::fs::File::options().write(true).open(&next).expect("the new file");
+    file.set_modified(before.modified).expect("the old time");
+    drop(file);
+    std::fs::rename(&next, &path).expect("the replace");
+    let after = Fingerprint::of(&path).expect("the second fingerprint");
+    assert_eq!((after.len, after.modified), (before.len, before.modified));
+    assert_ne!(after, before, "the identity tells them apart");
+}

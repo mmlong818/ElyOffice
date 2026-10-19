@@ -4,11 +4,13 @@ use std::{
     time::SystemTime,
 };
 
-/// Length and mtime when last loaded or saved.
+/// Length, mtime and identity when last loaded or saved.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Fingerprint {
     pub len: u64,
     pub modified: SystemTime,
+    /// A replace with the same time is a new file.
+    pub id: Option<(u64, u64)>,
 }
 
 impl Fingerprint {
@@ -17,6 +19,7 @@ impl Fingerprint {
         Ok(Self {
             len: meta.len(),
             modified: meta.modified()?,
+            id: file_id(path)?,
         })
     }
 }

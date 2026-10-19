@@ -14,6 +14,7 @@ use image::{Frame, ImageBuffer, Rgba};
 
 use crate::{Doc, Events, Rect, Worker};
 
+mod borders;
 mod clip;
 mod clock;
 mod formula;
@@ -31,7 +32,9 @@ mod scroll;
 mod sheet;
 pub use input::{CONTEXT, Copy, Cut, Paste, init};
 pub use off::read_off;
-pub use render::scheme;
+pub use render::{SCHEME, paper};
+mod turn;
+pub use turn::notch;
 
 pub(crate) use crate::{TILE_TWIPS, TWIPS_PER_PIXEL};
 
@@ -117,18 +120,22 @@ pub struct LokView {
     watching: Option<Task<()>>,
     cursor: Option<Rect>,
     cursor_visible: bool,
+    pointer: gpui::CursorStyle,
     selection: Vec<Rect>,
     cell: crate::Cell,
-    /// Whether the kernel was last told to paint dark.
-    dark: Option<bool>,
+    /// Whether the kernel was told Ely's scheme.
+    lit: bool,
     /// The zoom follows the viewport so a page fits.
     fit: bool,
+    /// Set when the wheel and Up, Down turn parts.
+    turning: Option<turn::Turning>,
     /// The sheet shown, and the offered function chosen.
     part: usize,
     picked: usize,
     marked: Option<ime::Marked>,
     dragging: bool,
     grip: Option<handles::Grip>,
+    borders: borders::Borders,
     handle_size: Pixels,
     states: HashMap<String, String>,
     graphic: Option<Rect>,
@@ -136,6 +143,7 @@ pub struct LokView {
     /// The last search outcome: its count and matches.
     search: (u64, Vec<Rect>),
     menu: Option<String>,
+    right_at: Option<Point<Pixels>>,
     fonts: Vec<String>,
     a11y: crate::A11y,
     tabs: Vec<i32>,
@@ -146,22 +154,10 @@ pub type Layout = ((i64, i64), Vec<Rect>);
 
 use sheet::{Measured, measure};
 
-/// A page's colour; the kernel's Ely schemes share it.
-pub fn paper(cx: &gpui::App) -> gpui::Hsla {
-    use ely_gpui_component::theme::ActiveTheme as _;
-    let theme = cx.theme();
-    if theme.is_dark() {
-        theme.colors.surface
-    } else {
-        theme.colors.paper
-    }
-}
-
 /// Reads `doc`'s size and page frames.
 pub fn layout(worker: &mut Worker, doc: &Doc) -> io::Result<Layout> {
     Ok((doc.size(worker)?, doc.pages(worker)?))
 }
-
 
 impl EventEmitter<LokError> for LokView {}
 
@@ -190,10 +186,7 @@ impl LokView {
         let mut view = Self {
             worker,
             doc,
-            geom: Geom {
-                zoom: 1.0,
-                dpi: 1.0,
-            },
+            geom: Geom { zoom: 1.0, dpi: 1.0 },
             scroll: (0, 0),
             doc_size: (width as i32, height as i32),
             generation: 0,
@@ -222,21 +215,25 @@ impl LokView {
             copied: None,
             cursor: None,
             cursor_visible: true,
+            pointer: gpui::CursorStyle::Arrow,
             selection: Vec::new(),
             cell: crate::Cell::default(),
-            dark: None,
+            lit: false,
             fit: false,
+            turning: None,
             part: 0,
             picked: 0,
             marked: None,
             dragging: false,
             grip: None,
+            borders: Default::default(),
             handle_size: px(6.0),
             states: HashMap::new(),
             graphic: None,
             review: 0,
             search: (0, Vec::new()),
             menu: None,
+            right_at: None,
             fonts: Vec::new(),
             a11y: crate::A11y::default(),
             tabs: Vec::new(),
@@ -387,12 +384,16 @@ impl LokView {
         self.follow_graphic(batch.graphic, cx);
         self.cursor = batch.cursor;
         self.cursor_visible = batch.cursor_visible;
+        if !batch.pointer.is_empty() {
+            self.pointer = render::pointer(&batch.pointer);
+        }
         self.selection = batch.selection;
         if batch.cell.functions != self.cell.functions {
             self.picked = 0;
         }
         self.cell = batch.cell;
         self.graphic = batch.graphic;
+        self.read_borders(batch.table, batch.revision);
         self.review = batch.review;
         self.search = (batch.searched, batch.found);
         self.fonts = batch.fonts;

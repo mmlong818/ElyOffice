@@ -1,7 +1,7 @@
 //! Password prompts, zoomed pairs, jumps across (C11.1).
 
-use ely_office::{Dialog, Dialogs as _, Tabs as _};
-use gpui::{Entity, TestAppContext, VisualTestContext, point, px};
+use ely_office::{Dialog, Dialogs as _, Opening as _, Tabs as _};
+use gpui::{Entity, Modifiers, ScrollDelta, ScrollWheelEvent, TestAppContext, VisualTestContext, point, px};
 
 use super::{file, frames, settle, shown, windowed};
 use crate::layout::{Mode, Zoom};
@@ -112,4 +112,53 @@ fn a_jump_to_the_right_page_brings_it_across() {
         (view.laid_out().placed[1].x, -f32::from(view.scroll.offset().x), f32::from(view.room.size.width))
     });
     assert!(x >= left && x < left + wide, "page at {x}, view {left}..{}", left + wide);
+}
+
+#[test]
+fn ctrl_and_a_wheel_notch_step_the_zoom_once() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let mut cx = TestAppContext::single();
+    let pages: &[(f32, f32, &[&str])] = &[(612.0, 792.0, &["one"]), (612.0, 792.0, &["two"]), (612.0, 792.0, &["three"])];
+    let (viewer, cx) = windowed(&mut cx, dir.path(), &[file(dir.path(), "three.pdf", pages)], true);
+    let view = shown(cx, &viewer);
+    settle(cx, |app| view.read(app).room.size.width > px(100.0));
+    cx.update(|_, app| view.update(app, |view, cx| view.change(|view, _| view.zoom = Zoom::Scale(1.0), cx)));
+    frames(cx);
+    let at = cx.update(|_, app| view.read(app).room.center());
+    let wheel = |modifiers, y| ScrollWheelEvent { position: at, delta: ScrollDelta::Lines(point(0.0, y)), modifiers, ..Default::default() };
+    let other = match cfg!(target_os = "macos") {
+        true => Modifiers { control: true, ..Default::default() },
+        false => Modifiers { platform: true, ..Default::default() },
+    };
+    let read = |cx: &mut VisualTestContext| cx.update(|_, app| (view.read(app).zoom, view.read(app).scroll.offset().y));
+    cx.simulate_event(wheel(other, -3.0));
+    frames(cx);
+    let (zoom, scrolled) = read(cx);
+    assert_eq!(zoom, Zoom::Scale(1.0), "only Ctrl, or Cmd on macOS");
+    assert!(scrolled < px(0.0), "a plain wheel scrolls");
+    cx.simulate_event(wheel(Modifiers::secondary_key(), 3.0));
+    frames(cx);
+    assert_eq!(read(cx).0, Zoom::Scale(crate::keys::stepped(1.0, true)), "a notch is one step");
+    cx.simulate_event(wheel(Modifiers::secondary_key(), -3.0));
+    cx.simulate_event(wheel(Modifiers::secondary_key(), -3.0));
+    frames(cx);
+    assert_eq!(read(cx).0, Zoom::Scale(crate::keys::stepped(1.0, false)));
+}
+
+#[test]
+fn a_dark_app_shows_the_page_as_the_file_paints_it() {
+    use ely_gpui_component::theme::{Mode, Theme};
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let mut cx = TestAppContext::single();
+    let (viewer, cx) = windowed(&mut cx, dir.path(), &[], true);
+    cx.update(|_, app| Theme::set_mode_now(Mode::Dark, app));
+    let path = file(dir.path(), "one.pdf", &[(612.0, 792.0, &["alpha"])]);
+    cx.update(|_, app| viewer.update(app, |viewer, cx| viewer.open_file(path, cx)));
+    settle(cx, |app| viewer.read(app).active_view().is_some());
+    let view = shown(cx, &viewer);
+    let corner = |app: &gpui::App| view.read(app).tiles.iter().find(|(key, _)| key.tx == 0 && key.ty == 0).map(|(_, image)| image.clone());
+    settle(cx, |app| corner(app).is_some());
+    let tile = cx.update(|_, app| corner(app)).expect("the first tile");
+    let bytes = tile.as_bytes(0).expect("its pixels");
+    assert_eq!(&bytes[..3], &[255, 255, 255], "the paper stays white");
 }

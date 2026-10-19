@@ -12,6 +12,8 @@ arboard.workspace = true
 directories.workspace = true
 ely-ipc.workspace = true
 env_logger.workspace = true
+futures.workspace = true
+getrandom.workspace = true
 image.workspace = true
 log.workspace = true
 semver.workspace = true
@@ -37,17 +39,21 @@ security-framework.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows-sys.workspace = true
+windows.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
+lopdf.workspace = true
+zbus.workspace = true
 rfd = { workspace = true, features = ["xdg-portal"] }
 
 [target.'cfg(not(target_os = "linux"))'.dependencies]
 rfd.workspace = true
 
 [dev-dependencies]
+lopdf.workspace = true
 tempfile.workspace = true
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]
@@ -58,4 +64,8 @@ workspace = true
 
 [[test]]
 name = "media"
+harness = false
+
+[[test]]
+name = "print"
 harness = false

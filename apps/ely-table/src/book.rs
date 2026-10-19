@@ -61,6 +61,8 @@ pub struct Book {
     pub drag: Option<Drag>,
     /// The sheet menu's request: number and place.
     pub sheet_menu: Option<(u64, gpui::Point<gpui::Pixels>)>,
+    /// The grid or header menu.
+    pub menu: Option<ely_office::menu::Offer<crate::menu::What>>,
     pub panel: Entity<Panel>,
     pub panel_shown: bool,
     pub choices: Option<crate::rules::Choices>,
@@ -95,6 +97,7 @@ impl Host for Book {
         self.freeze(id, view, cx);
         self.found(id, view, cx);
         self.requested(id, view, cx);
+        self.offer_menu(id, view, cx);
         self.follow_rule(id, view, cx);
         self.read_links(id, view, cx);
         if self.core.active == Some(id) {
@@ -190,6 +193,7 @@ impl Book {
             bars: Bars::new(window, cx),
             drag: None,
             sheet_menu: None,
+            menu: None,
             panel,
             panel_shown: true,
             choices: None,
@@ -388,7 +392,8 @@ impl Render for Book {
             .on_action(cx.listener(Self::on_print))
             .child(shell)
             .children(self.core_dialog(cx))
-            .children(self.dialog_element(cx));
+            .children(self.dialog_element(cx))
+            .children(self.context_menu(cx));
         let root = Self::bind_zoom(crate::cells::bind(crate::sheets::bind(root, cx), cx), cx);
         let root = crate::data::bind(crate::formulas::bind(root, cx), cx);
         let root = crate::page::bind(crate::protect::bind(root, cx), cx);

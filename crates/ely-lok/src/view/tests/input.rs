@@ -60,7 +60,7 @@ fn typing_and_composing_reach_the_document() {
     assert_eq!(saved(&view, &mut cx), ["ab你", "Hello 世界"]);
 }
 
-struct Blank;
+pub(super) struct Blank;
 
 impl gpui::Render for Blank {
     fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl gpui::IntoElement {

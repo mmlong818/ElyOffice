@@ -6,6 +6,7 @@ use ely_gpui_component::{
     buttons::{Button, SegmentedControl},
     feedback::EmptyState,
     forms::{InputEvent, SearchInput, TextInput},
+    layout::ScrollArea,
     lists::{FileTree, ListItem, Outline, SelectableList},
     primitives::IconName,
     theme::ControlSize,
@@ -13,10 +14,9 @@ use ely_gpui_component::{
 use ely_office::prelude::*;
 use ely_ui::{commands, i18n::text};
 use gpui::{
-    AnyElement, AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render,
-    SharedString, Styled as _, WeakEntity, Window, div,
+    AnyElement, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
+    ParentElement as _, Render, SharedString, Styled as _, WeakEntity, Window, div,
 };
-use serde_json::json;
 
 use crate::desk::Desk;
 use crate::folder::{Hit, MOST_HITS, lines_with};
@@ -110,7 +110,7 @@ impl Side {
         // Open files by real path, as the folder lists them.
         let reals: Vec<(u64, PathBuf)> = open
             .iter()
-            .filter_map(|(id, path, _)| Some((*id, std::fs::canonicalize(path).ok()?)))
+            .filter_map(|(id, path, _)| Some((*id, dunce::canonicalize(path).ok()?)))
             .collect();
         let sources: Vec<(Option<u64>, PathBuf)> = match (self.wide, &desk.folder) {
             (true, Some(folder)) => folder
@@ -200,7 +200,7 @@ impl Side {
             .action(open)
             .into_any_element();
         }
-        let opener = desk.downgrade();
+        let (opener, clearer) = (desk.downgrade(), desk.downgrade());
         let rows = read.recent.iter().map(|path| {
             let name = path
                 .file_name()
@@ -214,15 +214,32 @@ impl Side {
             );
             (key, item)
         });
-        rows.fold(
-            SelectableList::new("mark-recent").label(text(cx, "mark.recent", &[])),
-            |list, (key, item)| list.row(key, item),
-        )
-        .on_activate(move |key, _, cx| {
-            let path = PathBuf::from(key.as_ref());
-            opener.update(cx, |desk, cx| desk.open_path(path, cx)).ok();
-        })
-        .into_any_element()
+        let list = rows
+            .fold(
+                SelectableList::new("mark-recent").label(text(cx, "mark.recent", &[])),
+                |list, (key, item)| list.row(key, item),
+            )
+            .on_activate(move |key, _, cx| {
+                let path = PathBuf::from(key.as_ref());
+                opener.update(cx, |desk, cx| desk.open_path(path, cx)).ok();
+            });
+        let clear = Button::new("mark-clear-recent", text(cx, "mark.recent.clear", &[]))
+            .size(ControlSize::Sm)
+            .on_click(move |_, _, cx| {
+                clearer.update(cx, |desk, cx| desk.clear_recent(cx)).ok();
+            });
+        div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .size_full()
+            .child(div().flex_1().min_h_0().child(list))
+            .child(
+                div()
+                    .debug_selector(|| "mark-clear-recent".into())
+                    .child(clear),
+            )
+            .into_any_element()
     }
 
     fn outline(&self, desk: &Entity<Desk>, cx: &mut Context<Self>) -> AnyElement {
@@ -234,7 +251,7 @@ impl Side {
             )
             .into_any_element();
         };
-        let headings = view.read(cx).outline.clone();
+        let headings = view.read(cx).outline(cx);
         if headings.is_empty() {
             return EmptyState::new(
                 "mark-no-headings",
@@ -249,15 +266,22 @@ impl Side {
                 outline.item(at.to_string(), heading.title.clone(), heading.level)
             },
         );
-        outline
-            .on_select(move |key, window, cx| {
-                if let Ok(at) = key.parse::<usize>() {
-                    view.update(cx, |view, cx| view.reveal(json!({ "heading": at }), cx));
-                    // Keys go to the document, at the heading.
-                    let focus = view.read(cx).focus.clone();
-                    window.focus(&focus, cx);
-                }
-            })
+        let outline = outline.on_select(move |key, window, cx| {
+            let Some(heading) = key.parse::<usize>().ok().and_then(|at| headings.get(at)) else {
+                return log::error!("mark: the outline chose no heading");
+            };
+            // The heading in view, the caret on it.
+            let line = heading.line;
+            view.update(cx, |view, cx| view.reveal((line, 0), window, cx));
+        });
+        ScrollArea::new("mark-outline-scroll")
+            .vertical()
+            .size_full()
+            .child(
+                div()
+                    .debug_selector(|| "mark-outline".into())
+                    .child(outline),
+            )
             .into_any_element()
     }
 
@@ -265,9 +289,17 @@ impl Side {
         let this = cx.entity();
         let scope = SegmentedControl::new("mark-scope", if self.wide { "folder" } else { "file" })
             .size(ControlSize::Sm)
-            .segment("file", text(cx, "mark.search.file", &[]), Some(IconName::File));
+            .segment(
+                "file",
+                text(cx, "mark.search.file", &[]),
+                Some(IconName::File),
+            );
         let scope = match desk.read(cx).folder {
-            Some(_) => scope.segment("folder", text(cx, "mark.search.folder", &[]), Some(IconName::Folder)),
+            Some(_) => scope.segment(
+                "folder",
+                text(cx, "mark.search.folder", &[]),
+                Some(IconName::Folder),
+            ),
             None => scope,
         };
         let scope = scope.on_change(move |key, _, cx| {
@@ -277,7 +309,7 @@ impl Side {
             })
         });
         let opener = desk.downgrade();
-        let (hits, query) = (self.hits.clone(), self.searched.clone());
+        let hits = self.hits.clone();
         // Files not read come first: the results lack them.
         let missed = self.missed.iter().enumerate().map(|(at, (path, why))| {
             let name = path
@@ -312,10 +344,10 @@ impl Side {
                 let Some((tab, hit)) = key.parse::<usize>().ok().and_then(|at| hits.get(at)) else {
                     return;
                 };
-                let (tab, file, line) = (*tab, hit.file.clone(), hit.line);
-                let place = json!({ "line": line, "query": query });
+                // Hits count lines from one.
+                let (tab, file, at) = (*tab, hit.file.clone(), (hit.line - 1, hit.column));
                 opener
-                    .update(cx, |desk, cx| desk.open_at(tab, file, place, window, cx))
+                    .update(cx, |desk, cx| desk.open_at(tab, file, at, window, cx))
                     .ok();
             });
         let more = (self.hits.len() == MOST_HITS)
@@ -346,9 +378,21 @@ impl Render for Side {
         };
         let panes = SegmentedControl::new("mark-pane", key)
             .size(ControlSize::Sm)
-            .segment("files", text(cx, "mark.pane.files", &[]), Some(IconName::Folder))
-            .segment("outline", text(cx, "mark.pane.outline", &[]), Some(IconName::List))
-            .segment("search", text(cx, "mark.pane.search", &[]), Some(IconName::Search))
+            .segment(
+                "files",
+                text(cx, "mark.pane.files", &[]),
+                Some(IconName::Folder),
+            )
+            .segment(
+                "outline",
+                text(cx, "mark.pane.outline", &[]),
+                Some(IconName::List),
+            )
+            .segment(
+                "search",
+                text(cx, "mark.pane.search", &[]),
+                Some(IconName::Search),
+            )
             .on_change(move |key, _, cx| {
                 this.update(cx, |side, cx| {
                     side.pane = match key.as_ref() {
@@ -375,3 +419,6 @@ impl Render for Side {
             .into_any_element()
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -100,6 +100,7 @@ pub(super) const ROWS: &[Command] = &[
         Check::Undoable,
     ),
     command("cells.split", ".uno:SplitCell", &[], Check::Undoable),
+    command("cells.clear", ".uno:ClearContents", &[], Check::Undoable),
     command("view.freeze", ".uno:FreezePanes", &[], Check::Finished),
     command("rows.hide", ".uno:HideRow", &[], Check::Undoable),
     command("rows.show", ".uno:ShowRow", &[], Check::Undoable),

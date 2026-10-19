@@ -250,15 +250,15 @@ impl Render for Props {
         let grid = if graphic {
             grid.group(self.object_group(cx))
         } else {
-            let grid = grid
-                .group(self.text_group(window, cx))
-                .group(self.paragraph_group(cx))
-                .group(self.style_group(cx))
-                .group(self.page_group(cx));
-            match self.state(".uno:DeleteTable", cx).as_deref() {
+            // In a table, its group leads, as in Word.
+            let grid = match self.state(".uno:DeleteTable", cx).as_deref() {
                 Some("enabled") => grid.group(self.table_group(cx)),
                 _ => grid,
-            }
+            };
+            grid.group(self.text_group(window, cx))
+                .group(self.paragraph_group(cx))
+                .group(self.style_group(cx))
+                .group(self.page_group(cx))
         };
         div()
             .size_full()

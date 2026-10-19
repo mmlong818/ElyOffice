@@ -267,7 +267,7 @@ impl Deck {
         let range = output.pages();
         let (w, h) = tab.extra.size;
         let size = (PICTURE, (f64::from(PICTURE) * h as f64 / w.max(1) as f64).round() as u32);
-        let (copy, light) = (tab.work.join("output.odp"), ely_lok::scheme(false));
+        let (copy, light) = (tab.work.join("output.odp"), ely_lok::SCHEME);
         let (shown, opened) = (folder.display().to_string(), folder.clone());
         log::info!("show: writes slide pictures");
         self.read_in(

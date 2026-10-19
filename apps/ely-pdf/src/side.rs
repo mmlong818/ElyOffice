@@ -100,11 +100,11 @@ impl PdfView {
     }
 
     /// Asks for the first missing picture in `rows`.
-    fn ask_thumb(&mut self, rows: Range<usize>, (sf, dark): (f32, bool), cx: &mut Context<Self>) {
+    fn ask_thumb(&mut self, rows: Range<usize>, sf: f32, cx: &mut Context<Self>) {
         if self.thumbing {
             return;
         }
-        let due = |page: &usize| !self.thumbs.contains_key(&(*page, dark)) || self.thumbs_stale.contains(&(*page, dark));
+        let due = |page: &usize| !self.thumbs.contains_key(page) || self.thumbs_stale.contains(page);
         let Some(page) = rows.clone().find(|page| due(page) && !self.thumbs_failed.contains(page)) else {
             return;
         };
@@ -114,7 +114,7 @@ impl PdfView {
         let (doc, version) = (self.doc, self.version);
         self.thumbing = true;
         self.off(
-            move |worker| worker.render(doc, page, (scale, 0), tile, dark),
+            move |worker| worker.render(doc, page, (scale, 0), tile),
             move |view, painted, cx| {
                 view.thumbing = false;
                 if view.version != version {
@@ -128,8 +128,8 @@ impl PdfView {
                 });
                 match painted.map(|bgra| crate::pages::picture((tile[2] as u32, tile[3] as u32), bgra)) {
                     Ok(Some(image)) => {
-                        view.thumbs_stale.remove(&(page, dark));
-                        if let Some(old) = view.thumbs.insert((page, dark), image) {
+                        view.thumbs_stale.remove(&page);
+                        if let Some(old) = view.thumbs.insert(page, image) {
                             view.retired.push(old);
                         }
                     }
@@ -149,18 +149,18 @@ impl PdfView {
 
 impl PdfView {
     /// The picture a row draws; an old one until repainted.
-    pub fn picture(&self, page: usize, dark: bool) -> Option<Arc<RenderImage>> {
-        self.thumbs.get(&(page, dark)).cloned()
+    pub fn picture(&self, page: usize) -> Option<Arc<RenderImage>> {
+        self.thumbs.get(&page).cloned()
     }
 }
 
 /// One row: the page number and its picture.
-fn row(view: &Entity<PdfView>, page: usize, dark: bool, cx: &App) -> gpui::AnyElement {
+fn row(view: &Entity<PdfView>, page: usize, cx: &App) -> gpui::AnyElement {
     let read = view.read(cx);
     let colors = &cx.theme().colors;
     let (w, h) = read.sizes[page];
     let picked = read.picked.contains(&page);
-    let picture = read.picture(page, dark);
+    let picture = read.picture(page);
     let count = read.sizes.len();
     let label = Viewer::text(cx, "pdf.page.label", &[("n", &(page + 1).to_string())]);
     let (clicked, pressed, dropped) = (view.clone(), view.clone(), view.clone());
@@ -210,7 +210,7 @@ fn row(view: &Entity<PdfView>, page: usize, dark: bool, cx: &App) -> gpui::AnyEl
                 .h(px(height))
                 .border_1()
                 .border_color(if picked { colors.focus } else { colors.border })
-                .bg(if dark { colors.surface } else { colors.paper })
+                .bg(gpui::white())
                 .when_some(picture, |frame, picture| frame.child(img(picture).size_full())),
         )
         .child(div().text_xs().text_color(colors.fg_subtle).child((page + 1).to_string()))
@@ -258,12 +258,12 @@ impl Render for Side {
             Pane::Notes => crate::notelist::list(&view, cx),
             Pane::Files => crate::attach::list(&view, cx),
             Pane::Pages => {
-                let shown = (window.scale_factor(), cx.theme().is_dark());
+                let sf = window.scale_factor();
                 let count = view.read(cx).sizes.len();
                 let rows = view.clone();
                 let list = uniform_list("pdf-thumbs", count, move |range, _, cx| {
-                    rows.update(cx, |view, cx| view.ask_thumb(range.clone(), shown, cx));
-                    range.map(|page| row(&rows, page, shown.1, cx)).collect()
+                    rows.update(cx, |view, cx| view.ask_thumb(range.clone(), sf, cx));
+                    range.map(|page| row(&rows, page, cx)).collect()
                 })
                 .size_full();
                 div()

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Usage: release.sh [batch]; a dmg per app of the batch.
+# Usage: release.sh [batch]; a dmg per app, one of all.
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/../.." && pwd)
@@ -12,32 +12,44 @@ releases=https://git.zacharyzhang.com/ZacharyZhang-NY/ElyOffice/releases
   echo "release.sh: notarizing needs ELY_SIGN_IDENTITY, a Developer ID" >&2
   exit 1
 }
+# Usage: dmg <out> <volume> <app>...; apps beside Applications.
+dmg() {
+  local out=$1 volume=$2 stage
+  shift 2
+  rm -f "$out"
+  # Drag an app onto Applications.
+  stage=$(mktemp -d)
+  for app in "$@"; do ditto "$app" "$stage/$(basename "$app")"; done
+  ln -s /Applications "$stage/Applications"
+  hdiutil create -quiet -volname "$volume" -srcfolder "$stage" -format UDZO "$out"
+  rm -rf "$stage"
+  if [ -n "${ELY_NOTARY_PROFILE:-}" ]; then
+    codesign --force --timestamp --sign "$ELY_SIGN_IDENTITY" "$out"
+    xcrun notarytool submit "$out" --keychain-profile "$ELY_NOTARY_PROFILE" --wait
+    xcrun stapler staple "$out"
+  else
+    echo "release.sh: $out is not notarized (no ELY_NOTARY_PROFILE)" >&2
+  fi
+  echo "$out"
+}
 "$root/packaging/source.sh" "$dist"
 awk -F'\t' -v batch="$batch" '$4 == batch { print $1 "\t" $2 }' "$root/packaging/apps.tsv" |
   while IFS=$'\t' read -r slug name; do
     "$root/packaging/macos/bundle.sh" "$slug" release
     codesign --verify --deep --strict "$dist/$name.app"
-    dmg=$dist/$name-$version-$arch.dmg
-    rm -f "$dmg"
-    # The app beside Applications: drag one onto the other.
-    stage=$(mktemp -d)
-    ditto "$dist/$name.app" "$stage/$name.app"
-    ln -s /Applications "$stage/Applications"
-    hdiutil create -quiet -volname "$name" -srcfolder "$stage" -format UDZO "$dmg"
-    rm -rf "$stage"
-    if [ -n "${ELY_NOTARY_PROFILE:-}" ]; then
-      codesign --force --timestamp --sign "$ELY_SIGN_IDENTITY" "$dmg"
-      xcrun notarytool submit "$dmg" --keychain-profile "$ELY_NOTARY_PROFILE" --wait
-      xcrun stapler staple "$dmg"
-    else
-      echo "release.sh: $dmg is not notarized (no ELY_NOTARY_PROFILE)" >&2
-    fi
-    echo "$dmg"
+    out=$dist/$name-$version-$arch.dmg
+    dmg "$out" "$name" "$dist/$name.app"
     # What the app's update check reads from the latest release.
-    sha=$(shasum -a 256 "$dmg" | cut -d' ' -f1)
-    url="$releases/download/v$version/$(basename "$dmg")"
+    sha=$(shasum -a 256 "$out" | cut -d' ' -f1)
+    url="$releases/download/v$version/$(basename "$out")"
     printf '{"version": "%s", "assets": {"macos-%s": {"url": "%s", "sha256": "%s"}}}\n' \
       "$version" "${arch/arm64/aarch64}" "$url" "$sha" >"$dist/$slug.json"
     echo "$dist/$slug.json"
   done
+# Every app of the batch in one dmg.
+apps=()
+for name in $(awk -F'\t' -v batch="$batch" '$4 == batch { print $2 }' "$root/packaging/apps.tsv"); do
+  apps+=("$dist/$name.app")
+done
+dmg "$dist/ElyOffice-$version-$arch.dmg" "Ely Office" "${apps[@]}"
 rm -rf "$root/target/release/incremental"

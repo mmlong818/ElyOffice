@@ -23,7 +23,8 @@ attempt() { # name, setup; sets status, writes the output
   cp "$root/packaging/apps.tsv" "$clone/packaging/"
   (cd "$clone" && eval "$2")
   status=0
-  ELY_SHARE=$share ELY_RELEASE_TOKEN=unused "$clone/scripts/ci.sh" macos "v$version" >"$work/$1.out" 2>&1 ||
+  ELY_SHARE=$share ELY_RELEASE_TOKEN=unused ELY_SIGN_IDENTITY=unused ELY_NOTARY_PROFILE=unused \
+    "$clone/scripts/ci.sh" macos "v$version" >"$work/$1.out" 2>&1 ||
     status=$?
 }
 # The target as stored plus a newline and x.

@@ -278,6 +278,21 @@ fn docx_edits_saves_reopens_and_shuts_down() {
         "ElyOffice DOCX persisted edit",
         "the edit persists in the reopened DOCX model"
     );
+    let selected = super::poll_until(
+        &mut worker,
+        &reopened,
+        &Events::default(),
+        std::time::Duration::from_millis(EVENT_TIMEOUT_MS),
+        |events| !events.selection.is_empty(),
+    );
+    assert!(!selected.selection.is_empty(), "the reopened text selection is reported");
+    assert_eq!(
+        worker
+            .turn(&reopened, 1, Some((0, 1024)))
+            .expect("a picked text selection routes the arrow key through its owner"),
+        None,
+        "the picked-document path returns the key sentinel"
+    );
     finish(worker, reopened, &case, "DOCX");
 }
 
@@ -343,6 +358,16 @@ fn pptx_edits_duplicates_hides_saves_reopens_and_shuts_down() {
         baseline.list.len() >= 2,
         "the presentation has multiple slides"
     );
+    assert_eq!(
+        worker.turn(&doc, 1, None).expect("turn to the next slide"),
+        Some(1)
+    );
+    assert_eq!(doc.sheets(&mut worker).expect("second slide is shown").current, 1);
+    assert_eq!(
+        worker.turn(&doc, -1, None).expect("turn to the previous slide"),
+        Some(0)
+    );
+    assert_eq!(doc.sheets(&mut worker).expect("first slide is restored").current, 0);
     doc.show_sheet(&mut worker, 0).expect("show first slide");
     // t.pptx's first slide has an empty title placeholder centered at these twips.
     click(&mut worker, &doc, 10_764, 3_402);

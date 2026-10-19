@@ -10,17 +10,7 @@ fail() {
   exit 1
 }
 check() { python3 "$root/tests/scripts/comments.py" "$work" >/dev/null 2>&1; }
-mkdir -p "$work/apps/a/web/src" "$work/tests/scripts"
-printf '// One short line.\nconst a = 1\n' >"$work/apps/a/web/src/a.js"
-check || fail "a short comment failed"
-printf '/* A comment\n   spanning lines. */\n' >"$work/apps/a/web/src/a.js"
-! check || fail "a multi-line JS block comment passed"
-printf 'const a = 1 /* A comment\n   spanning lines. */\n' >"$work/apps/a/web/src/a.js"
-! check || fail "an inline multi-line JS block comment passed"
-printf '// One two three four five six seven eight nine ten eleven.\n' >"$work/apps/a/web/src/a.js"
-! check || fail "an eleven-word JS comment passed"
-rm "$work/apps/a/web/src/a.js"
-mkdir -p "$work/site/src"
+mkdir -p "$work/site/src" "$work/tests/scripts"
 for ext in ts css; do
   printf '/* A comment\n   spanning lines. */\n' >"$work/site/src/a.$ext"
   ! check || fail "a multi-line .$ext block comment passed"
@@ -30,6 +20,8 @@ for ext in ts css; do
   check || fail "a short .$ext comment failed"
   rm "$work/site/src/a.$ext"
 done
+printf 'const a = 1 /* A comment\n   spanning lines. */\n' >"$work/site/src/a.ts"
+! check || fail "an inline multi-line .ts block comment passed"
 printf 'const glob = "/*.css";\n' >"$work/site/src/a.ts"
 check || fail "a /* inside a .ts string failed"
 printf 'const a = 1; // One two three four five six seven eight nine ten eleven.\n' >"$work/site/src/a.ts"

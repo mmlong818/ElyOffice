@@ -4,7 +4,7 @@ set -euo pipefail
 
 root=$(cd "$(dirname "$0")/../.." && pwd)
 script=$root/scripts/fetch-references.sh
-names="Ely-GPUI-Components zed libreoffice-core mupdf tesseract mailcore2 libetpan cef cef-rs milkdown codemirror-dev marktext colamd magpie agent-client-protocol omarchy"
+names="Ely-GPUI-Components zed libreoffice-core mupdf git tesseract mailcore2 libetpan marktext colamd magpie agent-client-protocol markion markdown-rs omarchy"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -29,8 +29,7 @@ for header in \
   tesseract/include/tesseract/capi.h \
   mailcore2/CMakeLists.txt \
   libetpan/src/low-level/gmail/mailgmail.h \
-  libetpan/src/low-level/activesync/mailactivesync.h \
-  cef-rs/Cargo.toml; do
+  libetpan/src/low-level/activesync/mailactivesync.h; do
   [ -s "$root/reference/$header" ] || fail "missing reference/$header"
 done
 
@@ -45,7 +44,10 @@ for name in mupdf mailcore2; do
   [ -z "$bad" ] || fail "$name submodules off their pins: $bad"
 done
 
-grep -q "rev = \"$(pin_of zed)\"" "$root/reference/Ely-GPUI-Components/Cargo.toml" ||
-  fail "zed pin differs from the gpui rev in Ely-GPUI-Components"
+grep -q "rev = \"$(pin_of Ely-GPUI-Components)\"" "$root/Cargo.toml" ||
+  fail "the component library pin differs from the workspace's"
+gpui=$(grep -E '^gpui = ' "$root/Cargo.toml")
+grep -qxF "$gpui" "$root/reference/Ely-GPUI-Components/Cargo.toml" ||
+  fail "the workspace and the component library pin different gpui"
 
-echo "references: $# pins match, sparse set and submodules in place, gpui rev agrees"
+echo "references: $# pins match, sparse set and submodules in place, library and gpui agree"

@@ -18,7 +18,7 @@ const SCALE: f32 = 200.0 / 72.0;
 /// Page one of `doc`, saved as a gray scan.
 fn scan_of(worker: &mut Worker, doc: Doc, out: PathBuf) -> PathBuf {
     let (w, h) = ((612.0 * SCALE).ceil() as i32, (792.0 * SCALE).ceil() as i32);
-    let bgra = worker.render(doc, 0, (SCALE, 0), [0, 0, w, h], false).expect("draws").bgra;
+    let bgra = worker.render(doc, 0, (SCALE, 0), [0, 0, w, h]).expect("draws").bgra;
     let gray: Vec<u8> = bgra.chunks_exact(4).map(|p| ((u16::from(p[0]) + u16::from(p[1]) + u16::from(p[2])) / 3) as u8).collect();
     std::fs::write(&out, scan((612.0, 792.0), (w as u32, h as u32), &gray)).expect("writes");
     out
@@ -49,12 +49,12 @@ fn a_scan_reads_and_its_text_layer_finds_without_drawing() {
     assert!(read.iter().any(|l| l.contains("Hello world")) && read.iter().any(|l| l.contains("Second line")), "{read:?}");
     let hello = lines.iter().find(|l| l.text.contains("Hello")).expect("hello");
     assert!((hello.rect[0] - 72.0).abs() < 6.0 && (hello.rect[3] - 76.0).abs() < 8.0, "in page points: {:?}", hello.rect);
-    let before = worker.render(doc, 0, (1.0, 0), [0, 0, 612, 792], false).expect("draws").bgra;
+    let before = worker.render(doc, 0, (1.0, 0), [0, 0, 612, 792]).expect("draws").bgra;
     let mark = worker.text_layer(doc, &[(0, lines)], false).expect("lays");
     doc = worker.now(doc).expect("the state");
     assert!(words(&mut worker, doc).contains("Hello world"), "searchable now");
     assert_eq!(worker.search(doc, 0, "second line").expect("finds").len(), 1);
-    assert!(worker.render(doc, 0, (1.0, 0), [0, 0, 612, 792], false).expect("draws").bgra == before, "nothing drawn");
+    assert!(worker.render(doc, 0, (1.0, 0), [0, 0, 612, 792]).expect("draws").bgra == before, "nothing drawn");
     worker.undo(doc, false).expect("undoes");
     doc = worker.now(doc).expect("the state");
     assert_eq!(words(&mut worker, doc), "", "one step");
@@ -144,9 +144,9 @@ fn text_added_after_a_layer_still_shows() {
     let line = OcrLine { rect: [72.0, 60.0, 200.0, 78.0], text: "Hello world".into() };
     worker.text_layer(doc, &[(0, vec![line])], false).expect("lays");
     doc = worker.now(doc).expect("the state");
-    let before = worker.render(doc, 0, (1.0, 0), [0, 0, 612, 792], false).expect("draws").bgra;
+    let before = worker.render(doc, 0, (1.0, 0), [0, 0, 612, 792]).expect("draws").bgra;
     let writing = Writing { block: None, expected: String::new(), text: "VISIBLE".into(), font: "helvetica".into(), size: 24.0, rgb: 0, bx: [72.0, 600.0, 300.0] };
     assert!(matches!(worker.put_text(doc, 0, &writing, 0.0).expect("writes"), Wrote::Done(_)));
     doc = worker.now(doc).expect("the state");
-    assert!(worker.render(doc, 0, (1.0, 0), [0, 0, 612, 792], false).expect("draws").bgra != before, "the new text is drawn");
+    assert!(worker.render(doc, 0, (1.0, 0), [0, 0, 612, 792]).expect("draws").bgra != before, "the new text is drawn");
 }

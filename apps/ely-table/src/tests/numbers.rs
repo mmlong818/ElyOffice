@@ -64,7 +64,9 @@ fn a_failed_print_says_printing_failed() {
         .expect("the window");
     let gone = dir.path().join("gone.pdf");
     update(&mut cx, &book, |_, cx| ely_office::print_later(gone, cx));
-    cx.run_until_parked();
-    let (toasts, prefix) = cx.update(|app| (root.read(app).toasts(app), ely_office::text(app, "office.print.failed", &[("error", "")])));
-    assert!(toasts.iter().any(|(text, severity)| *severity == Some(Severity::Danger) && text.starts_with(prefix.as_ref())), "{toasts:?}");
+    // The file is read on its own thread.
+    settle(&cx, |app| {
+        let prefix = ely_office::text(app, "office.print.failed", &[("error", "")]);
+        root.read(app).toasts(app).iter().any(|(text, severity)| *severity == Some(Severity::Danger) && text.starts_with(prefix.as_ref()))
+    });
 }

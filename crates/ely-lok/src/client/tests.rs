@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use super::*;
 
 mod analysis;
+mod borders;
 mod charts;
 mod check;
 mod commands;
@@ -15,6 +16,7 @@ pub(crate) mod input;
 mod latency;
 mod layout;
 mod media;
+mod menus;
 mod motion;
 mod output;
 mod paint;
@@ -29,6 +31,7 @@ mod slides;
 #[cfg(all(windows, feature = "supervisor-test"))]
 mod supervise;
 mod tools;
+mod word;
 mod workbook;
 #[cfg(windows)]
 mod windows_real_flow;

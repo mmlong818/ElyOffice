@@ -88,6 +88,8 @@ pub mod tag {
     pub const REVISION: u8 = 34;
     /// One layer's pixels from the last `SLIDE_LAYERS`.
     pub const SLIDE_LAYER: u8 = 35;
+    /// Turns parts; an arrow with something picked goes in.
+    pub const TURN: u8 = 36;
     pub const OK: u8 = 100;
     pub const ERR: u8 = 101;
 }

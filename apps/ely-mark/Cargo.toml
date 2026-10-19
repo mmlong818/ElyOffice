@@ -11,17 +11,19 @@ build = "../../packaging/windows/icon.rs"
 embed-resource.workspace = true
 
 [dependencies]
+dunce.workspace = true
 anyhow.workspace = true
+base64.workspace = true
 ely-files.workspace = true
 ely-gpui-component.workspace = true
 ely-office.workspace = true
+ely-pdf-engine.workspace = true
 ely-platform.workspace = true
 ely-ui.workspace = true
-ely-web-content.workspace = true
 gpui.workspace = true
 log.workspace = true
-base64.workspace = true
 futures.workspace = true
+markdown = "=1.0.0"
 jiff.workspace = true
 notify.workspace = true
 serde.workspace = true
@@ -31,5 +33,7 @@ serde_json.workspace = true
 workspace = true
 
 [dev-dependencies]
+ely-gpui-component = { workspace = true, features = ["test-support"] }
+ely-ui = { workspace = true, features = ["test-support"] }
 gpui = { workspace = true, features = ["test-support"] }
 tempfile.workspace = true

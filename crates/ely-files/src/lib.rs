@@ -19,6 +19,7 @@ pub use task::RecoveryTask;
 
 pub use save::{
     SaveError, Saved, atomic_capable, claim_all, export, import_attachment, same_file, save,
+    write_attachment,
     save_as, save_atomic, save_overwrite, save_with_backup, save_with_probe,
 };
 pub use session::{Fingerprint, Open, SaveState, SaveTicket, Session, Sessions, StaleTicket};

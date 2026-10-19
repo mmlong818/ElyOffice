@@ -5,6 +5,7 @@ mod calc;
 mod data;
 mod doc;
 mod mark;
+mod mark_menus;
 mod motion;
 mod office;
 mod output;
@@ -19,7 +20,6 @@ mod tools;
 mod tree;
 mod tree_ops;
 mod tree_places;
-mod web;
 use gpui::{App, SharedString};
 
 const EN: &[(&str, &str)] = &[
@@ -41,7 +41,6 @@ const EN: &[(&str, &str)] = &[
     ("command.file.export", "Export…"),
     ("command.file.print", "Print…"),
     ("command.blocked.no_document", "No open document"),
-    ("command.blocked.unbuilt", "Not built for this platform yet"),
     ("palette.group.file", "File"),
     ("gallery.ready", "Ready"),
     ("gallery.nav", "Navigation"),
@@ -97,7 +96,6 @@ const ZH_CN: &[(&str, &str)] = &[
     ("command.file.export", "导出…"),
     ("command.file.print", "打印…"),
     ("command.blocked.no_document", "没有打开的文档"),
-    ("command.blocked.unbuilt", "此平台尚未构建"),
     ("palette.group.file", "文件"),
     ("gallery.ready", "就绪"),
     ("gallery.nav", "导航"),
@@ -147,6 +145,8 @@ pub fn install(cx: &mut App) {
 
 /// Installs the catalogs speaking `locale` (en-US or zh-CN).
 pub fn install_as(locale: &'static str, cx: &mut App) {
+    #[cfg(target_os = "windows")]
+    gpui_windows::set_text_language(locale);
     let (en, zh) = catalogs();
     cx.set_global(
         I18n::new(locale)
@@ -179,8 +179,8 @@ fn catalogs() -> (Catalog, Catalog) {
         .chain(tree::EN)
         .chain(tree_ops::EN)
         .chain(tree_places::EN)
-        .chain(web::EN)
         .chain(mark::EN)
+        .chain(mark_menus::EN)
         .chain(settings::EN)
         .copied()
         .collect();
@@ -203,8 +203,8 @@ fn catalogs() -> (Catalog, Catalog) {
         .chain(tree::ZH_CN)
         .chain(tree_ops::ZH_CN)
         .chain(tree_places::ZH_CN)
-        .chain(web::ZH_CN)
         .chain(mark::ZH_CN)
+        .chain(mark_menus::ZH_CN)
         .chain(settings::ZH_CN)
         .copied()
         .collect();

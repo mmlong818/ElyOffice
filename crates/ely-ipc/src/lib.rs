@@ -53,6 +53,11 @@ pub fn check_reply(asked: u64, got: u64) -> io::Result<()> {
 
 /// Reads (tag, id, payload); None at a clean stream end.
 pub fn read_frame(input: &mut impl Read) -> io::Result<Option<(u8, u64, Vec<u8>)>> {
+    read_capped(input, MAX_FRAME)
+}
+
+/// As `read_frame`, refusing payloads over `cap` before allocating.
+pub fn read_capped(input: &mut impl Read, cap: usize) -> io::Result<Option<(u8, u64, Vec<u8>)>> {
     let mut len = [0u8; 4];
     // Only a stream ending between frames ends cleanly.
     let mut got = 0;
@@ -66,10 +71,10 @@ pub fn read_frame(input: &mut impl Read) -> io::Result<Option<(u8, u64, Vec<u8>)
         }
     }
     let len = u32::from_le_bytes(len) as usize;
-    if len > MAX_FRAME {
+    if len > cap {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            "frame over the cap",
+            format!("a {len} byte frame is over the {cap} byte cap"),
         ));
     }
     let mut tag = [0u8; 1];

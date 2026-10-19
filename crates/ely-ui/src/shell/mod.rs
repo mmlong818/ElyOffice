@@ -10,8 +10,8 @@ use ely_gpui_component::{
     theme::{ActiveTheme, TextSize},
 };
 use gpui::{
-    AnyElement, AnyView, App, ElementId, FocusHandle, IntoElement, ParentElement, RenderOnce,
-    SharedString, Styled, Window, div,
+    AnyElement, AnyView, App, ElementId, FocusHandle, InteractiveElement, IntoElement,
+    ParentElement, RenderOnce, SharedString, Styled, Window, div,
 };
 
 mod page;
@@ -32,6 +32,7 @@ pub struct Shell {
     right: Option<AnyView>,
     status: Option<StatusBar>,
     page: Option<ElementId>,
+    main: bool,
     body: Vec<AnyElement>,
 }
 
@@ -45,8 +46,15 @@ impl Shell {
             right: None,
             status: None,
             page: None,
+            main: true,
             body: Vec::new(),
         }
+    }
+
+    /// Beside the main window: no menus, no update banner.
+    pub fn secondary(mut self) -> Self {
+        self.main = false;
+        self
     }
 
     pub fn tabs(mut self, tabs: EditorTabs) -> Self {
@@ -98,6 +106,7 @@ impl RenderOnce for Shell {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let length = motion::duration(motion::BASE, cx);
         let content = div()
+            .debug_selector(|| "shell-body".into())
             .flex_1()
             .min_w_0()
             .h_full()
@@ -123,9 +132,13 @@ impl RenderOnce for Shell {
         let header = div()
             .flex()
             .flex_col()
-            .child(TitleBar::new("titlebar").title(self.title))
-            .children(crate::updates::updater(cx))
-            .children(menu_bar(cx))
+            .child(
+                div()
+                    .debug_selector(|| "shell-title".into())
+                    .child(TitleBar::new("titlebar").title(self.title)),
+            )
+            .children(self.main.then(|| crate::updates::updater(cx)).flatten())
+            .children(self.main.then(|| menu_bar(cx)).flatten())
             .children(self.tabs);
         // Panels give way so the content keeps its room.
         let (left, right) = (panel::fitted(Side::Left, window, cx), panel::fitted(Side::Right, window, cx));

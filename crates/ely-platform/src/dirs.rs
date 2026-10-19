@@ -99,8 +99,6 @@ mod tests {
                 assert_eq!(path, root.join(app.slug()));
                 println!("{}={}", app.slug(), path.display());
             }
-            let cef = data_dir(AppId::Mark).unwrap().join("web");
-            println!("cef-root-cache-path={}", cef.display());
             return;
         }
 
@@ -133,10 +131,6 @@ mod tests {
                 app.slug()
             );
         }
-        assert!(stdout.contains(&format!(
-            "cef-root-cache-path={}",
-            requested_root.join(AppId::Mark.slug()).join("web").display()
-        )));
     }
 
     #[test]

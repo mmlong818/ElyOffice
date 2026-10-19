@@ -48,7 +48,7 @@ impl Docs {
                 .size_full()
                 .child(tab.view.clone())
                 .children(self.find_box(cx))
-                .children(self.spelling_menu(cx))
+                .children(self.context_menu(cx))
                 .into_any_element();
             let risk = self.stopped_banner(cx).or_else(|| self.risk_banner(cx));
             let fonts = tab.view.read(cx).missing_fonts().join(", ");

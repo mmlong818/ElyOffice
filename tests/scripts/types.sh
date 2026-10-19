@@ -28,7 +28,19 @@ for slug in $(cut -f1 "$types" | sort -u); do
   mimes=$(cut -f3 <<<"$rows" | sort -u | wc -l | tr -d ' ')
   [ "$utis" -eq "$mimes" ] || fail "$slug: macOS declares $utis types, the table $mimes"
 done
-# Never the default: macOS ranks Alternate; Windows only lists.
-! grep -q 'Classes\\\.[a-z]*" ""' <(for s in $(cut -f1 "$types" | sort -u); do "$root/packaging/windows/types.sh" "$s"; done) ||
-  fail "Windows sets a default handler"
-echo "ok: types ($count file types on three systems)"
+# Never the default: Windows fills only a handlerless type.
+for s in $(cut -f1 "$types" | sort -u); do
+  "$root/packaging/windows/types.sh" "$s" | awk -v slug="$s" '
+    /WriteRegStr HKCU "Software\\Classes\\\.[a-z]*" ""/ && (prev !~ /\$\{OrIf\} \$\{Errors\}$/ || prev2 !~ /\$\{If\} \$0 == ""$/) { print slug ": " $0; bad = 1 }
+    { prev2 = prev; prev = $0 } END { exit bad }' || fail "Windows sets a default handler"
+done
+# Explorer's New makes docx, xlsx, pptx and md.
+fresh=0
+for ext in docx xlsx pptx md; do
+  slug=$(awk -F'\t' -v ext="$ext" '$2 == ext { print $1 }' "$types")
+  windows=$("$root/packaging/windows/types.sh" "$slug")
+  grep -qF "\\.$ext\\ShellNew\" \"FileName\" \"\$INSTDIR\\new.$ext\"" <<<"$windows" ||
+    fail "$slug: New misses .$ext"
+  fresh=$((fresh + 1))
+done
+echo "ok: types ($count file types on three systems, $fresh in New)"

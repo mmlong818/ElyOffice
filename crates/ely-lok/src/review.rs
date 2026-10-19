@@ -38,13 +38,6 @@ pub struct Counts {
     pub selected_characters: u64,
 }
 
-/// A misspelled word's menu: suggestions as the kernel's rules.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Spelling {
-    /// Label and `ApplyRule` value for each suggestion.
-    pub suggestions: Vec<(String, String)>,
-}
-
 /// The counts from `.uno:WordCount`.
 pub fn counts(json: &str) -> io::Result<Counts> {
     let list = parse(json)?;
@@ -55,32 +48,6 @@ pub fn counts(json: &str) -> io::Result<Counts> {
         selected_words: number(selection, "words")?,
         selected_characters: number(selection, "characters")?,
     })
-}
-
-/// A context menu's spelling part, if it has one.
-pub fn spelling(json: &str) -> io::Result<Option<Spelling>> {
-    let list = parse(json)?;
-    let items = entries(&list, "menu")?;
-    let commands: Vec<&str> = items
-        .iter()
-        .filter_map(|item| item["command"].as_str())
-        .collect();
-    if !commands
-        .iter()
-        .any(|command| command.starts_with(".uno:SpellCheckIgnoreAll"))
-    {
-        return Ok(None);
-    }
-    let suggestions = items
-        .iter()
-        .filter_map(|item| {
-            let rule = item["command"]
-                .as_str()?
-                .strip_prefix(".uno:SpellCheckApplySuggestion?ApplyRule:string=")?;
-            Some((item["text"].as_str()?.to_string(), rule.to_string()))
-        })
-        .collect();
-    Ok(Some(Spelling { suggestions }))
 }
 
 /// A heading from `.uno:Outline`.
@@ -190,11 +157,11 @@ pub fn formula(json: &str) -> io::Result<Option<String>> {
     }
 }
 
-fn parse(json: &str) -> io::Result<serde_json::Value> {
+pub(crate) fn parse(json: &str) -> io::Result<serde_json::Value> {
     serde_json::from_str(json).map_err(|error| invalid(format!("a bad kernel list: {error}")))
 }
 
-fn entries<'a>(list: &'a serde_json::Value, key: &str) -> io::Result<&'a Vec<serde_json::Value>> {
+pub(crate) fn entries<'a>(list: &'a serde_json::Value, key: &str) -> io::Result<&'a Vec<serde_json::Value>> {
     list[key]
         .as_array()
         .ok_or_else(|| invalid(format!("the list has no {key}")))
@@ -257,7 +224,7 @@ fn plain(html: &str) -> String {
         .replace("&amp;", "&")
 }
 
-fn invalid(message: String) -> io::Error {
+pub(crate) fn invalid(message: String) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message)
 }
 
@@ -288,12 +255,5 @@ mod tests {
         let counts = counts(r#"{"document":{"words":11,"characters":41,"charactersNoSpaces":31},"selection":{"words":2,"characters":7,"charactersNoSpaces":6}}"#)
             .expect("counts parse");
         assert_eq!((counts.words, counts.selected_characters), (11, 7));
-        let menu = r#"{"menu":[{"text":"The","type":"command","command":".uno:SpellCheckApplySuggestion?ApplyRule:string=Spelling_The"},{"type":"separator"},{"text":"Ignore All","type":"command","command":".uno:SpellCheckIgnoreAll?Type:string=Spelling"}]}"#;
-        let found = spelling(menu)
-            .expect("the menu parses")
-            .expect("a spelling menu");
-        assert_eq!(found.suggestions, [("The".into(), "Spelling_The".into())]);
-        let other = r#"{"menu":[{"text":"Cut","type":"command","command":".uno:Cut"}]}"#;
-        assert_eq!(spelling(other).expect("the menu parses"), None);
     }
 }

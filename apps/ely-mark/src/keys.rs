@@ -1,39 +1,34 @@
-//! Modes, menus and keys (MARK-01, MARK-02).
+//! Modes, menus and keys, as Typora's (MARK-01, MARK-02, MARK-15).
 
 use ely_ui::{commands, i18n::text};
-use gpui::{App, KeyBinding, Menu, MenuItem, actions};
+use gpui::{Action, App, Context, InteractiveElement as _, KeyBinding, Menu, MenuItem, actions};
 
-use crate::page::Mode;
+use crate::{desk::Desk, view::Mode};
 
 actions!(
     mark,
-    [
-        VisualMode,
-        SourceMode,
-        PreviewMode,
-        InsertTable,
-        RowAbove,
-        RowBelow,
-        ColumnLeft,
-        ColumnRight,
-        DeleteRow,
-        DeleteColumn,
-        CheckDisk
-    ]
+    [VisualMode, SourceMode, PreviewMode, ToggleSource, CheckDisk]
 );
 
 pub fn bind(cx: &mut App) {
     let at = Some(commands::CONTEXT);
     cx.bind_keys([
-        KeyBinding::new("secondary-1", VisualMode, at),
-        KeyBinding::new("secondary-2", SourceMode, at),
-        KeyBinding::new("secondary-3", PreviewMode, at),
-        KeyBinding::new("secondary-f", crate::finding::Find, at),
-        KeyBinding::new("secondary-shift-f", crate::look::FocusMode, at),
-        KeyBinding::new("secondary-=", crate::look::Larger, at),
-        KeyBinding::new("secondary--", crate::look::Smaller, at),
-        KeyBinding::new("secondary-0", crate::look::ActualSize, at),
+        KeyBinding::new("secondary-/", ToggleSource, at),
+        // Over the code editor's `//` toggle.
+        KeyBinding::new("secondary-/", ToggleSource, Some("ElyEditor")),
+        KeyBinding::new("f8", crate::look::FocusMode, at),
+        KeyBinding::new("f9", crate::look::Typewriter, at),
+        KeyBinding::new("secondary-+", crate::look::Larger, at),
+        KeyBinding::new("secondary-_", crate::look::Smaller, at),
+        KeyBinding::new("secondary-)", crate::look::ActualSize, at),
+        KeyBinding::new("secondary-f", ely_office::FindReplace, at),
     ]);
+    // Windows' Chinese input keeps Ctrl+Shift+0 for itself.
+    #[cfg(target_os = "windows")]
+    cx.bind_keys([KeyBinding::new("ctrl-(", crate::look::ActualSize, at)]);
+    crate::blocks::bind(cx);
+    crate::tools::bind(cx);
+    crate::clip::bind(cx);
 }
 
 /// The label of `mode`.
@@ -41,30 +36,39 @@ pub fn label(mode: Mode, cx: &App) -> gpui::SharedString {
     text(cx, &format!("mark.mode.{}", mode.name()), &[])
 }
 
-pub fn menus(look: &crate::look::Look, cx: &App) -> Vec<Menu> {
-    use crate::look::{self, Font, Width};
-    let checked = |key: &str, action: Box<dyn gpui::Action>, checked: bool| MenuItem::Action {
+/// A menu row named by `key`, ticked when `checked`.
+pub(crate) fn checked(key: &str, action: Box<dyn Action>, checked: bool, cx: &App) -> MenuItem {
+    MenuItem::Action {
         name: text(cx, key, &[]),
         action,
         os_action: None,
         checked,
         disabled: false,
-    };
-    let item = |key: &str, action: Box<dyn gpui::Action>| checked(key, action, false);
-    let table = Menu::new(text(cx, "mark.menu.table", &[])).items([
-        item("mark.table.insert", Box::new(InsertTable)),
-        MenuItem::separator(),
-        item("mark.table.row_above", Box::new(RowAbove)),
-        item("mark.table.row_below", Box::new(RowBelow)),
-        item("mark.table.column_left", Box::new(ColumnLeft)),
-        item("mark.table.column_right", Box::new(ColumnRight)),
-        MenuItem::separator(),
-        item("mark.table.delete_row", Box::new(DeleteRow)),
-        item("mark.table.delete_column", Box::new(DeleteColumn)),
-    ]);
+    }
+}
+
+pub(crate) fn item(key: &str, action: Box<dyn Action>, cx: &App) -> MenuItem {
+    checked(key, action, false, cx)
+}
+
+pub fn menus(look: &crate::look::Look, cx: &App) -> Vec<Menu> {
+    use crate::look::{self, Font, Width};
+    let checked = |key: &str, action: Box<dyn Action>, on: bool| checked(key, action, on, cx);
+    let item = |key: &str, action: Box<dyn Action>| item(key, action, cx);
     vec![
-        table,
+        Menu::new(text(cx, "menu.edit", &[])).items([
+            item("mark.copy.plain", Box::new(crate::export::CopyPlain)),
+            item("mark.copy.markdown", Box::new(crate::clip::CopyMarkdown)),
+            item("mark.copy.html", Box::new(crate::export::CopyHtml)),
+            item("mark.copy.rich", Box::new(crate::export::CopyRich)),
+            item("mark.paste.plain", Box::new(crate::clip::PastePlain)),
+            MenuItem::separator(),
+            item("office.find.open", Box::new(ely_office::FindReplace)),
+        ]),
+        crate::blocks::paragraph_menu(cx),
+        crate::blocks::format_menu(cx),
         Menu::new(text(cx, "menu.view", &[])).items([
+            item("mark.view.source", Box::new(ToggleSource)),
             MenuItem::action(label(Mode::Visual, cx), VisualMode),
             MenuItem::action(label(Mode::Source, cx), SourceMode),
             MenuItem::action(label(Mode::Preview, cx), PreviewMode),
@@ -108,11 +112,45 @@ pub fn menus(look: &crate::look::Look, cx: &App) -> Vec<Menu> {
                 look.font == Font::Mono,
             ),
             MenuItem::separator(),
+            item("mark.look.actual", Box::new(look::ActualSize)),
             item("mark.look.larger", Box::new(look::Larger)),
             item("mark.look.smaller", Box::new(look::Smaller)),
-            item("mark.look.actual", Box::new(look::ActualSize)),
             MenuItem::separator(),
             item("mark.outside.check", Box::new(CheckDisk)),
         ]),
     ]
+}
+
+impl Desk {
+    /// Source and visual, as Typora's Source Code Mode.
+    fn toggle_source(&mut self, window: &mut gpui::Window, cx: &mut Context<Self>) {
+        let Some(view) = self.active_view() else {
+            return self.no_document(cx);
+        };
+        let mode = match view.read(cx).mode {
+            Mode::Source => Mode::Visual,
+            Mode::Visual | Mode::Preview => Mode::Source,
+        };
+        self.switch(mode, window, cx);
+    }
+
+    pub fn mode_actions(root: gpui::Div, cx: &mut Context<Self>) -> gpui::Div {
+        root.on_action(cx.listener(|desk, _: &CheckDisk, _, cx| desk.look_all(cx)))
+            .on_action(
+                cx.listener(|desk, _: &ToggleSource, window, cx| desk.toggle_source(window, cx)),
+            )
+            .on_action(
+                cx.listener(|desk, _: &VisualMode, window, cx| {
+                    desk.switch(Mode::Visual, window, cx)
+                }),
+            )
+            .on_action(
+                cx.listener(|desk, _: &SourceMode, window, cx| {
+                    desk.switch(Mode::Source, window, cx)
+                }),
+            )
+            .on_action(cx.listener(|desk, _: &PreviewMode, window, cx| {
+                desk.switch(Mode::Preview, window, cx)
+            }))
+    }
 }

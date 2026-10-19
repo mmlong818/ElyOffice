@@ -80,6 +80,11 @@ fn reader(mut input: impl io::Read) {
     }
 }
 
+/// Balances the reader's pending count before the shutdown path exits directly.
+pub(super) fn finish_shutdown_request() {
+    PENDING.fetch_sub(1, Ordering::SeqCst);
+}
+
 /// Idle jobs yield to a waiting request, including while its owner task runs.
 extern "C" fn waiting(_: *mut c_void, _: i32) -> bool {
     PENDING.load(Ordering::SeqCst) > 0

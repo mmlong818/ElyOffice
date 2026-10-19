@@ -27,7 +27,7 @@ pub fn stage(show: &Show, (w, h): (Pixels, Pixels), cx: &App) -> AnyElement {
     let Some(stack) = show.stack(part) else {
         return black((w, h));
     };
-    let paper = ely_lok::paper(cx);
+    let paper = ely_lok::paper();
     let t = show.entered.elapsed().as_secs_f64();
     let slide = &show.slides[part];
     let shown = match &show.leaving {
@@ -76,9 +76,9 @@ pub fn stage(show: &Show, (w, h): (Pixels, Pixels), cx: &App) -> AnyElement {
 }
 
 /// A slide as it first shows, still.
-pub fn still(show: &Show, part: usize, size: (Pixels, Pixels), cx: &App) -> AnyElement {
+pub fn still(show: &Show, part: usize, size: (Pixels, Pixels)) -> AnyElement {
     match show.stack(part) {
-        Some(stack) => compose::slide(stack, |visible| visible, size, ely_lok::paper(cx))
+        Some(stack) => compose::slide(stack, |visible| visible, size, ely_lok::paper())
             .into_any_element(),
         None => black(size),
     }

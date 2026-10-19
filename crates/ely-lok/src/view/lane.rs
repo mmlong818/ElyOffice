@@ -9,7 +9,8 @@ use std::{
 use futures::{StreamExt, channel::mpsc, select_biased};
 use gpui::Context;
 
-use super::{Geom, LokError, LokView, Reported, TILE_TWIPS, input::Input};
+use super::input::{Back, Input};
+use super::{Geom, LokError, LokView, Reported, TILE_TWIPS};
 use crate::{Doc, Tile, Worker};
 
 /// An input slower than this is logged as a warning.
@@ -24,7 +25,7 @@ pub(super) struct Job {
 /// What came back from the lane.
 enum Landed {
     /// Sequence, whether it edits, whether it switched part, outcome.
-    Input(u64, bool, bool, (io::Result<Option<String>>, Option<u64>)),
+    Input(u64, bool, bool, (io::Result<Option<Back>>, Option<u64>)),
     Tile(Job, io::Result<Tile>),
 }
 
@@ -111,7 +112,13 @@ impl LokView {
                     }
                     self.seen_revision(now.unwrap_or(0));
                     match outcome {
-                        Ok(Some(copied)) => self.copied = Some(copied),
+                        Ok(Some(Back::Copied(copied))) => self.copied = Some(copied),
+                        Ok(Some(Back::Shown(part))) if part != self.part => {
+                            // The worker turned in order.
+                            self.part = part;
+                            self.invalidate(cx);
+                        }
+                        Ok(Some(Back::Shown(_))) => {}
                         Ok(None) => {}
                         Err(error) => {
                             log::error!("lok: input failed ({:?})", error.kind());

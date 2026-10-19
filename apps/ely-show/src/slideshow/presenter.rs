@@ -159,7 +159,7 @@ impl Render for Presenter {
         let big = stage::fit(show.slide, (room.width * 0.6, room.height * 0.8));
         let small = stage::fit(show.slide, (room.width * 0.3, room.height * 0.35));
         let next = match show.upcoming() {
-            Some(part) => stage::still(show, part, small, cx),
+            Some(part) => stage::still(show, part, small),
             None => div().w(small.0).h(small.1).into_any_element(),
         };
         let notes = show.part().map(|part| show.slides[part].notes.clone());

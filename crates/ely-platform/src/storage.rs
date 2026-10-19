@@ -11,18 +11,15 @@ use crate::AppId;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Log,
-    /// The web content cache (ElyMark).
-    Cache,
     Recovery,
 }
 
 impl Kind {
-    pub const ALL: [Kind; 3] = [Kind::Log, Kind::Cache, Kind::Recovery];
+    pub const ALL: [Kind; 2] = [Kind::Log, Kind::Recovery];
 
     fn place(self) -> &'static str {
         match self {
             Kind::Log => "ely.log",
-            Kind::Cache => "web",
             Kind::Recovery => "recovery",
         }
     }
@@ -40,10 +37,7 @@ impl Kind {
 /// Bytes each kind holds now; a missing one holds none.
 pub fn usage(app: AppId) -> io::Result<Vec<(Kind, u64)>> {
     let dir = crate::data_dir(app).map_err(io::Error::other)?;
-    Kind::ALL
-        .into_iter()
-        .map(|kind| Ok((kind, size(&dir.join(kind.place()))?)))
-        .collect()
+    Kind::ALL.into_iter().map(|kind| Ok((kind, size(&dir.join(kind.place()))?))).collect()
 }
 
 fn size(path: &Path) -> io::Result<u64> {
@@ -55,9 +49,7 @@ fn size(path: &Path) -> io::Result<u64> {
     if !meta.is_dir() {
         return Ok(meta.len());
     }
-    std::fs::read_dir(path)?
-        .map(|entry| size(&entry?.path()))
-        .sum()
+    std::fs::read_dir(path)?.map(|entry| size(&entry?.path())).sum()
 }
 
 /// Clears `kind` now, or marks it for the next start.
@@ -69,10 +61,7 @@ pub fn clear(app: AppId, kind: Kind) -> io::Result<()> {
         return Ok(());
     }
     // The logger appends; emptying keeps its handle valid.
-    std::fs::OpenOptions::new()
-        .write(true)
-        .open(dir.join(kind.place()))?
-        .set_len(0)?;
+    std::fs::OpenOptions::new().write(true).open(dir.join(kind.place()))?.set_len(0)?;
     log::info!("storage: {kind:?} cleared");
     Ok(())
 }
@@ -114,10 +103,7 @@ pub struct Limits {
 
 impl Default for Limits {
     fn default() -> Self {
-        Self {
-            keep: 20,
-            megabytes: 64,
-        }
+        Self { keep: 20, megabytes: 64 }
     }
 }
 
@@ -133,21 +119,11 @@ fn limits_of(saved: Option<&serde_json::Value>) -> io::Result<Limits> {
         return Ok(Limits::default());
     };
     let number = |key: &str, least: u64, most: u64| {
-        saved
-            .get(key)
-            .and_then(serde_json::Value::as_u64)
-            .filter(|n| (least..=most).contains(n))
-            .ok_or_else(|| {
-                io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("settings: recovery {key} cannot be {saved}"),
-                )
-            })
+        saved.get(key).and_then(serde_json::Value::as_u64).filter(|n| (least..=most).contains(n)).ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidData, format!("settings: recovery {key} cannot be {saved}"))
+        })
     };
-    Ok(Limits {
-        keep: number("keep", 1, 100)? as usize,
-        megabytes: number("megabytes", 1, 4096)?,
-    })
+    Ok(Limits { keep: number("keep", 1, 100)? as usize, megabytes: number("megabytes", 1, 4096)? })
 }
 
 /// Keeps new limits for `app` if `still` holds once locked.
@@ -164,18 +140,8 @@ mod tests {
     fn limits_read_strictly() {
         assert_eq!(limits_of(None).unwrap(), Limits::default());
         let set = serde_json::json!({"keep": 10, "megabytes": 32});
-        assert_eq!(
-            limits_of(Some(&set)).unwrap(),
-            Limits {
-                keep: 10,
-                megabytes: 32
-            }
-        );
-        for bad in [
-            serde_json::json!({"keep": 0, "megabytes": 32}),
-            serde_json::json!({"keep": "ten"}),
-            serde_json::json!(5),
-        ] {
+        assert_eq!(limits_of(Some(&set)).unwrap(), Limits { keep: 10, megabytes: 32 });
+        for bad in [serde_json::json!({"keep": 0, "megabytes": 32}), serde_json::json!({"keep": "ten"}), serde_json::json!(5)] {
             assert!(limits_of(Some(&bad)).is_err(), "{bad}");
         }
     }
@@ -183,21 +149,14 @@ mod tests {
     #[test]
     fn marked_kinds_go_at_start_and_others_stay() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join("web/Cache")).unwrap();
-        std::fs::write(dir.path().join("web/Cache/blob"), vec![0u8; 4096]).unwrap();
         std::fs::create_dir_all(dir.path().join("recovery/a")).unwrap();
-        std::fs::write(dir.path().join("recovery/a/point"), b"text").unwrap();
-        assert_eq!(size(&dir.path().join("web")).unwrap(), 4096);
-        std::fs::write(dir.path().join(Kind::Cache.mark()), b"").unwrap();
+        std::fs::write(dir.path().join("recovery/a/point"), vec![0u8; 4096]).unwrap();
+        std::fs::write(dir.path().join("ely.log"), b"line").unwrap();
+        assert_eq!(size(&dir.path().join("recovery")).unwrap(), 4096);
+        std::fs::write(dir.path().join(Kind::Recovery.mark()), b"").unwrap();
         clear_marked_in(dir.path()).unwrap();
-        assert!(!dir.path().join("web").exists(), "the cache went");
-        assert!(
-            dir.path().join("recovery/a/point").exists(),
-            "unmarked kinds stay"
-        );
-        assert!(
-            !dir.path().join(Kind::Cache.mark()).exists(),
-            "the mark is spent"
-        );
+        assert!(!dir.path().join("recovery").exists(), "the copies went");
+        assert!(dir.path().join("ely.log").exists(), "the log stays");
+        assert!(!dir.path().join(Kind::Recovery.mark()).exists(), "the mark is spent");
     }
 }

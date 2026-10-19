@@ -24,37 +24,63 @@ fn area() -> Bounds<Pixels> {
     }
 }
 
+/// A user profile whose dark scheme paints the page black.
+const DARK_PROFILE: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<oor:items xmlns:oor="http://openoffice.org/2001/registry" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+<item oor:path="/org.openoffice.Office.UI/ColorScheme/ColorSchemes"><node oor:name="TEST_DARK" oor:op="replace"><node oor:name="DocColor"><prop oor:name="Color" oor:op="fuse"><value>0</value></prop></node></node></item>
+</oor:items>
+"#;
+
+/// Shows a view in a window.
+struct Host(Entity<LokView>);
+
+impl gpui::Render for Host {
+    fn render(&mut self, _: &mut gpui::Window, _: &mut gpui::Context<Self>) -> impl gpui::IntoElement {
+        self.0.clone()
+    }
+}
+
 #[test]
-fn the_view_paints_the_app_theme_and_back() {
+fn a_dark_app_paints_the_page_white() {
     let Some(install) = crate::client::tests::install() else {
         eprintln!("SKIP: no pinned LOK build");
         return;
     };
-    let cx = TestAppContext::single();
-    let (view, worker) = cx.update(|app| live_view(app, &install));
-    let doc = cx.update(|app| view.read(app).doc.clone());
-    let mut shades = Vec::new();
-    for dark in [true, false] {
-        cx.update(|app| view.update(app, |view, _| view.follow_theme(dark)));
-        assert!(
-            settle(&cx, |app| view.read(app).settled()),
-            "the theme goes out"
-        );
+    let mut cx = TestAppContext::single();
+    cx.update(|app| {
+        ely_gpui_component::init_for_tests(app);
+        ely_gpui_component::theme::Theme::set_mode_now(ely_gpui_component::theme::Mode::Dark, app);
+    });
+    // A dark profile, as an old Ely left.
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let profile = dir.path().join("profile");
+    std::fs::create_dir_all(profile.join("user")).expect("a profile");
+    std::fs::write(profile.join("user/registrymodifications.xcu"), DARK_PROFILE).expect("the scheme writes");
+    let source = dir.path().join("note.fodt");
+    std::fs::write(&source, crate::client::tests::FODT).expect("the fixture writes");
+    let mut started = crate::Worker::spawn(&install, &profile).expect("the worker");
+    let doc = started.load(&crate::file_url(&source)).expect("the document loads");
+    let laid = super::super::layout(&mut started, &doc).expect("the layout reads");
+    let worker = Arc::new(Mutex::new(started));
+    let shade = || {
         let mut worker = worker.lock().expect("the worker");
-        let tile = doc
-            .paint_tile(&mut worker, (1440, 1440, 3840, 3840), (64, 64))
-            .expect("a tile");
-        let sum: u64 = tile
-            .pixels
-            .chunks_exact(4)
-            .map(|px| u64::from(px[0]) + u64::from(px[1]) + u64::from(px[2]))
-            .sum();
-        shades.push(sum / (64 * 64 * 3));
-    }
+        let tile = doc.paint_tile(&mut worker, (1440, 1440, 3840, 3840), (64, 64)).expect("a tile");
+        let sum: u64 = tile.pixels.chunks_exact(4).map(|px| u64::from(px[0]) + u64::from(px[1]) + u64::from(px[2])).sum();
+        sum / (64 * 64 * 3)
+    };
+    worker.lock().expect("the worker").run(&doc, "view.theme", &["TEST_DARK"]).expect("the dark scheme");
+    let dark = shade();
+    assert!(dark < 100, "the kernel starts dark: {dark}");
+    let view = cx.update(|app| LokView::open(Arc::clone(&worker), doc.clone(), laid, app));
+    let shown = view.clone();
+    cx.add_window(move |_, _| Host(shown));
     assert!(
-        shades[0] < 100 && shades[1] > 200,
-        "dark then light: {shades:?}"
+        settle(&cx, |app| view.read(app).lit() && view.read(app).settled()),
+        "the scheme goes out"
     );
+    assert_eq!(paper(), gpui::white(), "the page mask is the scheme's white");
+    let light = shade();
+    assert!(light > 240, "the view paints the page white: {light}");
 }
 
 #[test]

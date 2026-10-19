@@ -30,10 +30,6 @@ pub struct Comparing {
 impl Desk {
     /// Mine, the base and the disk's, side by side.
     pub fn compare(&mut self, id: u64, cx: &mut Context<Self>) {
-        // The page's newest text first.
-        if !self.settled(id, cx) {
-            return self.when_settled(id, move |desk, _, cx| desk.compare(id, cx));
-        }
         let Some(tab) = self.tab(id) else {
             return;
         };
@@ -193,4 +189,37 @@ enum Choice {
     Disk,
     Mine,
     Merged,
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui::TestAppContext;
+
+    use super::Choice;
+    use crate::outside::tests::{look, opened, shown};
+
+    #[gpui::test]
+    fn a_merge_lands_as_one_undo_step(cx: &mut TestAppContext) {
+        let (desk, cx, id, path, _dirs) = opened("a\n\nb\n", cx);
+        let view = desk.read_with(cx, |desk, _| desk.active_view().expect("a tab"));
+        view.update(cx, |view, cx| view.adopt("a\n\nb\n\nmine\n".into(), cx));
+        cx.run_until_parked();
+        std::fs::write(&path, "theirs\n\na\n\nb\n").expect("an outside write");
+        look(&desk, id, cx);
+        desk.update(cx, |desk, cx| desk.compare(id, cx));
+        desk.update_in(cx, |desk, window, cx| {
+            desk.settle(Choice::Merged, window, cx)
+        });
+        cx.run_until_parked();
+        assert_eq!(shown(&desk, cx), "theirs\n\na\n\nb\n\nmine\n");
+        let focus = view.read_with(cx, |view, _| view.focus.clone());
+        cx.update(|window, cx| window.focus(&focus, cx));
+        cx.run_until_parked();
+        cx.simulate_keystrokes("secondary-z");
+        assert_eq!(
+            shown(&desk, cx),
+            "a\n\nb\n\nmine\n",
+            "one undo takes the merge back"
+        );
+    }
 }

@@ -67,9 +67,9 @@ fn a_picture_under_a_region_loses_those_pixels() {
     let out = dir.path().join("out.pdf");
     worker.redact(doc, &[Region { page: 0, rect: [72.0, 242.0, 122.0, 292.0] }], &out).expect("removes");
     let (mut other, written) = reopen(&out);
-    let left = other.render(written, 0, (1.0, 0), [124, 244, 46, 46], false).expect("draws").bgra;
+    let left = other.render(written, 0, (1.0, 0), [124, 244, 46, 46]).expect("draws").bgra;
     assert!(left.chunks_exact(4).any(|p| p[0] > 100 || p[1] > 100 || p[2] > 100), "the right half keeps its colour");
-    let gone = other.render(written, 0, (1.0, 0), [74, 244, 46, 46], false).expect("draws").bgra;
+    let gone = other.render(written, 0, (1.0, 0), [74, 244, 46, 46]).expect("draws").bgra;
     assert!(gone.chunks_exact(4).all(|p| p[0] < 40 && p[1] < 40 && p[2] < 40), "the left half is black");
 }
 
@@ -166,7 +166,7 @@ fn a_shape_touching_a_region_goes_whole() {
     let report = worker.redact(doc, &[Region { page: 0, rect: [90.0, 45.0, 180.0, 100.0] }], &out).expect("removes");
     assert_eq!(report.objects, 0);
     let (mut other, read) = reopen(&out);
-    let right = other.render(read, 0, (1.0, 0), [200, 55, 90, 30], false).expect("draws").bgra;
+    let right = other.render(read, 0, (1.0, 0), [200, 55, 90, 30]).expect("draws").bgra;
     assert!(right.chunks_exact(4).all(|p| p[2] < 200 || p[1] > 200), "no red left past the box");
 }
 

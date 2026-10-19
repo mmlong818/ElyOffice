@@ -1,0 +1,149 @@
+LOK: Impress tables report every edge's bounds; the left edge drags
+
+A LOK client draws its own table borders from
+LOK_CALLBACK_TABLE_SELECTED and clamps a drag to the bounds it reads.
+Impress sent bounds only for inner edges, and its row minimum was the
+layouter's fixed 600 (a todo), not the row's own minimum height; a
+client's guide and the kernel's result then disagreed. The JSON now
+carries leftMin/leftMax and rightMin/rightMax for both axes (columns
+only left to right) and inner rows use the row's minimum height.
+The leftmost column edge did nothing (DragEdge's own todo) while
+adding an undo step. Over LOK's TableChangeCurrentBorderPosition it now
+narrows or widens the first column and moves the table with its edge,
+as the top edge also moves it, in the same undo step. Desktop drag
+handles are unchanged.
+
+diff --git a/svx/source/table/svdotable.cxx b/svx/source/table/svdotable.cxx
+--- a/svx/source/table/svdotable.cxx
++++ b/svx/source/table/svdotable.cxx
+@@ -1579,8 +1579,30 @@
+ 
+ void SdrTableObj::changeEdge(bool bHorizontal, int nEdge, sal_Int32 nOffset)
+ {
+-    if (mpImpl.is())
++    if (!mpImpl.is() || !mpImpl->mxTable.is())
++        return;
++    const bool bLeft = !bHorizontal && nEdge == 0 && GetWritingMode() != WritingMode_RL_TB;
++    if (!bLeft)
+         mpImpl->DragEdge(bHorizontal, nEdge, nOffset);
++    else
++    {
++        // LOK: the left edge narrows the first column.
++        try
++        {
++            const sal_Int32 nWidth = mpImpl->mpLayouter->getColumnWidth(0) - nOffset;
++            Reference<XIndexAccess> xCols(mpImpl->mxTable->getColumns(), UNO_QUERY_THROW);
++            Reference<XPropertySet> xCol(xCols->getByIndex(0), UNO_QUERY_THROW);
++            xCol->setPropertyValue(u"Size"_ustr, Any(nWidth));
++        }
++        catch (const Exception&)
++        {
++            TOOLS_WARN_EXCEPTION("svx.table", "");
++            return;
++        }
++    }
++    // A first edge moves the table with it.
++    if (nEdge == 0 && (bHorizontal || bLeft))
++        NbcMove(bHorizontal ? Size(0, nOffset) : Size(nOffset, 0));
+ }
+ 
+ void SdrTableObj::setActiveCell( const CellPos& rPos )
+@@ -2450,11 +2472,24 @@
+     (void)xmlTextWriterEndElement(pWriter);
+ }
+ 
++namespace
++{
++/// An outer edge's bounds, as LOK clients clamp a drag.
++void putEnd(boost::property_tree::ptree& rAxis, const std::string& rSide, sal_Int32 nMin, sal_Int32 nMax)
++{
++    rAxis.put(rSide + "Min", o3tl::toTwips(nMin, o3tl::Length::mm100));
++    rAxis.put(rSide + "Max", o3tl::toTwips(nMax, o3tl::Length::mm100));
++}
++}
++
+ bool SdrTableObj::createTableEdgesJson(boost::property_tree::ptree & rJsonRoot)
+ {
+     if (!mpImpl.is() || !mpImpl->mxTable.is())
+         return false;
+ 
++    TableLayouter& rLayouter = *mpImpl->mpLayouter;
++    const bool bRTL = GetWritingMode() == WritingMode_RL_TB;
++
+     tools::Rectangle aRect = GetCurrentBoundRect();
+     boost::property_tree::ptree aTableColumns;
+     {
+@@ -2467,10 +2502,17 @@
+             if (rEdge.nIndex == 0)
+             {
+                 aTableColumns.put("left", o3tl::toTwips(rEdge.nPosition, o3tl::Length::mm100));
++                if (!bRTL)
++                    putEnd(aTableColumns, "left", -0x0fffffff,
++                        rEdge.nPosition + rLayouter.getColumnWidth(0) - rLayouter.getMinimumColumnWidth(0));
+             }
+             else if (rEdge.nIndex == sal_Int32(aEdges.size() - 1))
+             {
+                 aTableColumns.put("right", o3tl::toTwips(rEdge.nPosition, o3tl::Length::mm100));
++                const sal_Int32 nLast = rEdge.nIndex - 1;
++                if (!bRTL)
++                    putEnd(aTableColumns, "right",
++                        rEdge.nPosition - rLayouter.getColumnWidth(nLast) + rLayouter.getMinimumColumnWidth(nLast), 0x0fffffff);
+             }
+             else
+             {
+@@ -2492,21 +2534,28 @@
+ 
+         boost::property_tree::ptree aEntries;
+         auto const aEdges = mpImpl->mpLayouter->getHorizontalEdges();
++        // A row's own minimum, not the layouter's fixed gap.
++        auto rowMin = [&rLayouter](const EdgeInfo& rEdge, sal_Int32 nRow) {
++            return rEdge.nPosition - rLayouter.getRowHeight(nRow) + rLayouter.getMinimumRowHeight(nRow);
++        };
+         for (auto & rEdge : aEdges)
+         {
+             if (rEdge.nIndex == 0)
+             {
+                 aTableRows.put("left", o3tl::toTwips(rEdge.nPosition, o3tl::Length::mm100));
++                putEnd(aTableRows, "left", -0x0fffffff,
++                    rEdge.nPosition + rLayouter.getRowHeight(0) - rLayouter.getMinimumRowHeight(0));
+             }
+             else if (rEdge.nIndex == sal_Int32(aEdges.size() - 1))
+             {
+                 aTableRows.put("right", o3tl::toTwips(rEdge.nPosition, o3tl::Length::mm100));
++                putEnd(aTableRows, "right", rowMin(rEdge, rEdge.nIndex - 1), 0x0fffffff);
+             }
+             else
+             {
+                 boost::property_tree::ptree aEntry;
+                 aEntry.put("position", o3tl::toTwips(rEdge.nPosition, o3tl::Length::mm100));
+-                aEntry.put("min", o3tl::toTwips(rEdge.nPosition + rEdge.nMin, o3tl::Length::mm100));
++                aEntry.put("min", o3tl::toTwips(rowMin(rEdge, rEdge.nIndex - 1), o3tl::Length::mm100));
+                 aEntry.put("max", o3tl::toTwips(rEdge.nPosition + rEdge.nMax, o3tl::Length::mm100));
+                 aEntry.put("hidden", false);
+                 aEntries.push_back(std::make_pair("", aEntry));
+diff --git a/svx/source/table/tablelayouter.cxx b/svx/source/table/tablelayouter.cxx
+--- a/svx/source/table/tablelayouter.cxx
++++ b/svx/source/table/tablelayouter.cxx
+@@ -158,6 +158,11 @@
+         return 0;
+ }
+ 
++sal_Int32 TableLayouter::getMinimumRowHeight( sal_Int32 nRow ) const
++{
++    return isValidRow(nRow) ? maRows[nRow].mnMinSize : 0;
++}
++
+ 
+ sal_Int32 TableLayouter::getColumnWidth( sal_Int32 nColumn ) const
+ {
+diff --git a/svx/source/table/tablelayouter.hxx b/svx/source/table/tablelayouter.hxx
+--- a/svx/source/table/tablelayouter.hxx
++++ b/svx/source/table/tablelayouter.hxx
+@@ -93,6 +93,7 @@
+     sal_Int32 calcPreferredColumnWidth( sal_Int32 nColumn, Size aSize ) const;
+ 
+     sal_Int32 getMinimumColumnWidth( sal_Int32 nColumn );
++    sal_Int32 getMinimumRowHeight( sal_Int32 nRow ) const;
+ 
+     /** checks if the given edge is visible.
+         Edges between merged cells are not visible.

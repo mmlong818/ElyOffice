@@ -17,6 +17,8 @@ const en = {
   needs: "macOS 14 or later, Apple silicon.",
   unsigned: "Not notarized. If macOS blocks the app, open System Settings › Privacy & Security and click Open Anyway.",
   get: "Download",
+  count: "{n} downloads so far.",
+  source: "Source",
   other: "中文",
   roads: "Drag a file down the road.",
   fileDoc: "ElyDoc file",
@@ -53,6 +55,8 @@ const zh: typeof en = {
   needs: "macOS 14 或更新，Apple 芯片。",
   unsigned: "未经公证。macOS 拦下应用时，打开“系统设置 › 隐私与安全性”，点“仍要打开”。",
   get: "前往下载",
+  count: "已下载 {n} 次。",
+  source: "源码",
   other: "English",
   roads: "把文件沿着路拖过去。",
   fileDoc: "ElyDoc 文件",
@@ -83,10 +87,17 @@ export function said<K extends keyof HTMLElementTagNameMap>(tag: K, key: Key): H
   return el;
 }
 
+/** `key` in `lang`, with `n` written for {n}. */
+export function word(lang: Lang, key: Key, n?: number): string {
+  const text = TEXT[lang][key];
+  return n === undefined ? text : text.replace("{n}", n.toLocaleString(lang === "zh" ? "zh-CN" : "en"));
+}
+
 /** Writes every keyed text in `lang`. */
 export function speak(lang: Lang): void {
   document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
   for (const el of document.querySelectorAll<HTMLElement>("[data-t]")) {
-    el.textContent = TEXT[lang][el.dataset.t as Key];
+    const { n } = el.dataset;
+    el.textContent = word(lang, el.dataset.t as Key, n === undefined ? undefined : Number(n));
   }
 }

@@ -1,27 +1,56 @@
 //! One running copy per app; two would wipe shared data.
 
-use std::{fs::File, io, path::Path, sync::OnceLock};
+mod door;
+
+use std::{
+    fs::File,
+    io,
+    path::{Path, PathBuf},
+    sync::OnceLock,
+    time::Duration,
+};
+
+pub use door::Door;
 
 use crate::AppId;
 
 /// The lock this process holds while it runs.
 static HELD: OnceLock<File> = OnceLock::new();
 
-/// Takes `app`'s instance lock; a running copy refuses this one.
-pub fn hold(app: AppId) -> io::Result<()> {
+/// How long a second copy waits for the door.
+const WAIT: Duration = Duration::from_secs(10);
+
+/// What starting a copy found.
+pub enum Start {
+    /// This copy runs; its door takes later copies' files.
+    First(Door),
+    /// A running copy took the files; this one ends.
+    Handed,
+}
+
+/// Takes `app`'s lock, or hands `files` to its holder.
+pub fn hold(app: AppId, files: &[PathBuf]) -> io::Result<Start> {
     let dir = crate::data_dir(app).map_err(io::Error::other)?;
     std::fs::create_dir_all(&dir)?;
-    take(app, &dir)
+    start(app, &dir, files)
+}
+
+fn start(app: AppId, dir: &Path, files: &[PathBuf]) -> io::Result<Start> {
+    match take(app, dir) {
+        Ok(()) => Ok(Start::First(Door::open(dir)?)),
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => match door::hand(dir, files, WAIT) {
+            Ok(()) => Ok(Start::Handed),
+            Err(handing) => Err(io::Error::new(handing.kind(), format!("{error} and did not take the files: {handing}"))),
+        },
+        Err(error) => Err(error),
+    }
 }
 
 fn take(app: AppId, dir: &Path) -> io::Result<()> {
     let file = std::fs::OpenOptions::new().write(true).create(true).truncate(false).open(dir.join("instance.lock"))?;
     match lock(&file)? {
         None => HELD.set(file).map_err(|_| io::Error::other("this process took its instance lock twice")),
-        Some(holder) => Err(io::Error::new(
-            io::ErrorKind::AlreadyExists,
-            format!("{} is already running ({holder}); open files in its window", app.name()),
-        )),
+        Some(holder) => Err(io::Error::new(io::ErrorKind::AlreadyExists, format!("{} is already running ({holder})", app.name()))),
     }
 }
 
@@ -99,6 +128,44 @@ mod tests {
         for out in refused {
             assert!(out.contains(&named), "{out}");
         }
+    }
+
+    #[test]
+    fn a_second_copy_hands_its_files_to_the_first() {
+        use std::io::BufRead;
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let exe = std::env::current_exe().expect("this test");
+        let mut first = std::process::Command::new(&exe)
+            .args(["--exact", "instance::tests::first_copy", "--nocapture"])
+            .env("ELY_FIRST_DIR", dir.path())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .expect("the first copy");
+        let mut said = std::io::BufReader::new(first.stdout.take().expect("its output")).lines().map(|line| line.expect("a line"));
+        assert!(said.by_ref().any(|line| line.contains("HELD")), "the first copy did not start");
+        let file = std::path::PathBuf::from("C:/notes/a b.md");
+        let second = start(AppId::Doc, dir.path(), std::slice::from_ref(&file)).expect("handed over");
+        assert!(matches!(second, Start::Handed));
+        let got = said.find(|line| line.contains("GOT"));
+        assert_eq!(got.as_deref().and_then(|line| line.split("GOT ").nth(1)), Some(file.to_str().expect("text")));
+        assert!(first.wait().expect("ends").success());
+    }
+
+    /// The first copy: holds, then reports one hand-over.
+    #[test]
+    fn first_copy() {
+        let Ok(dir) = std::env::var("ELY_FIRST_DIR") else {
+            return;
+        };
+        let Ok(Start::First(door)) = start(AppId::Doc, Path::new(&dir), &[]) else {
+            panic!("the first copy did not hold");
+        };
+        let (sender, heard) = std::sync::mpsc::channel();
+        let sender = std::sync::Mutex::new(sender);
+        door.serve(move |files| sender.lock().expect("a sender").send(files).is_ok()).expect("served");
+        println!("HELD");
+        let files = heard.recv_timeout(std::time::Duration::from_secs(20)).expect("a hand-over");
+        println!("GOT {}", files[0].display());
     }
 
     /// One copy, in a process of its own.

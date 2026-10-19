@@ -1,14 +1,14 @@
 //! What the view knows, for apps to read.
 
-use gpui::FocusHandle;
+use gpui::{FocusHandle, Pixels, Point};
 
 use super::LokView;
 use crate::Rect;
 
 impl LokView {
-    /// Whether the kernel paints dark; None before the first frame.
-    pub fn dark(&self) -> Option<bool> {
-        self.dark
+    /// Whether the kernel was told Ely's scheme.
+    pub fn lit(&self) -> bool {
+        self.lit
     }
 
     /// The kernel's state for `uno`, as LOK reports it (LOK-05).
@@ -91,9 +91,10 @@ impl LokView {
         &self.fonts
     }
 
-    /// Takes the context menu the kernel last offered.
-    pub fn take_menu(&mut self) -> Option<String> {
-        self.menu.take()
+    /// Takes the kernel's last menu and the click that asked.
+    pub fn take_menu(&mut self) -> Option<(String, Option<Point<Pixels>>)> {
+        let menu = self.menu.take()?;
+        Some((menu, self.right_at.take()))
     }
 
     /// The paragraph's own tab stops, in 1/100 mm.

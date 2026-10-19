@@ -72,7 +72,7 @@ while IFS=$'\t' read -r slug name; do
     ely-doc | ely-table | ely-show) engines=(LibreOffice) ;;
     ely-pdf) engines=(MuPDF MuPDF/fonts/urw MuPDF/fonts/sil MuPDF/fonts/noto MuPDF/fonts/droid MuPDF/fonts/han OpenSSL tessdata GreatVibes) ;;
     ely-tree) engines=(Git git-lfs) ;;
-    ely-mark) engines=(CEF content) ;;
+    ely-mark) engines=(KaTeX MuPDF MuPDF/fonts/noto OpenSSL GreatVibes) ;;
   esac
   for part in LICENSE rust-crates.txt "${engines[@]}"; do
     [ -n "$(find "$licenses/$part" -type f -size +0 2>/dev/null)" ] || fail "$name lacks the licences of $part"
@@ -83,9 +83,8 @@ while IFS=$'\t' read -r slug name; do
     [ -n "$(find "$family" -type f -size +0 \( -iname 'licen[cs]e*' -o -iname 'copying*' -o -iname 'notice*' -o -iname 'ofl*' \))" ] ||
       fail "$name lacks the licence of the ${family##*/} fonts"
   done
-  # Nothing inside registers with macOS but CEF's helpers.
-  extra=$(find "$app/Contents" \( -name '*.app' -o -name '*.appex' -o -name '*.mdimporter' -o -name '*.qlgenerator' \) |
-    grep -v "/Frameworks/$slug Helper" || true)
+  # Nothing inside registers with macOS.
+  extra=$(find "$app/Contents" \( -name '*.app' -o -name '*.appex' -o -name '*.mdimporter' -o -name '*.qlgenerator' \))
   [ -z "$extra" ] || fail "$name carries bundles macOS registers: $extra"
   # No binary may need a newer macOS than the app.
   least=$(/usr/libexec/PlistBuddy -c "Print :LSMinimumSystemVersion" "$app/Contents/Info.plist")
@@ -124,10 +123,6 @@ while IFS=$'\t' read -r slug name; do
       grep -qF "at $app/Contents/MacOS/../Resources/git/bin/git (bundled)" "$log" || fail "ElyTree used another Git"
       # Built-ins stay links to one binary, not copies.
       [ "$(du -sm "$app/Contents/Resources/git" | cut -f1)" -lt 100 ] || fail "ElyTree's Git copies its built-ins"
-      ;;
-    ely-mark)
-      grep -qF "web: CEF loaded from $app/Contents/Frameworks" "$log" || fail "ElyMark used another CEF"
-      grep -qF "mark: page from $app/Contents/Resources/content" "$log" || fail "ElyMark used another page"
       ;;
   esac
   # A running app takes Finder's next file.

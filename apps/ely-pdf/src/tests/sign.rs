@@ -136,7 +136,7 @@ fn save_signed_as(cx: &mut VisualTestContext, viewer: &Entity<Viewer>, old: &Ent
     let id = cx.update(|_, app| viewer.read(app).core.tabs[0].id);
     let target = copy.to_path_buf();
     std::fs::write(copy, b"").expect("a place");
-    let copy = std::fs::canonicalize(copy).expect("the real path");
+    let copy = dunce::canonicalize(copy).expect("the real path");
     std::fs::remove_file(&copy).expect("clears the place");
     cx.update(|window, app| viewer.update(app, |viewer, cx| viewer.write_as(id, target, None, window, cx)));
     settle(cx, |app| {

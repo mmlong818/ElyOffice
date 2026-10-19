@@ -188,13 +188,13 @@ fn tiles_beside_the_view_are_neither_asked_nor_kept() {
 
 /// Flags any notify leaving a shown page with nothing drawn.
 fn never_bare(cx: &mut VisualTestContext, view: &Entity<PdfView>) -> (gpui::Subscription, std::rc::Rc<std::cell::Cell<bool>>) {
-    let (sf, dark) = cx.update(|window, app| (window.scale_factor(), ely_gpui_component::theme::ActiveTheme::theme(app).is_dark()));
+    let sf = cx.update(|window, _| window.scale_factor());
     let bare = std::rc::Rc::new(std::cell::Cell::new(false));
     let seen = bare.clone();
     let watch = cx.update(|_, app| {
         app.observe(view, move |view, app| {
             let read = view.read(app);
-            if read.showing(sf, dark).iter().any(|page| read.pieces(page).is_empty()) {
+            if read.showing(sf).iter().any(|page| read.pieces(page).is_empty()) {
                 seen.set(true);
             }
         })
@@ -248,10 +248,10 @@ fn a_new_scale_keeps_the_old_tiles_until_new_ones_land() {
     cx.simulate_resize(gpui::size(px(700.), px(800.)));
     // The new size lays out before any new tile lands.
     cx.run_until_parked();
-    let (sf, dark) = cx.update(|window, app| (window.scale_factor(), ely_gpui_component::theme::ActiveTheme::theme(app).is_dark()));
+    let sf = cx.update(|window, _| window.scale_factor());
     let now = cx.update(|_, app| {
         let read = view.read(app);
-        read.showing(sf, dark).iter().map(|page| read.pieces(page).len()).collect::<Vec<_>>()
+        read.showing(sf).iter().map(|page| read.pieces(page).len()).collect::<Vec<_>>()
     });
     assert!(now.iter().all(|count| *count > 0), "drawn right after the resize: {now:?}");
     settle(cx, |app| view.read(app).laid_out().scale != scale && repainted(view.read(app)));
@@ -315,7 +315,7 @@ fn old_tiles_are_painted_and_freed_with_their_tab() {
     let shown = cx.update(|window, app| {
         let read = view.read(app);
         let room = read.room;
-        read.showing(window.scale_factor(), false).iter().map(|s| {
+        read.showing(window.scale_factor()).iter().map(|s| {
             let (left, top) = (-f32::from(read.scroll.offset().x), -f32::from(read.scroll.offset().y));
             let w = (s.place.x + s.place.w).min(left + f32::from(room.size.width)) - s.place.x.max(left);
             let h = (s.place.y + s.place.h).min(top + f32::from(room.size.height)) - s.place.y.max(top);
@@ -333,9 +333,8 @@ fn an_edit_keeps_page_pictures_until_they_repaint() {
     let mut cx = TestAppContext::single();
     let (viewer, cx) = windowed(&mut cx, dir.path(), &[file(dir.path(), "one.pdf", &[(612.0, 792.0, &["Hello"])])], true);
     let view = shown(cx, &viewer);
-    let dark = cx.update(|_, app| ely_gpui_component::theme::ActiveTheme::theme(app).is_dark());
-    settle(cx, |app| view.read(app).picture(0, dark).is_some() && repainted(view.read(app)));
-    let old = cx.update(|_, app| view.read(app).picture(0, dark).expect("a picture"));
+    settle(cx, |app| view.read(app).picture(0).is_some() && repainted(view.read(app)));
+    let old = cx.update(|_, app| view.read(app).picture(0).expect("a picture"));
     // A picture on its way holds back the repaint.
     cx.update(|_, app| view.update(app, |view, _| view.thumbing = true));
     cx.update(|_, app| view.update(app, |view, cx| view.annotate("adding a note", vec![note()], cx)));
@@ -349,7 +348,7 @@ fn an_edit_keeps_page_pictures_until_they_repaint() {
         cx.notify()
     }));
     settle(cx, |app| view.read(app).thumbs_stale.is_empty());
-    let new = cx.update(|_, app| view.read(app).picture(0, dark).expect("a picture"));
+    let new = cx.update(|_, app| view.read(app).picture(0).expect("a picture"));
     assert!(!std::sync::Arc::ptr_eq(&new, &old), "the new picture replaces it");
     super::frames(cx);
     assert!(cx.update(|window, _| window.has_image_atlas_entry(&new)), "and is drawn");

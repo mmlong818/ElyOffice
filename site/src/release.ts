@@ -1,3 +1,11 @@
-// This version's release page holds every download.
-export const VERSION = "0.1.3";
-export const RELEASES = "https://git.zacharyzhang.com/ZacharyZhang-NY/ElyOffice/releases/tag/v0.1.3";
+// Gitea redirects this to the newest release.
+export const RELEASES = "https://git.zacharyzhang.com/ZacharyZhang-NY/ElyOffice/releases/latest";
+
+export type Release = { version: string; downloads: number };
+
+/** The newest release and all downloads, from the worker. */
+export async function latest(): Promise<Release> {
+  const res = await fetch("/release.json");
+  if (!res.ok) throw new Error(`release.json: ${res.status} ${await res.text()}`);
+  return (await res.json()) as Release;
+}

@@ -1,5 +1,6 @@
 use std::{cell::RefCell, rc::Rc};
 
+use ely_gpui_component::theme::Theme;
 use ely_lok::LokError;
 use ely_office::panel::Panel as _;
 use gpui::{Entity, TestAppContext};
@@ -294,5 +295,84 @@ fn quick_spacing_edits_keep_each_other() {
     assert!(
         text.contains("fo:margin-top=\"0.111in\" fo:margin-bottom=\"0.1665in\""),
         "both quick edits land"
+    );
+}
+
+/// A window root that shows the panel.
+struct Shown(Entity<Props>);
+
+impl gpui::Render for Shown {
+    fn render(
+        &mut self,
+        _: &mut gpui::Window,
+        _: &mut gpui::Context<Self>,
+    ) -> impl gpui::IntoElement {
+        use gpui::{ParentElement as _, Styled as _};
+        gpui::div().size_full().child(self.0.clone())
+    }
+}
+
+/// The top of the element marked `selector`.
+fn top(cx: &mut gpui::VisualTestContext, selector: &'static str) -> Option<gpui::Pixels> {
+    // Past reduced motion's 1ms folds.
+    for _ in 0..3 {
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        cx.update(|window, _| window.refresh());
+        cx.run_until_parked();
+    }
+    cx.debug_bounds(selector).map(|bounds| bounds.origin.y)
+}
+
+#[test]
+fn in_a_table_the_table_group_comes_first_and_folds_stay_put() {
+    const DOWN: i32 = 1024;
+    const UP: i32 = 1025;
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let mut cx = TestAppContext::single();
+    let Some(docs) = docs(&mut cx, dir.path()) else {
+        eprintln!("SKIP: no LOK build");
+        return;
+    };
+    cx.update(|cx| {
+        ely_gpui_component::init_for_tests(cx);
+        Theme::update(cx, |theme| theme.reduced_motion = true);
+    });
+    blank(&mut cx, &docs);
+    type_into(&mut cx, &docs, "Table");
+    let props = panel(&mut cx, &docs);
+    let window = cx.add_window(|_, _| Shown(props.clone()));
+    let mut shown = gpui::VisualTestContext::from_window(window.into(), &cx);
+    assert_eq!(
+        top(&mut shown, "doc-props-table"),
+        None,
+        "no table, no group"
+    );
+    let header = gpui::point(gpui::px(10.0), gpui::px(12.0));
+    shown.simulate_click(header, gpui::Modifiers::none());
+    assert_eq!(top(&mut shown, "doc-props-text"), None, "Text folds");
+    shown.simulate_click(header, gpui::Modifiers::none());
+    assert!(top(&mut shown, "doc-props-text").is_some(), "Text opens");
+    with_window(&mut cx, &docs, |docs, _, cx| {
+        docs.insert_table(3.0, 2.0, cx)
+    });
+    let in_table = |app: &gpui::App| props.read(app).state(".uno:DeleteTable", app);
+    settle(&cx, |app| in_table(app).as_deref() == Some("enabled"));
+    let table = top(&mut shown, "doc-props-table").expect("the table group");
+    let text = top(&mut shown, "doc-props-text").expect("the text group");
+    assert!(table < text, "the table group leads: {table:?} vs {text:?}");
+    keys(&mut cx, &docs, &[UP]);
+    settle(&cx, |app| in_table(app).as_deref() != Some("enabled"));
+    shown.simulate_click(header, gpui::Modifiers::none());
+    assert_eq!(top(&mut shown, "doc-props-text"), None, "Text folds again");
+    keys(&mut cx, &docs, &[DOWN]);
+    settle(&cx, |app| in_table(app).as_deref() == Some("enabled"));
+    assert!(top(&mut shown, "doc-props-table").is_some(), "Table opens");
+    assert_eq!(top(&mut shown, "doc-props-text"), None, "Text stays folded");
+    keys(&mut cx, &docs, &[UP]);
+    settle(&cx, |app| in_table(app).as_deref() != Some("enabled"));
+    assert_eq!(
+        top(&mut shown, "doc-props-text"),
+        None,
+        "and after the table"
     );
 }

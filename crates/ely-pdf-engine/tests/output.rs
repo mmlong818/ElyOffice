@@ -148,6 +148,7 @@ fn a_broken_stream_under_a_sound_table_is_damage_and_fails_exports() {
     let report = worker.repair_report(doc).expect("asks").expect("damage is reported");
     assert!(!report.trim().is_empty());
     assert!(worker.export_text(doc, &dir.path().join("doc.txt")).is_err(), "partial text is no export");
+    assert!(worker.export_image(doc, 0, 72.0, &dir.path().join("page.png")).is_err(), "nor a partial page");
     worker.rotate_pages(doc, &[0], 90).expect("edits the copy");
     doc = worker.now(doc).expect("the state");
     worker.save(doc, &dir.path().join("fixed.pdf")).expect("saves the copy");
@@ -171,6 +172,45 @@ fn a_print_copy_carries_no_lock() {
 }
 
 #[test]
+fn a_print_copy_shows_what_prints_to_any_screen_renderer() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    // No looks of their own: MuPDF makes them.
+    let square = |flags: u8, rect: &str, color: &str| format!("<< /Type /Annot /Subtype /Square /F {flags} /Rect [{rect}] /C [{color}] /IC [{color}] >>");
+    let annots = [
+        square(4, "50 100 150 180", "1 0 0"),
+        square(0, "200 100 300 180", "0 1 0"),
+        // Print and NoView: printed, never shown.
+        square(36, "350 100 450 180", "0 0 1"),
+        // Print and Hidden: neither.
+        square(6, "50 300 150 380", "0 1 0"),
+        "<< /Type /Annot /Subtype /Link /F 4 /Rect [200 300 300 380] /A << /S /URI /URI (https://example.com) >> >>".to_string(),
+    ];
+    let path = dir.path().join("doc.pdf");
+    std::fs::write(&path, one_page("", " /Annots [5 0 R 6 0 R 7 0 R 8 0 R 9 0 R]", "", &annots)).expect("writes");
+    let (mut worker, doc) = opened(&path);
+    let print = dir.path().join("print.pdf");
+    worker.print_copy(doc, &print).expect("writes");
+    // Only the link stays an annotation.
+    let copy = lopdf::Document::load(&print).expect("a PDF");
+    let left = copy.get_dictionary(copy.get_pages()[&1]).and_then(|page| page.get(b"Annots")).and_then(lopdf::Object::as_array).expect("annotations");
+    let kinds: Vec<&[u8]> = left.iter().map(|annot| copy.dereference(annot).and_then(|(_, a)| a.as_dict()?.get(b"Subtype")?.as_name()).expect("a kind")).collect();
+    assert_eq!(kinds, [b"Link".as_slice()]);
+    assert!(copy.catalog().expect("a catalog").get(b"AcroForm").is_err(), "no form left");
+    // MuPDF draws by screen rules, as Windows' renderer does.
+    let mut third = self::worker();
+    let printed = third.open(&print).expect("opens").doc;
+    let bgra = third.render(printed, 0, (1.0, 0), [0, 0, 612, 792]).expect("draws").bgra;
+    let at = |x: usize, y: usize| -> [u8; 3] {
+        let p = &bgra[((792 - y) * 612 + x) * 4..][..3];
+        [p[2], p[1], p[0]]
+    };
+    assert_eq!(at(100, 140), [255, 0, 0], "printable");
+    assert_eq!(at(250, 140), [255, 255, 255], "not for print");
+    assert_eq!(at(400, 140), [0, 0, 255], "print, not view");
+    assert_eq!(at(100, 340), [255, 255, 255], "hidden");
+}
+
+#[test]
 fn a_broken_picture_shows_when_drawn_or_checked() {
     let dir = tempfile::tempdir().expect("a temp dir");
     let picture = "<< /Type /XObject /Subtype /Image /Width 4 /Height 4 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /FlateDecode /Length 12 >>\nstream\nnot a zlib!!\nendstream".to_string();
@@ -179,10 +219,138 @@ fn a_broken_picture_shows_when_drawn_or_checked() {
     std::fs::write(&path, &bytes).expect("writes");
     let (mut worker, doc) = opened(&path);
     assert_eq!(worker.repair_report(doc).expect("asks"), None, "pictures wait to be drawn");
-    let tile = worker.render(doc, 0, (1.0, 0), [0, 0, 612, 792], false).expect("draws");
+    let tile = worker.render(doc, 0, (1.0, 0), [0, 0, 612, 792]).expect("draws");
     assert!(tile.damaged, "drawing finds it");
     assert!(worker.repair_report(doc).expect("asks").is_some());
     let (mut other, again) = opened(&path);
     assert!(other.check_pictures(again).expect("checks"), "the check finds it undrawn");
     assert_eq!(std::fs::read(&path).expect("reads"), bytes);
+}
+
+/// As many Chinese files name their fonts.
+const SIMSUN: &str = "<< /Type /Font /Subtype /Type0 /BaseFont /SimSun /Encoding /Identity-H /DescendantFonts [<< /Type /Font /Subtype /CIDFontType2 /BaseFont /SimSun /CIDSystemInfo << /Registry (Adobe) /Ordering (GB1) /Supplement 2 >> /FontDescriptor << /Type /FontDescriptor /FontName /SimSun /Flags 6 /FontBBox [0 -141 996 855] /ItalicAngle 0 /Ascent 859 /Descent -141 /CapHeight 859 /StemV 91 >> >>] >>";
+
+/// Two runs, each in its own unembedded font.
+const TWO_RUNS: &str = "BT /F1 24 Tf 72 700 Td <00410042> Tj /F2 24 Tf <0043> Tj ET";
+
+#[test]
+fn an_unembedded_font_is_no_damage() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let path = dir.path().join("doc.pdf");
+    // Two fonts, one notice: a repeat is no damage either.
+    let fonts = " /Resources << /Font << /F1 5 0 R /F2 6 0 R >> >>";
+    let bytes = one_page("", fonts, TWO_RUNS, &[SIMSUN.to_string(), SIMSUN.to_string()]);
+    std::fs::write(&path, &bytes).expect("writes");
+    // Each on a fresh worker: no font loaded before.
+    let (mut worker, doc) = opened(&path);
+    worker.export_text(doc, &dir.path().join("doc.txt")).expect("the text exports");
+    let (mut worker, doc) = opened(&path);
+    worker.export_image(doc, 0, 72.0, &dir.path().join("page.png")).expect("the page exports");
+    let (mut worker, doc) = opened(&path);
+    // Read unwatched first: its repeat is pending.
+    worker.text(doc, 0).expect("reads");
+    let tile = worker.render(doc, 0, (1.0, 0), [0, 0, 612, 792]).expect("draws");
+    assert!(!tile.damaged, "a substituted font draws whole");
+    assert_eq!(worker.repair_report(doc).expect("asks"), None);
+}
+
+#[test]
+fn unreadable_content_still_draws_as_damage() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    // Text with no font; a stray bracket.
+    for content in ["BT 72 700 Td (Missing text) Tj ET", "BT ] ET"] {
+        let path = dir.path().join("doc.pdf");
+        std::fs::write(&path, one_page("", "", content, &[])).expect("writes");
+        let (mut worker, doc) = opened(&path);
+        let tile = worker.render(doc, 0, (1.0, 0), [0, 0, 612, 792]).expect("draws");
+        assert!(tile.damaged, "{content} draws as damage");
+    }
+}
+
+/// Two pictures whose zlib checksums are wrong.
+fn broken_pictures(dir: &Path) -> std::path::PathBuf {
+    let hex = format!("{}>", "ff0000".repeat(16));
+    // One stored deflate block, its checksum wrong.
+    let mut zlib = vec![0x78, 0x01, 0x01];
+    zlib.extend_from_slice(&(hex.len() as u16).to_le_bytes());
+    zlib.extend_from_slice(&(!(hex.len() as u16)).to_le_bytes());
+    zlib.extend_from_slice(hex.as_bytes());
+    zlib.extend_from_slice(&[0, 0, 0, 0]);
+    let slot = "#".repeat(zlib.len());
+    let image = format!("<< /Type /XObject /Subtype /Image /Width 4 /Height 4 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter [/FlateDecode /ASCIIHexDecode] /Length {} >>
+stream
+{slot}
+endstream", zlib.len());
+    let names = " /Resources << /XObject << /Im1 5 0 R /Im2 6 0 R >> >>";
+    let mut bytes = one_page("", names, "q 100 0 0 100 72 600 cm /Im1 Do Q q 100 0 0 100 72 400 cm /Im2 Do Q", &[image.clone(), image]);
+    for _ in 0..2 {
+        let at = bytes.windows(slot.len()).position(|w| w == slot.as_bytes()).expect("the slot");
+        bytes[at..at + zlib.len()].copy_from_slice(&zlib);
+    }
+    let path = dir.join("doc.pdf");
+    std::fs::write(&path, &bytes).expect("writes");
+    path
+}
+
+/// A picture whose colour key mask is invalid.
+fn masked() -> String {
+    let hex = format!("{}>", "ff0000".repeat(16));
+    format!("<< /Type /XObject /Subtype /Image /Width 4 /Height 4 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Mask [null null null null null null] /Filter /ASCIIHexDecode /Length {} >>
+stream
+{hex}
+endstream", hex.len())
+}
+
+/// The bad mask, alone or drawn beside two font notices.
+fn bad_mask(dir: &Path, fonts: Option<bool>) -> std::path::PathBuf {
+    let picture = "q 100 0 0 100 72 600 cm /Im1 Do Q";
+    let (resources, content, objects) = match fonts {
+        None => (String::new(), picture.to_string(), vec![masked()]),
+        Some(first) => (
+            " /Font << /F1 6 0 R /F2 7 0 R >>".to_string(),
+            if first { format!("{picture} {TWO_RUNS}") } else { format!("{TWO_RUNS} {picture}") },
+            vec![masked(), SIMSUN.to_string(), SIMSUN.to_string()],
+        ),
+    };
+    let names = format!(" /Resources << /XObject << /Im1 5 0 R >>{resources} >>");
+    let path = dir.join(format!("mask-{fonts:?}.pdf"));
+    std::fs::write(&path, one_page("", &names, &content, &objects)).expect("writes");
+    path
+}
+
+#[test]
+fn a_broken_picture_under_two_filters_fails_exports() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let path = broken_pictures(dir.path());
+    let (mut worker, doc) = opened(&path);
+    assert!(worker.export_text(doc, &dir.path().join("doc.txt")).is_err(), "its text read whole");
+    let (mut worker, doc) = opened(&path);
+    assert!(worker.export_image(doc, 0, 72.0, &dir.path().join("page.png")).is_err(), "its page read whole");
+    let (mut worker, doc) = opened(&path);
+    let tile = worker.render(doc, 0, (1.0, 0), [0, 0, 612, 792]).expect("draws");
+    assert!(tile.damaged, "the picture draws as damage");
+}
+
+#[test]
+fn a_broken_picture_read_before_is_still_damage() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let files = [broken_pictures(dir.path()), bad_mask(dir.path(), None), bad_mask(dir.path(), Some(true)), bad_mask(dir.path(), Some(false))];
+    // Reading caches the pictures; their repeat waits.
+    let read: [fn(&mut Worker, Doc); 2] = [|w, d| drop(w.text(d, 0).expect("reads")), |w, d| drop(w.search(d, 0, "x").expect("searches"))];
+    for (path, first) in files.iter().flat_map(|p| read.map(|r| (p, r))) {
+        let (mut worker, doc) = opened(path);
+        first(&mut worker, doc);
+        let tile = worker.render(doc, 0, (1.0, 0), [0, 0, 612, 792]).expect("draws");
+        assert!(tile.damaged, "the picture draws as damage");
+        assert!(worker.repair_report(doc).expect("asks").is_some());
+        let (mut worker, doc) = opened(path);
+        first(&mut worker, doc);
+        assert!(worker.export_image(doc, 0, 72.0, &dir.path().join("page.png")).is_err(), "its page read whole");
+        let (mut worker, doc) = opened(path);
+        first(&mut worker, doc);
+        assert!(worker.export_text(doc, &dir.path().join("doc.txt")).is_err(), "its text read whole");
+        let (mut worker, doc) = opened(path);
+        first(&mut worker, doc);
+        assert!(worker.check_pictures(doc).expect("checks"), "the check finds it");
+    }
 }

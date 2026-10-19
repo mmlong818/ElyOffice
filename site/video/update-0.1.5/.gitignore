@@ -1,0 +1,8 @@
+node_modules
+out
+public/footage
+public/fonts/*.ttf
+public/fonts/*.otf
+node_modules
+public/audio
+__pycache__

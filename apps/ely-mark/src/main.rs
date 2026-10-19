@@ -3,6 +3,8 @@
 
 mod attach;
 mod autosave;
+mod blocks;
+mod clip;
 mod compare;
 mod desk;
 mod engine;
@@ -11,24 +13,19 @@ mod finding;
 mod folder;
 mod keys;
 mod look;
+mod output;
 mod outside;
-mod page;
-mod paper;
 mod places;
 mod rename;
 mod restore;
 mod side;
-mod tally;
 mod text;
+mod tools;
 mod vcs;
 mod view;
 
 use ely_platform::AppId;
 
 fn main() {
-    // CEF runs its helper processes from this same binary.
-    if let Some(code) = ely_web_content::subprocess() {
-        std::process::exit(code);
-    }
     ely_ui::run(AppId::Mark, desk::open);
 }

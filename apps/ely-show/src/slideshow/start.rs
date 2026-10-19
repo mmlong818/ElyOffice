@@ -59,16 +59,14 @@ pub fn discard(worker: Arc<Mutex<Worker>>, doc: Doc, copy: PathBuf, cx: &App) {
 fn copy(
     worker: &mut Worker,
     doc: &Doc,
-    (copy, scheme): (&std::path::Path, Option<&'static str>),
+    copy: &std::path::Path,
 ) -> io::Result<(usize, Doc, Vec<ShowSlide>)> {
     let current = doc.sheets(worker)?.current;
     let url = ely_lok::file_url(copy);
     doc.save_as(worker, &url, "odp")?;
     let shown = worker.load(&url)?;
     let read = |worker: &mut Worker| -> io::Result<Vec<ShowSlide>> {
-        if let Some(scheme) = scheme {
-            worker.run(&shown, "view.theme", &[scheme])?;
-        }
+        worker.run(&shown, "view.theme", &[ely_lok::SCHEME])?;
         ely_lok::show::slide_show(&worker.values(&shown, ely_lok::show::SLIDE_SHOW)?)
     };
     match read(worker) {
@@ -161,14 +159,13 @@ impl Deck {
             self.show_starting = false;
             return;
         };
-        let scheme = tab.view.read(cx).dark().map(ely_lok::scheme);
         let path = tab.work.join(format!("show-{}.odp", self.shows));
         self.shows += 1;
         let into = path.clone();
         let worker = self.core.worker.clone();
         self.read_in(
             id,
-            move |worker, doc| copy(worker, doc, (&into, scheme)),
+            move |worker, doc| copy(worker, doc, &into),
             move |deck, read, _, cx| {
                 deck.show_starting = false;
                 let (current, doc, slides) = match read {
@@ -382,7 +379,7 @@ mod tests {
             let deck = deck.read(app);
             let tab = deck.active_tab().expect("a tab");
             let mut worker = deck.core.worker.lock().expect("the worker lock");
-            let (_, doc, slides) = super::copy(&mut worker, &tab.doc, (&path, None)).expect("a copy");
+            let (_, doc, slides) = super::copy(&mut worker, &tab.doc, &path).expect("a copy");
             super::Starting { tab: tab.id, slides, first: 0, doc, copy: path.clone(), audience: 99, presenter: false }
         });
         update(&mut cx, &deck, |deck, cx| {

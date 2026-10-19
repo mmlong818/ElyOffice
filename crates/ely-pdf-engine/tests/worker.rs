@@ -36,23 +36,15 @@ fn pages_measure_render_and_read_their_text() {
     );
     // Page one's top left, twice its size: text is dark.
     let tile = worker
-        .render(doc, 0, (2.0, 0), [0, 0, 600, 300], false)
+        .render(doc, 0, (2.0, 0), [0, 0, 600, 300])
         .expect("renders").bgra;
     assert_eq!(tile.len(), 600 * 300 * 4);
     let dark = tile.chunks_exact(4).filter(|p| p[0] < 128).count();
     assert!(dark > 100, "text shows: {dark}");
-    let night = worker
-        .render(doc, 0, (2.0, 0), [0, 0, 600, 300], true)
-        .expect("renders dark").bgra;
-    let light = night.chunks_exact(4).filter(|p| p[0] > 128).count();
-    assert!(
-        light > 100 && night[0] < 64,
-        "dark mode turns paper dark and text light"
-    );
     // A quarter turn makes the page tall side wide.
     assert!(
         worker
-            .render(doc, 1, (1.0, 90), [0, 0, 595, 842], false)
+            .render(doc, 1, (1.0, 90), [0, 0, 595, 842])
             .is_ok()
     );
     let text: String = worker
@@ -135,7 +127,7 @@ fn a_thousand_pages_show_the_first_in_time() {
     assert_eq!(worker.pages(doc).expect("counts"), 1000);
     // What the viewer asks before its first frame.
     worker.bounds(doc, 0, 100).expect("the first sizes");
-    worker.render(doc, 0, (2.0, 0), [0, 0, 512, 512], false).expect("the first tile");
+    worker.render(doc, 0, (2.0, 0), [0, 0, 512, 512]).expect("the first tile");
     let took = started.elapsed();
     assert!(took < std::time::Duration::from_secs(3), "PERF-05: {took:?}");
 }

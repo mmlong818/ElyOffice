@@ -54,27 +54,20 @@ if uses ely-lok; then
   fi
 fi
 if uses ely-pdf-engine; then
-  tessdata=${ELY_TESSDATA:-$root/engines/tessdata}
-  need "$tessdata/eng.traineddata" scripts/fetch-tessdata.sh
   build -p ely-pdf-engine --bin ely-pdf-worker
   cp "$release/ely-pdf-worker$exe" "$out/"
+fi
+# OCR's languages: ElyPDF alone reads text from pictures.
+if [ "$slug" = ely-pdf ]; then
+  tessdata=${ELY_TESSDATA:-$root/engines/tessdata}
+  need "$tessdata/eng.traineddata" scripts/fetch-tessdata.sh
   mkdir "$out/tessdata"
   cp "$tessdata"/{eng,chi_sim,chi_tra}.traineddata "$out/tessdata/"
 fi
-if [ "$slug" = ely-tree ] || [ "$slug" = ely-mark ]; then
+# ElyTree carries Git. ElyMark also bundles it in standalone Windows and Linux packages.
+if [ "$slug" = ely-tree ] || { [ "$slug" = ely-mark ] && { [ -n "$exe" ] || [ "$(uname)" = Linux ]; }; }; then
   need "$root/engines/git" "scripts/build-git.sh and scripts/fetch-git-lfs.sh"
   cp -R "$root/engines/git" "$out/git"
-fi
-if uses ely-web-content; then
-  cef=${ELY_CEF:-$root/engines/cef}
-  need "$cef/icudtl.dat" scripts/fetch-cef.sh
-  # CEF's runtime sits beside the app, as cef-dll-sys has it.
-  find "$cef" -maxdepth 1 -type f \( -name '*.dll' -o -name '*.so' -o -name '*.so.*' -o -name '*.pak' \
-    -o -name '*.bin' -o -name '*.dat' -o -name '*.json' -o -name chrome-sandbox \) -exec cp {} "$out/" \;
-  cp -R "$cef/locales" "$out/"
-  content=$root/engines/content/$slug
-  need "$content/index.html" "its scripts/build-*-content.sh"
-  cp -R "$content" "$out/content"
 fi
 "$root/packaging/licenses.sh" "$slug" "$out/licenses"
 echo "$out"

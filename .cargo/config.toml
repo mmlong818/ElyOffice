@@ -1,6 +1,2 @@
 [target.'cfg(all(windows, target_env = "msvc"))']
 rustflags = ["-C", "target-feature=+crt-static"]
-
-[env]
-# cef-dll-sys builds against the CEF that scripts/fetch-cef.sh fetched.
-CEF_PATH = { value = "engines/cef", relative = true }

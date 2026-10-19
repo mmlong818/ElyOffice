@@ -74,9 +74,7 @@ impl SettingsView {
             None => {}
             Some(Err(error)) => section = section.row(Banner::new("storage-unread", Severity::Danger, error.clone())),
             Some(Ok(usage)) => {
-                // Only ElyMark keeps web content.
-                let shown = usage.iter().filter(|(kind, ..)| *kind != Kind::Cache || self.app == ely_platform::AppId::Mark);
-                for (kind, bytes, clearing) in shown {
+                for (kind, bytes, clearing) in usage {
                     section = section.row(row(*kind, *bytes, *clearing, this.clone(), cx));
                 }
             }
@@ -188,7 +186,6 @@ impl SettingsView {
 fn name(kind: Kind, cx: &App) -> SharedString {
     match kind {
         Kind::Log => text(cx, "settings.storage.log", &[]),
-        Kind::Cache => text(cx, "settings.storage.cache", &[]),
         Kind::Recovery => text(cx, "settings.storage.recovery", &[]),
     }
 }

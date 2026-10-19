@@ -11,6 +11,7 @@ mod guides;
 mod insert;
 mod list;
 mod media;
+mod menu;
 mod motion;
 mod new;
 mod notes;

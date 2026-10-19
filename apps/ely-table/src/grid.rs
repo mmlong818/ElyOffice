@@ -140,6 +140,12 @@ impl Book {
         }
     }
 
+    /// Selects a header's row or column.
+    pub(crate) fn select_header(&mut self, column: bool, index: u32, modifier: &str, cx: &mut Context<Self>) {
+        let id = if column { "select.column" } else { "select.row" };
+        self.run_active(id, &[&index.to_string(), modifier], cx);
+    }
+
     /// One row or column header with its sizing edge.
     fn header(
         &self,
@@ -201,13 +207,15 @@ impl Book {
             .border_color(transparent_black())
             .focus_ring(cx)
             .tab_index(0)
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(move |book, event: &MouseDownEvent, _, cx| {
+                    cx.stop_propagation();
+                    book.header_menu(column, index, event.position, cx);
+                }),
+            )
             .on_click(cx.listener(move |book, event: &ClickEvent, _, cx| {
-                let id = if column {
-                    "select.column"
-                } else {
-                    "select.row"
-                };
-                book.run_active(id, &[&index.to_string(), &modifier(&event.modifiers())], cx);
+                book.select_header(column, index, &modifier(&event.modifiers()), cx);
             }))
             .child(label);
         let cell = div()

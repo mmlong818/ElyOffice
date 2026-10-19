@@ -1,0 +1,83 @@
+LOK: selecting a row or column leaves a drawing first
+
+Calc's own headers call DrawDeselectAll before marking. Over LOK the
+header is the client's, and .uno:SelectRow / .uno:SelectColumn live
+only on the cell shell. While a shape is selected or its text is
+being edited, a drawing shell replaces the cell shell, so the command
+finds no slot and is dropped. The view shell now takes both slots in
+LOK: it ends any drawing edit (keeping the typed text), deselects,
+ends drawing mode as Escape does (rerunning the active tool's slot),
+then marks, as a header click does. Desktop keeps them on the cell
+shell only.
+
+diff --git a/sc/sdi/tabvwsh.sdi b/sc/sdi/tabvwsh.sdi
+--- a/sc/sdi/tabvwsh.sdi
++++ b/sc/sdi/tabvwsh.sdi
+@@ -42,6 +42,8 @@
+     FID_TABLE_HIDE      [ ExecMethod = ExecuteTable; StateMethod = GetStateTable; ]
+     FID_TABLE_SHOW      [ ExecMethod = ExecuteTable; StateMethod = GetStateTable; ]
+     SID_SELECT_TABLES   [ ExecMethod = Execute; StateMethod = GetState; ]
++    SID_SELECT_COL      [ ExecMethod = Execute; StateMethod = GetState; ]
++    SID_SELECT_ROW      [ ExecMethod = Execute; StateMethod = GetState; ]
+     FID_TAB_MENU_SET_TAB_BG_COLOR   [ ExecMethod = ExecuteTable; StateMethod = GetStateTable; ]
+     FID_TAB_EVENTS      [ ExecMethod = ExecuteTable; StateMethod = GetStateTable; ]
+ }
+diff --git a/sc/source/ui/view/tabvwsh3.cxx b/sc/source/ui/view/tabvwsh3.cxx
+--- a/sc/source/ui/view/tabvwsh3.cxx
++++ b/sc/source/ui/view/tabvwsh3.cxx
+@@ -45,6 +45,7 @@
+ #include <reffact.hxx>
+ #include <tabprotection.hxx>
+ #include <protectiondlg.hxx>
++#include <fupoor.hxx>
+ #include <kitsheet.hxx>
+ #include <docfunc.hxx>
+ #include <boost/property_tree/json_parser.hpp>
+@@ -1304,6 +1305,31 @@
+             rReq.Done();
+             break;
+ 
++        // A drawing shell is on top: leave it, then mark.
++        case SID_SELECT_COL:
++        case SID_SELECT_ROW:
++        {
++            const SfxInt32Item* pIndex = rReq.GetArg<SfxInt32Item>(FN_PARAM_1);
++            const SfxInt16Item* pModifier = rReq.GetArg<SfxInt16Item>(FN_PARAM_2);
++            DrawDeselectAll();
++            // End drawing mode as Escape does: rerun the tool's slot.
++            if (FuPoor* pFunc = GetDrawFuncPtr(); pFunc && IsDrawSelMode())
++                GetViewData().GetDispatcher().Execute(pFunc->GetSlotID(), SfxCallMode::SLOT | SfxCallMode::RECORD);
++            if (nSlot == SID_SELECT_COL)
++            {
++                if (pIndex && pModifier)
++                    MarkColumns(static_cast<SCCOL>(pIndex->GetValue()), pModifier->GetValue());
++                else
++                    MarkColumns();
++            }
++            else if (pIndex && pModifier)
++                MarkRows(static_cast<SCROW>(pIndex->GetValue()), pModifier->GetValue());
++            else
++                MarkRows();
++            rReq.Done();
++            break;
++        }
++
+         case SID_SELECT_TABLES:
+         {
+             ScViewData& rViewData = GetViewData();
+diff --git a/sc/source/ui/view/tabvwsha.cxx b/sc/source/ui/view/tabvwsha.cxx
+--- a/sc/source/ui/view/tabvwsha.cxx
++++ b/sc/source/ui/view/tabvwsha.cxx
+@@ -553,6 +553,12 @@
+                     rSet.DisableItem( nWhich );     // enabled only if several sheets are selected
+                 break;
+ 
++            case SID_SELECT_COL:
++            case SID_SELECT_ROW:
++                if (!comphelper::LibreOfficeKit::isActive())
++                    rSet.DisableItem( nWhich );     // desktop: the cell shell owns them
++                break;
++
+             case FID_TOGGLEHIDDENCOLROW:
+                 const svtools::ColorConfig& rColorCfg = ScModule::get()->GetColorConfig();
+                 rSet.Put( SfxBoolItem( nWhich, rColorCfg.GetColorValue(svtools::CALCHIDDENROWCOL).bIsVisible) );

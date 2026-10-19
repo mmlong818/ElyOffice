@@ -74,6 +74,11 @@ pub fn read() -> Result<Option<Clip>> {
     })
 }
 
+/// The clipboard's HTML, if any; gpui's reads omit it.
+pub fn html() -> Result<Option<String>> {
+    with_board(|board| absent_ok(board.get().html()))
+}
+
 /// Empty or other-format clipboards read as None.
 fn absent_ok<T>(outcome: Result<T, Error>) -> Result<Option<T>> {
     match outcome {

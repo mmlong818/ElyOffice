@@ -395,6 +395,7 @@ fn a_delete_stays_with_its_workbook() {
 
 mod analysis;
 mod data;
+mod menu;
 mod names;
 mod numbers;
 mod output;

@@ -22,40 +22,31 @@ use gpui::{
     ParentElement as _, PathPromptOptions, Render, Styled as _, Window, div,
 };
 
-use crate::engine::{Mark, Pages};
-use crate::keys::{
-    CheckDisk, ColumnLeft, ColumnRight, DeleteColumn, DeleteRow, InsertTable, PreviewMode,
-    RowAbove, RowBelow, SourceMode, VisualMode,
-};
-use crate::page::Mode;
-use crate::view::MarkView;
+use crate::engine::Mark;
+use crate::view::{MarkView, Mode};
 
 pub struct Desk {
     pub core: Core<Desk>,
     /// The tab being renamed and its name field.
     pub naming: Option<(u64, Entity<TextInput>)>,
+    /// The export dialog's tab and format.
+    pub exporting: Option<(u64, crate::output::Format)>,
     pub folder: Option<crate::folder::Folder>,
     /// Folder listings so far; searches redo on a new one.
     pub listings: u64,
     /// Files and folders opened lately, newest first.
     pub recent: Vec<PathBuf>,
     pub recent_file: PathBuf,
-    /// A file asked to open at a place.
-    pub going: Option<(PathBuf, serde_json::Value)>,
+    /// A file asked to open at a line and column.
+    pub going: Option<(PathBuf, (usize, usize))>,
     /// The path each tab last put in the recent list.
     pub remembered: HashMap<u64, PathBuf>,
-    side: Entity<crate::side::Side>,
-    pub finder: Option<crate::finding::Finder>,
+    pub(crate) side: Entity<crate::side::Side>,
     pub watcher: Option<notify::RecommendedWatcher>,
     /// The folders the watcher covers.
     pub watched: Vec<PathBuf>,
     pub comparing: Option<crate::compare::Comparing>,
     pub keeping: crate::restore::Keeping,
-    /// The export dialog's choice, while it is open.
-    pub output: Option<crate::export::Output>,
-    /// Pages printing to PDF, by job; several may run.
-    pub printing: HashMap<u64, crate::export::Printing>,
-    pub print_jobs: u64,
     pub look: crate::look::Look,
     pub look_file: PathBuf,
     /// Git's word on the shown file, and which tab asked.
@@ -63,6 +54,10 @@ pub struct Desk {
     asked: Option<u64>,
     /// The shown file's fingerprint when Git was last asked.
     asked_print: Option<ely_files::Fingerprint>,
+    /// The find box, while open.
+    pub(crate) finding: Option<crate::finding::Find>,
+    /// The copy being converted; a newer one drops it.
+    pub(crate) copying: Option<gpui::Task<()>>,
 }
 
 impl Host for Desk {
@@ -113,8 +108,7 @@ impl Host for Desk {
     /// Save As or rename moves where images come from.
     fn observed(&mut self, id: u64, view: &Entity<MarkView>, cx: &mut Context<Self>) {
         self.watch_folders(cx);
-        let look = serde_json::to_value(&self.look).expect("a look serializes");
-        view.update(cx, |view, cx| view.set_look(look, cx));
+        self.look_once(id, cx);
         let changed = view.read(cx).changed();
         self.autosave(id, changed, cx);
         let recheck = self.tab_mut(id).is_some_and(|tab| {
@@ -126,8 +120,9 @@ impl Host for Desk {
         if recheck {
             self.look(id, cx);
         }
-        if view.read(cx).shown {
-            self.restore_shown(id, cx);
+        self.restore_shown(id, cx);
+        if self.finding.is_some() {
+            self.count(cx);
         }
         // A save changes what Git sees.
         let print = self.active_tab().and_then(|tab| tab.session.fingerprint());
@@ -139,19 +134,18 @@ impl Host for Desk {
             .tab(id)
             .and_then(|tab| tab.session.path().map(PathBuf::from));
         if let Some(path) = path {
-            view.update(cx, |view, _| view.attachable = true);
             if let Some(folder) = path.parent() {
                 view.update(cx, |view, cx| view.moved(folder.to_path_buf(), cx));
             }
             self.track_recent(id, &path, cx);
-            let real = std::fs::canonicalize(&path).ok();
+            let real = dunce::canonicalize(&path).ok();
             if self
                 .going
                 .as_ref()
                 .is_some_and(|(file, _)| Some(file) == real.as_ref())
-                && let Some((_, place)) = self.going.take()
+                && let Some((_, at)) = self.going.take()
             {
-                view.update(cx, |view, cx| view.reveal(place, cx));
+                self.reveal_later(view.clone(), at, cx);
             }
         }
         cx.notify();
@@ -160,15 +154,21 @@ impl Host for Desk {
 
 /// The window root; files given at launch open.
 pub fn open(app: AppId, window: &mut Window, cx: &mut App) -> Entity<Root> {
+    let data = ely_platform::data_dir(app)
+        .unwrap_or_else(|error| startup::fail(app, &format!("{error:#}")));
+    open_in(app, data, window, cx).0
+}
+
+/// The window root and its desk, kept in `data`.
+pub(crate) fn open_in(
+    app: AppId,
+    data: PathBuf,
+    window: &mut Window,
+    cx: &mut App,
+) -> (Entity<Root>, Entity<Desk>) {
     let fail = |error: String| -> ! { startup::fail(app, &error) };
-    let data = ely_platform::data_dir(app).unwrap_or_else(|error| fail(format!("{error:#}")));
-    if let Err(error) = ely_web_content::start(&data, cx) {
-        fail(format!("{error:#}"));
-    }
-    let dir = crate::page::content().unwrap_or_else(|error| fail(format!("{error:#}")));
     let work = ely_office::fresh_work(&data).unwrap_or_else(|error| fail(format!("{error}")));
     crate::keys::bind(cx);
-    let pages = Arc::new(Mutex::new(Pages { dir }));
     let recent_file = data.join("recent.json");
     let look_file = data.join("look.json");
     // An unreadable look is reported; the default shows.
@@ -187,8 +187,9 @@ pub fn open(app: AppId, window: &mut Window, cx: &mut App) -> Entity<Root> {
         let this = cx.entity();
         let side = cx.new(|cx| crate::side::Side::new(&this, window, cx));
         Desk {
-            core: Core::new(pages, work, cx),
+            core: Core::new(Arc::new(Mutex::new(())), work, cx),
             naming: None,
+            exporting: None,
             folder: None,
             listings: 0,
             recent,
@@ -196,19 +197,17 @@ pub fn open(app: AppId, window: &mut Window, cx: &mut App) -> Entity<Root> {
             going: None,
             remembered: HashMap::new(),
             side,
-            finder: None,
             watcher: None,
             watched: Vec::new(),
             comparing: None,
             keeping,
-            output: None,
-            printing: Default::default(),
-            print_jobs: 0,
             look: look.clone(),
             look_file,
             tracked: None,
             asked: None,
             asked_print: None,
+            finding: None,
+            copying: None,
         }
     });
     let menus = crate::keys::menus(&look, cx);
@@ -228,7 +227,12 @@ pub fn open(app: AppId, window: &mut Window, cx: &mut App) -> Entity<Root> {
         // Launch files stand alone; unsaved text still returns.
         if asked.is_empty() {
             for path in kept {
+                // A restored tab does not rejoin the recent list.
+                let (id, real) = (desk.core.next, dunce::canonicalize(&path).ok());
                 desk.open_path(path, cx);
+                if let Some(real) = real.filter(|_| desk.core.next > id) {
+                    desk.remembered.insert(id, real);
+                }
             }
         }
         for (at, name) in desk.keeping.untitled() {
@@ -298,7 +302,7 @@ pub fn open(app: AppId, window: &mut Window, cx: &mut App) -> Entity<Root> {
             desk.should_close(window, cx)
         })
     });
-    root
+    (root, desk)
 }
 
 impl Desk {
@@ -337,16 +341,28 @@ impl Desk {
         self.new_from_text("untitled.md", "", cx);
     }
 
-    fn table(&mut self, op: &str, cx: &mut Context<Self>) {
+    pub(crate) fn switch(&mut self, mode: Mode, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(view) = self.active_view() {
-            view.update(cx, |view, cx| view.table(op, cx));
+            view.update(cx, |view, cx| view.switch(mode, window, cx));
         }
     }
 
-    fn switch(&mut self, mode: Mode, cx: &mut Context<Self>) {
-        if let Some(view) = self.active_view() {
-            view.update(cx, |view, cx| view.switch(mode, cx));
-        }
+    /// Shows line and column `at` from outside an update.
+    pub fn reveal_later(
+        &mut self,
+        view: Entity<MarkView>,
+        at: (usize, usize),
+        cx: &mut Context<Self>,
+    ) {
+        cx.spawn(async move |desk, cx| {
+            let shown = ely_office::in_window(&desk, cx, |_, window, cx| {
+                view.update(cx, |view, cx| view.reveal(at, window, cx))
+            });
+            if let Err(error) = shown {
+                log::warn!("mark: line {} was not shown: {error:#}", at.0);
+            }
+        })
+        .detach();
     }
 
     fn status(&self, cx: &mut Context<Self>) -> StatusBar {
@@ -367,9 +383,9 @@ impl Desk {
                 control.segment(mode.name(), crate::keys::label(mode, cx), Some(icon))
             },
         );
-        let modes = modes.on_change(move |key, _, cx| {
+        let modes = modes.on_change(move |key, window, cx| {
             if let Some(mode) = Mode::parse(key) {
-                this.update(cx, |desk, cx| desk.switch(mode, cx));
+                this.update(cx, |desk, cx| desk.switch(mode, window, cx));
             }
         });
         let bar = StatusBar::new().left(state);
@@ -417,28 +433,17 @@ impl Render for Desk {
             .on_action(cx.listener(Self::on_save))
             .on_action(cx.listener(Self::on_save_as))
             .on_action(cx.listener(Self::on_rename))
-            .on_action(cx.listener(Self::on_find))
-            .on_action(cx.listener(Self::on_export))
-            .on_action(cx.listener(Self::on_print))
             .on_action(cx.listener(Self::on_close_tab))
-            .on_action(cx.listener(|desk, _: &InsertTable, _, cx| desk.table("insert", cx)))
-            .on_action(cx.listener(|desk, _: &RowAbove, _, cx| desk.table("row-above", cx)))
-            .on_action(cx.listener(|desk, _: &RowBelow, _, cx| desk.table("row-below", cx)))
-            .on_action(cx.listener(|desk, _: &ColumnLeft, _, cx| desk.table("column-left", cx)))
-            .on_action(cx.listener(|desk, _: &ColumnRight, _, cx| desk.table("column-right", cx)))
-            .on_action(cx.listener(|desk, _: &DeleteRow, _, cx| desk.table("delete-row", cx)))
-            .on_action(cx.listener(|desk, _: &DeleteColumn, _, cx| desk.table("delete-column", cx)))
-            .on_action(cx.listener(|desk, _: &CheckDisk, _, cx| desk.look_all(cx)))
-            .on_action(cx.listener(|desk, _: &VisualMode, _, cx| desk.switch(Mode::Visual, cx)))
-            .on_action(cx.listener(|desk, _: &SourceMode, _, cx| desk.switch(Mode::Source, cx)))
-            .on_action(cx.listener(|desk, _: &PreviewMode, _, cx| desk.switch(Mode::Preview, cx)))
+            .on_action(cx.listener(Self::on_find))
             .child(shell)
             .children(self.core_dialog(cx))
             .children(self.naming_element(cx))
-            .children(self.find_bar(cx))
             .children(self.compare_dialog(cx))
+            .children(self.find_box(cx))
             .children(self.export_dialog(cx));
-        Self::look_actions(root, cx)
+        let root = Self::mode_actions(Self::look_actions(root, cx), cx);
+        let root = Self::block_actions(Self::table_actions(root, cx), cx);
+        Self::output_actions(Self::clip_actions(root, cx), cx)
     }
 }
 
@@ -447,7 +452,7 @@ fn large_banner(
     view: &Entity<MarkView>,
     cx: &mut Context<Desk>,
 ) -> Option<ely_gpui_component::feedback::Banner> {
-    if !view.read(cx).large {
+    if !view.read(cx).large() {
         return None;
     }
     let size = view.read(cx).bytes() as f64 / (1024.0 * 1024.0);
@@ -458,3 +463,6 @@ fn large_banner(
         said,
     ))
 }
+
+#[cfg(test)]
+pub(crate) mod tests;

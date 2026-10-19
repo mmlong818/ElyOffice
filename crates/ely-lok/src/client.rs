@@ -270,6 +270,15 @@ impl Worker {
         Ok(())
     }
 
+    /// Turns `step` parts, or posts `key` if something is picked.
+    pub fn turn(&mut self, doc: &Doc, step: i32, key: Option<(u32, i32)>) -> io::Result<Option<usize>> {
+        let (char_code, key_code) = key.unwrap_or_default();
+        let doc_id = self.doc_id(doc)?;
+        let payload = Pack::new().u64(doc_id).i64(step.into()).i64(char_code.into()).i64(key_code.into()).bytes();
+        let shown = Unpack::new(&self.request(tag::TURN, &payload)?).i64()?;
+        Ok(usize::try_from(shown).ok())
+    }
+
     /// Drags a selected object's handle, start then end.
     pub fn drag_graphic(&mut self, doc: &Doc, from: (i32, i32), to: (i32, i32)) -> io::Result<()> {
         for (kind, (x, y)) in [(0, from), (1, to)] {

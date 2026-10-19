@@ -252,7 +252,7 @@ impl Deck {
         // A show starts from black; effects play on the page.
         let behind = match &preview.playing {
             Playing::Transition { .. } => gpui::black(),
-            Playing::Effects { .. } => ely_lok::paper(cx),
+            Playing::Effects { .. } => ely_lok::paper(),
         };
         let content = match &preview.playing {
             Playing::Effects {
@@ -266,7 +266,7 @@ impl Deck {
                 } else {
                     (t / preview.length) as f32
                 };
-                let paper = ely_lok::paper(cx);
+                let paper = ely_lok::paper();
                 // Exits are not read; the old slide shows everything.
                 let from = (from.as_deref())
                     .map(|from| compose::slide(from, |_| true, frame, paper).into_any_element());

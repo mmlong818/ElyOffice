@@ -212,24 +212,38 @@ pub fn same_file(a: &Path, b: &Path) -> io::Result<bool> {
 
 /// Copies an attachment in; the source is never touched (FILE-07).
 pub fn import_attachment(source: &Path, dir: &Path) -> io::Result<PathBuf> {
-    std::fs::create_dir_all(dir).map_err(|e| with_path(dir, e))?;
     let name = source.file_name().ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::InvalidInput,
             format!("{} has no file name", source.display()),
         )
     })?;
-    let mut target = dir.join(name);
-    let stem = Path::new(name)
-        .file_stem()
-        .unwrap_or_default()
-        .to_string_lossy()
-        .into_owned();
-    let ext = Path::new(name)
+    let mut from = std::fs::File::open(source).map_err(|e| with_path(source, e))?;
+    let target = attach(dir, Path::new(name), |to| io::copy(&mut from, to).map(drop))?;
+    log::info!("files: imported {} to {}", source.display(), target.display());
+    Ok(target)
+}
+
+/// Writes `bytes` into `dir` as `name`, or a free variant.
+pub fn write_attachment(name: &str, bytes: &[u8], dir: &Path) -> io::Result<PathBuf> {
+    let target = attach(dir, Path::new(name), |to| to.write_all(bytes))?;
+    log::info!("files: wrote {} bytes to {}", bytes.len(), target.display());
+    Ok(target)
+}
+
+/// Claims a free name like `name`, then fills it.
+fn attach(
+    dir: &Path,
+    name: &Path,
+    fill: impl FnOnce(&mut std::fs::File) -> io::Result<()>,
+) -> io::Result<PathBuf> {
+    std::fs::create_dir_all(dir).map_err(|e| with_path(dir, e))?;
+    let stem = name.file_stem().unwrap_or_default().to_string_lossy().into_owned();
+    let ext = name
         .extension()
         .map(|ext| ext.to_string_lossy().into_owned())
         .unwrap_or_default();
-    let mut from = std::fs::File::open(source).map_err(|e| with_path(source, e))?;
+    let mut target = dir.join(name);
     let mut counter = 1;
     // Claims the name; another writer's file is never replaced.
     let mut to = loop {
@@ -242,17 +256,12 @@ pub fn import_attachment(source: &Path, dir: &Path) -> io::Result<PathBuf> {
             Err(e) => return Err(with_path(&target, e)),
         }
     };
-    let copied = io::copy(&mut from, &mut to).and_then(|_| to.flush());
-    if let Err(e) = copied {
+    let filled = fill(&mut to).and_then(|()| to.flush());
+    if let Err(e) = filled {
         // A half copy is not left behind.
         std::fs::remove_file(&target).ok();
         return Err(with_path(&target, e));
     }
-    log::info!(
-        "files: imported {} to {}",
-        source.display(),
-        target.display()
-    );
     Ok(target)
 }
 
@@ -372,8 +381,10 @@ fn write_ticketed(
             return Err(SaveError::Io(error));
         }
     };
+    // Writes keep `\\?\`; the session shows plain.
+    let kept = dunce::simplified(path).to_path_buf();
     session
-        .finish_save(ticket, path.to_path_buf(), written)
+        .finish_save(ticket, kept.clone(), written)
         .map_err(|_| {
             SaveError::Io(io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -381,7 +392,7 @@ fn write_ticketed(
             ))
         })?;
     Ok(Saved {
-        path: path.to_path_buf(),
+        path: kept,
         written,
         backup,
     })

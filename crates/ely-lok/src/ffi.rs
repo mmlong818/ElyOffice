@@ -69,6 +69,8 @@ macro_rules! call {
     }};
 }
 
+#[cfg(target_os = "macos")]
+mod accessory;
 mod document;
 #[cfg(windows)]
 #[allow(dead_code)]
@@ -124,7 +126,7 @@ impl Lok {
 
     /// dlopens the LOK library and hooks with the profile URL.
     pub fn hook(install: &Path, profile_url: &str) -> io::Result<Self> {
-        let install = std::fs::canonicalize(install)?;
+        let install = dunce::canonicalize(install)?;
         let install = install.as_path();
         let install_str = install.to_string_lossy().into_owned();
         let install_c = cstring(&install_str)?;
@@ -133,6 +135,9 @@ impl Lok {
         let lib = Arc::new(Library::open(install)?);
         #[cfg(not(windows))]
         let lib = Library::open(install)?;
+        // Before the kit starts, so no Dock icon shows.
+        #[cfg(target_os = "macos")]
+        accessory::hide()?;
         let hook: Hook2 = unsafe {
             lib.symbol(b"libreofficekit_hook_2\0")
                 .or_else(|_| lib.symbol(b"libreofficekit_hook\0"))
@@ -193,6 +198,8 @@ impl Lok {
             type F = unsafe extern "C" fn(*mut Kit, u64);
             call!((*kit).class, 7, F, kit, features);
         })?;
+        #[cfg(target_os = "macos")]
+        accessory::check()?;
         log::info!("lok: hooked {}", install_str);
         Ok(lok)
     }

@@ -2,8 +2,8 @@
 
 use ely_gpui_component::theme::ActiveTheme;
 use gpui::{
-    BorderStyle, Bounds, ContentMask, Context, Corners, CursorStyle, Edges, ElementInputHandler,
-    InteractiveElement, IntoElement, MouseButton, ParentElement, Render, Role,
+    BorderStyle, Bounds, ContentMask, Context, Corners, CursorStyle, DispatchPhase, Edges,
+    ElementInputHandler, InteractiveElement, IntoElement, MouseButton, MouseMoveEvent, ParentElement, Render, Role,
     StatefulInteractiveElement, Styled, Window, canvas, div, fill, outline, px, quad, size,
     transparent_black,
 };
@@ -15,23 +15,21 @@ use gpui::{Pixels, RenderImage, point};
 use super::{CONTEXT, LokView, TILE_TWIPS, TWIPS_PER_PIXEL, handles, input};
 use crate::Rect;
 
-/// Ely's kernel color schemes, from `ely.xcd`.
-const DARK: &str = "COLOR_SCHEME_ELY_DARK";
-const LIGHT: &str = "COLOR_SCHEME_ELY_LIGHT";
+/// Ely's kernel color scheme, from `ely.xcd`.
+pub const SCHEME: &str = "COLOR_SCHEME_ELY_LIGHT";
 
-/// The kernel scheme for a light or dark app.
-pub fn scheme(dark: bool) -> &'static str {
-    if dark { DARK } else { LIGHT }
+/// A page's colour, the scheme's `DocColor`.
+pub fn paper() -> gpui::Hsla {
+    gpui::white()
 }
 
 impl LokView {
-    /// Paints with the app's light or dark scheme.
-    pub(super) fn follow_theme(&mut self, dark: bool) {
-        if self.dark != Some(dark) {
-            self.dark = Some(dark);
-            let scheme = scheme(dark);
-            log::info!("lok: paints with {scheme}");
-            self.send(input::Input::Theme(scheme));
+    /// Content keeps the file's colours in any app theme.
+    pub(super) fn paint_light(&mut self) {
+        if !self.lit {
+            self.lit = true;
+            log::info!("lok: paints with {SCHEME}");
+            self.send(input::Input::Theme(SCHEME));
         }
     }
 }
@@ -43,11 +41,11 @@ impl Render for LokView {
             self.keep_scroll(|view| view.geom.dpi = dpi);
             self.retire_tiles();
         }
-        self.follow_theme(cx.theme().is_dark());
+        self.paint_light();
         let this = cx.entity().clone();
         let focus = self.focus.clone();
         let colors = &cx.theme().colors;
-        let paper = super::paper(cx);
+        let paper = super::paper();
         let (selection_color, caret_color) = (colors.selection, colors.focus);
         let canvas_color = colors.sunken;
         let caret_width = cx.theme().caret_width().to_pixels(window.rem_size());
@@ -59,7 +57,7 @@ impl Render for LokView {
             .aria_value(self.a11y.text.clone())
             .key_context(CONTEXT)
             .track_focus(&self.focus)
-            .cursor(CursorStyle::IBeam)
+            .cursor(self.border_pointer().unwrap_or(self.pointer))
             .size_full()
             .overflow_hidden()
             .bg(canvas_color)
@@ -164,6 +162,9 @@ impl Render for LokView {
                                     ));
                                 }
                             }
+                            if let Some(guide) = painted.guide {
+                                window.paint_quad(fill(guide, frame_color));
+                            }
                             if let Some(caret) = painted.caret.filter(|_| focus.is_focused(window))
                             {
                                 let caret = Bounds {
@@ -173,6 +174,19 @@ impl Render for LokView {
                                 window.paint_quad(fill(caret, caret_color));
                             }
                         });
+                        if painted.guide.is_some() {
+                            // A held border follows the pointer out of the view.
+                            let this = this.clone();
+                            window.on_mouse_event(move |event: &MouseMoveEvent, phase, _, app| {
+                                if phase == DispatchPhase::Bubble {
+                                    this.update(app, |view, cx| {
+                                        if view.move_border(event.position) {
+                                            cx.notify();
+                                        }
+                                    });
+                                }
+                            });
+                        }
                         window.handle_input(&focus, ElementInputHandler::new(bounds, this), app);
                     },
                 )
@@ -196,6 +210,8 @@ pub(super) struct Painted {
     pub(super) frame: Option<(Bounds<Pixels>, Vec<Bounds<Pixels>>)>,
     /// The references of a formula being typed.
     pub(super) marks: Vec<(Bounds<Pixels>, gpui::Hsla)>,
+    /// A held table border's guide line.
+    pub(super) guide: Option<Bounds<Pixels>>,
 }
 
 impl LokView {
@@ -357,6 +373,33 @@ impl LokView {
             cell: self.cell.cursor.map(rect),
             frame,
             marks: self.marks(),
+            guide: self.guide(),
+        }
+    }
+}
+
+/// The cursor for a kernel CSS pointer name.
+pub(super) fn pointer(css: &str) -> CursorStyle {
+    match css {
+        "default" | "wait" | "help" => CursorStyle::Arrow,
+        "text" => CursorStyle::IBeam,
+        "vertical-text" => CursorStyle::IBeamCursorForVerticalLayout,
+        "crosshair" | "fill" => CursorStyle::Crosshair,
+        "move" => CursorStyle::ClosedHand,
+        "grab" => CursorStyle::OpenHand,
+        "pointer" => CursorStyle::PointingHand,
+        "n-resize" | "s-resize" => CursorStyle::ResizeUpDown,
+        "e-resize" | "w-resize" => CursorStyle::ResizeLeftRight,
+        "ne-resize" | "sw-resize" => CursorStyle::ResizeUpRightDownLeft,
+        "nw-resize" | "se-resize" => CursorStyle::ResizeUpLeftDownRight,
+        "col-resize" => CursorStyle::ResizeColumn,
+        "row-resize" => CursorStyle::ResizeRow,
+        "copy" => CursorStyle::DragCopy,
+        "alias" => CursorStyle::DragLink,
+        "not-allowed" => CursorStyle::OperationNotAllowed,
+        _ => {
+            log::warn!("lok: unknown pointer {css}");
+            CursorStyle::Arrow
         }
     }
 }

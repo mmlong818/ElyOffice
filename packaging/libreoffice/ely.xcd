@@ -36,25 +36,6 @@
   <oor:component-data oor:package="org.openoffice.Office" oor:name="UI">
     <node oor:name="ColorScheme">
       <node oor:name="ColorSchemes">
-        <node oor:name="COLOR_SCHEME_ELY_DARK" oor:op="replace">
-          <node oor:name="DocColor"><prop oor:name="Color"><value>2894892</value></prop></node>
-          <node oor:name="AppBackground"><prop oor:name="Color"><value>2434341</value></prop></node>
-          <node oor:name="FontColor"><prop oor:name="Color"><value>15987184</value></prop></node>
-          <node oor:name="DocBoundaries"><prop oor:name="Color"><value>5592405</value></prop></node>
-          <node oor:name="TableBoundaries"><prop oor:name="Color"><value>5592405</value></prop></node>
-          <node oor:name="CalcGrid"><prop oor:name="Color"><value>5592405</value></prop></node>
-          <node oor:name="Links"><prop oor:name="Color"><value>8303091</value></prop></node>
-          <node oor:name="LinksVisited"><prop oor:name="Color"><value>12297192</value></prop></node>
-          <node oor:name="Shadow"><prop oor:name="Color"><value>0</value></prop></node>
-          <node oor:name="WriterFieldShadings"><prop oor:name="Color"><value>4144959</value></prop></node>
-          <node oor:name="WriterIdxShadings"><prop oor:name="Color"><value>4144959</value></prop></node>
-          <node oor:name="CalcNotesBackground"><prop oor:name="Color"><value>16777152</value></prop></node>
-          <node oor:name="CalcPageBreak"><prop oor:name="Color"><value>6052440</value></prop></node>
-          <node oor:name="CalcHiddenColRow"><prop oor:name="Color"><value>6052440</value></prop></node>
-          <node oor:name="CalcCellFocus"><prop oor:name="Color"><value>6922728</value></prop></node>
-          <node oor:name="WriterPageBreaks"><prop oor:name="Color"><value>6052440</value></prop></node>
-          <node oor:name="DrawGrid"><prop oor:name="Color"><value>5592405</value></prop></node>
-        </node>
         <node oor:name="COLOR_SCHEME_ELY_LIGHT" oor:op="replace">
           <node oor:name="DocColor"><prop oor:name="Color"><value>16777215</value></prop></node>
           <node oor:name="AppBackground"><prop oor:name="Color"><value>15987184</value></prop></node>

@@ -19,7 +19,7 @@ fn main() {
         "shim/ely_write.c", "shim/ely_pen.c", "shim/ely_place.c", "shim/ely_annot.c",
         "shim/ely_form.c", "shim/ely_ocr.c", "shim/ely_outline.c", "shim/ely_meta.c",
         "shim/ely_redact.c", "shim/ely_alt.c", "shim/ely_clean.c", "shim/ely_secure.c",
-        "shim/ely_sign.c", "shim/ely_output.c", "shim/ely_shim.h", "src/proto.rs",
+        "shim/ely_sign.c", "shim/ely_output.c", "shim/ely_story.c", "shim/ely_shim.h", "src/proto.rs",
         "src/bin/ely-pdf-worker/main.rs", "src/bin/ely-pdf-worker/ffi.rs",
         "src/bin/ely-pdf-worker/edit.rs", "src/bin/ely-pdf-worker/content.rs", "src/edit.rs",
         "src/content.rs", "src/marks.rs", "src/bin/ely-pdf-worker/marks.rs",
@@ -59,10 +59,10 @@ fn main() {
     let mut shim = cc::Build::new();
     for source in [
         "shim/ely_mupdf.c", "shim/ely_pages.c", "shim/ely_insert.c", "shim/ely_text.c",
-        "shim/ely_write.c", "shim/ely_place.c", "shim/ely_annot.c", "shim/ely_form.c",
+        "shim/ely_write.c", "shim/ely_pen.c", "shim/ely_place.c", "shim/ely_annot.c", "shim/ely_form.c",
         "shim/ely_ocr.c", "shim/ely_outline.c", "shim/ely_meta.c", "shim/ely_redact.c",
         "shim/ely_alt.c", "shim/ely_clean.c", "shim/ely_secure.c", "shim/ely_sign.c",
-        "shim/ely_output.c",
+        "shim/ely_output.c", "shim/ely_story.c",
     ] {
         shim.file(source);
     }

@@ -11,6 +11,7 @@ mod figures;
 mod format;
 mod formulas;
 mod grid;
+mod menu;
 mod output;
 mod page;
 mod protect;
