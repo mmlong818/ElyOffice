@@ -17,7 +17,7 @@ rm -f "$verdict"
 # The list that holds the item.
 list=$(grep -l -- "] $id " tasks/TASKS.md tasks/BUGS.md site/TASKS.md site/video/TASKS.md | head -n 1)
 [ -n "$list" ] || { echo "review.sh: no item $id in any task list" >&2; exit 2; }
-prompt="You review item $id of Ely Office, round $round. Work dir is the project root; agents.md holds the rules.
+prompt="You review item $id of Ely Office, round $round. Work dir is the project root; agents.md holds the rules; docs/decisions.md is the dated decision log.
 Read the line for $id in $list and the PRD.md sections it cites (for tasks/BUGS.md: its entry in docs/BugList.md); the items before it in that list are done.
 Scope: $scope
 Find defects only: behavior that breaks the PRD, errors swallowed, silent fallbacks, dead code, files over 500 lines, comments over one line or ten words, boxes inside boxes or useless subtitles in UI, abstractions with one user, missing or weak tests, claims no evidence backs. Build and run the tests yourself.
@@ -37,7 +37,7 @@ pane=$(herdr pane split --current --direction right --cwd "$PWD" --no-focus | jq
 echo "$pane" >"$last"
 started=
 for _ in 1 2 3 4 5; do
-  if err=$(herdr agent start "$name" --kind codex --pane "$pane" --timeout 120000 -- --yolo --model gpt-6.1-sol -c 'model_reasoning_effort="xhigh"' -c 'service_tier="fast"' -c check_for_update_on_startup=false 2>&1); then
+  if err=$(herdr agent start "$name" --kind codex --pane "$pane" --timeout 120000 -- --yolo --model gpt-6-astra -c 'model_reasoning_effort="xhigh"' -c 'service_tier="fast"' -c check_for_update_on_startup=false 2>&1); then
     started=1
     break
   fi

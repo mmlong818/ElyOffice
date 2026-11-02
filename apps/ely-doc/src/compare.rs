@@ -80,8 +80,7 @@ impl Docs {
                         Docs::text(cx, "office.error.engine", &[("error", &error.to_string())]);
                     return docs.toast(text, Severity::Danger, cx);
                 }
-                docs.side = Side::Review;
-                cx.notify();
+                docs.show_side(Side::Review, cx);
             }),
         ));
     }

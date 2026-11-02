@@ -1,0 +1,23 @@
+LOK: Calc's selection read counts the cells holding something
+
+ElyTable asks before a merge that would hide more than one cell's
+data, and counted the cells from the selection's text. An empty range
+has no text at all: getTextSelection fails, so merging empty cells
+failed (GitHub ElyOffice #12). .uno:SelectedRange now reports
+"filled", the cells in the selected range holding anything.
+
+--- a/sc/source/ui/unoobj/docuno.cxx
++++ b/sc/source/ui/unoobj/docuno.cxx
+@@ -1155,6 +1155,12 @@
+         rJsonWriter.put("range", aTarget);
+         if (aTarget.isEmpty())
+             return;
++        // Cells holding anything; an empty range has no text.
++        sal_Int64 nFilled = 0;
++        ScCellIterator aCells(rDoc, aRange);
++        for (bool bHas = aCells.first(); bHas; bHas = aCells.next())
++            ++nFilled;
++        rJsonWriter.put("filled", nFilled);
+         // The data inside it: its corners, first row, header guess.
+         SCCOL nCol1 = aRange.aStart.Col(), nCol2 = aRange.aEnd.Col();
+         SCROW nRow1 = aRange.aStart.Row(), nRow2 = aRange.aEnd.Row();

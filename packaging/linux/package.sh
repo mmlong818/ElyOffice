@@ -18,10 +18,14 @@ row=$(awk -F'\t' -v slug="$slug" '$1 == slug { print $2 "\t" $3 }' "$root/packag
 }
 name=${row%%$'\t'*}
 categories=${row##*$'\t'}
+# Ely is MIT; bundled engines keep their licences.
+license=$(awk -F'\t' -v slug="$slug" '$1 == slug { print $5 }' "$root/packaging/apps.tsv")
 # The types it opens, from packaging/types.tsv; none drops the line.
 mimes=$(awk -F'\t' -v slug="$slug" '$1 == slug && !seen[$3]++ { printf "%s;", $3 }' "$root/packaging/types.tsv")
+# A URL scheme needs links, not only files.
+args=$(awk -F'\t' -v slug="$slug" '$1 == slug && $2 ~ /:$/ { found = 1 } END { print found ? "%U" : "%F" }' "$root/packaging/types.tsv")
 desktop_entry() {
-  sed -e "s/@NAME@/$name/" -e "s/@SLUG@/$slug/g" -e "s/@CATEGORIES@/$categories/" -e "s|@MIME@|$mimes|" \
+  sed -e "s/@NAME@/$name/" -e "s/@SLUG@/$slug/g" -e "s/@CATEGORIES@/$categories/" -e "s|@MIME@|$mimes|" -e "s/@ARGS@/$args/" \
     -e '/^MimeType=$/d' "$root/packaging/linux/app.desktop.in"
 }
 
@@ -116,6 +120,7 @@ version=$(awk -F'"' '/^version = / { print $2; exit }' "$root/Cargo.toml")
 out=$dist/$name-$version-linux-$arch.AppImage
 ARCH=$arch "$pack" --appimage-extract-and-run --runtime-file "$runtime" "$appdir" "$out"
 echo "$out"
+"$root/packaging/manifest.sh" "$slug" "linux-$arch" "$out"
 
 # Libraries the AppDir needs and does not bundle.
 broken() {
@@ -192,8 +197,8 @@ release: 1
 maintainer: ZacharyZhang
 vendor: ZacharyZhang
 description: $name, part of Ely Office
-homepage: https://git.zacharyzhang.com/ZacharyZhang-NY/ElyOffice
-license: AGPL-3.0-or-later
+homepage: https://github.com/ELY-Open-Source/ElyOffice
+license: $license
 contents:
   - src: $appdir/usr
     dst: /opt/ely-office/$slug

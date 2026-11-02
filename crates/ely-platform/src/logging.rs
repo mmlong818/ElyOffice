@@ -7,7 +7,8 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use env_logger::{Builder, Env, Target};
+use env_logger::{Builder, Env, Logger, Target};
+use log::{Level, Log, Metadata, Record};
 
 use crate::{AppId, data_dir};
 
@@ -25,6 +26,37 @@ impl Write for Tee {
     fn flush(&mut self) -> io::Result<()> {
         self.0.flush()?;
         io::stderr().flush()
+    }
+}
+
+/// The HTTP library logs raw bytes, tokens too.
+struct Private(Logger);
+
+fn wire(meta: &Metadata) -> bool {
+    let target = meta.target();
+    let http = target == "ureq" || target.starts_with("ureq::") || target.starts_with("ureq_proto");
+    http && meta.level() > Level::Info
+}
+
+/// html5ever says foster parenting is missing; it is not.
+fn stale(record: &Record) -> bool {
+    record.target() == "html5ever::tree_builder"
+        && record.args().as_str() == Some("foster parenting not implemented")
+}
+
+impl Log for Private {
+    fn enabled(&self, meta: &Metadata) -> bool {
+        !wire(meta) && self.0.enabled(meta)
+    }
+
+    fn log(&self, record: &Record) {
+        if self.enabled(record.metadata()) && !stale(record) {
+            self.0.log(record);
+        }
+    }
+
+    fn flush(&self) {
+        self.0.flush();
     }
 }
 
@@ -55,6 +87,11 @@ fn trimmed(path: &Path, cap: u64) -> std::io::Result<()> {
     fs::write(path, &tail[whole..])
 }
 
+/// Milliseconds in each stamp: the bench times by them.
+fn built(builder: &mut Builder, target: Target) -> Logger {
+    builder.format_timestamp_millis().target(target).build()
+}
+
 /// Logs to stderr and a file. `ELY_LOG` sets level.
 pub fn init(app: AppId) -> Result<()> {
     init_in(app, &data_dir(app)?)
@@ -69,10 +106,13 @@ pub fn init_in(app: AppId, dir: &Path) -> Result<()> {
         .append(true)
         .open(&path)
         .with_context(|| format!("cannot open {}", path.display()))?;
-    Builder::from_env(Env::new().filter_or("ELY_LOG", "info"))
-        .target(Target::Pipe(Box::new(Tee(file))))
-        .try_init()
-        .context("a logger is already set")?;
+    let logger = built(
+        &mut Builder::from_env(Env::new().filter_or("ELY_LOG", "info")),
+        Target::Pipe(Box::new(Tee(file))),
+    );
+    let level = logger.filter();
+    log::set_boxed_logger(Box::new(Private(logger))).context("a logger is already set")?;
+    log::set_max_level(level);
     LOG_PATH.set(path).expect("the logger was set once");
 
     let previous = panic::take_hook();
@@ -104,5 +144,68 @@ mod trim_tests {
             kept,
             "a short log stays"
         );
+    }
+}
+
+#[cfg(test)]
+mod filter_tests {
+    use std::{
+        io::Write,
+        sync::{Arc, Mutex},
+    };
+
+    use env_logger::{Builder, Target};
+    use log::{Level, Log, Record};
+
+    #[derive(Clone, Default)]
+    struct Shared(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for Shared {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn logged(target: &str, level: Level, args: std::fmt::Arguments) -> String {
+        let out = Shared::default();
+        let logger = super::built(
+            Builder::new().filter_level(log::LevelFilter::Trace),
+            Target::Pipe(Box::new(out.clone())),
+        );
+        let record = Record::builder()
+            .target(target)
+            .level(level)
+            .args(args)
+            .build();
+        super::Private(logger).log(&record);
+        String::from_utf8(out.0.lock().unwrap().clone()).unwrap()
+    }
+
+    #[test]
+    fn a_stale_html5ever_claim_stays_out_and_others_stay_in() {
+        let tree = "html5ever::tree_builder";
+        let stale = logged(
+            tree,
+            Level::Warn,
+            format_args!("foster parenting not implemented"),
+        );
+        assert!(stale.is_empty(), "{stale}");
+        let other = logged(tree, Level::Warn, format_args!("something else"));
+        assert!(other.contains("something else"), "{other}");
+        let wire = logged("ureq::unit", Level::Debug, format_args!("bytes"));
+        assert!(wire.is_empty(), "{wire}");
+    }
+
+    #[test]
+    fn a_line_is_stamped_to_the_millisecond() {
+        let line = logged("ely", Level::Info, format_args!("ready"));
+        let stamp = line.trim_start_matches('[').split(' ').next().unwrap();
+        let fraction = stamp.trim_end_matches('Z').rsplit_once('.').map(|(_, ms)| ms);
+        assert!(fraction.is_some_and(|ms| ms.len() == 3 && ms.bytes().all(|b| b.is_ascii_digit())), "{line}");
     }
 }

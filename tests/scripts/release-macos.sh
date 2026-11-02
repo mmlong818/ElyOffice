@@ -17,7 +17,7 @@ fail() {
   exit 1
 }
 apps=$(awk -F'\t' '$4 == 1 { print $1 "\t" $2 }' "$root/packaging/apps.tsv")
-[ "$(echo "$apps" | wc -l | tr -d ' ')" = 6 ] || fail "the first batch is not six apps"
+[ "$(echo "$apps" | wc -l | tr -d ' ')" = 7 ] || fail "the first batch is not seven apps"
 while IFS=$'\t' read -r slug name; do
   [ -d "$dist/$name.app" ] || fail "no $dist/$name.app; run packaging/macos/release.sh"
 done <<<"$apps"
@@ -46,7 +46,8 @@ files=$work/files
 mkdir -p "$files/repo"
 cp "$root"/tests/fixtures/office/t.* "$files/"
 printf '# Bundle\n' >"$files/t.md"
-for kind in docx xlsx pptx pdf md; do
+cp "$root/tests/fixtures/mail/sample.eml" "$files/t.eml"
+for kind in docx xlsx pptx pdf md eml; do
   [ -s "$files/t.$kind" ] || fail "no t.$kind sample"
   cp "$files/t.$kind" "$files/u.$kind"
 done
@@ -73,6 +74,7 @@ while IFS=$'\t' read -r slug name; do
     ely-pdf) engines=(MuPDF MuPDF/fonts/urw MuPDF/fonts/sil MuPDF/fonts/noto MuPDF/fonts/droid MuPDF/fonts/han OpenSSL tessdata GreatVibes) ;;
     ely-tree) engines=(Git git-lfs) ;;
     ely-mark) engines=(KaTeX MuPDF MuPDF/fonts/noto OpenSSL GreatVibes) ;;
+    ely-mail) engines=() ;;
   esac
   for part in LICENSE rust-crates.txt "${engines[@]}"; do
     [ -n "$(find "$licenses/$part" -type f -size +0 2>/dev/null)" ] || fail "$name lacks the licences of $part"
@@ -94,6 +96,7 @@ while IFS=$'\t' read -r slug name; do
     minos=$(vtool -show-build "$binary" | awk '/minos/ && !v { v = $2 } END { print v }')
     [ -z "$minos" ] || [ "$(printf '%s\n%s\n' "$minos" "$least" | sort -V | tail -n 1)" = "$least" ] ||
       fail "${binary#"$app"/} needs macOS $minos; $name says $least"
+    "$root/tests/scripts/rpath.sh" "$app" "$binary"
   done < <(find "$app" -type f \( -perm -111 -o -name '*.dylib' \))
   case $slug in
     ely-doc) first=t.docx second=u.docx ;;
@@ -102,11 +105,14 @@ while IFS=$'\t' read -r slug name; do
     ely-pdf) first=t.pdf second=u.pdf ;;
     ely-mark) first=t.md second=u.md ;;
     ely-tree) first=repo second=second ;;
+    ely-mail) first=t.eml second=u.eml ;;
   esac
   # Finder's launch: no arguments, an open request.
   open -n -a "$app" --env "HOME=$home" --env ELY_LOG=info --env ELY_NO_DIALOG=1 "$files/$first"
   case $slug in
     ely-tree) opened() { echo "tree: opened $(cd "$files/$1" && pwd -P)"; } ;;
+    # No file in its log: count the second open.
+    ely-mail) opened() { echo "mail: a message file opened"; } ;;
     *) opened() { echo "$slug: opened $1 as tab"; } ;;
   esac
   waits "$slug" "$(opened "$first")"
@@ -127,7 +133,17 @@ while IFS=$'\t' read -r slug name; do
   esac
   # A running app takes Finder's next file.
   open -a "$app" "$files/$second"
-  waits "$slug" "$(opened "$second")"
+  if [ "$slug" = ely-mail ]; then
+    seen=0
+    for _ in $(seq 240); do
+      seen=$(grep -cF "$(opened "$second")" "$(log_of "$slug")" || true)
+      [ "$seen" -ge 2 ] && break
+      sleep 0.25
+    done
+    [ "$seen" -ge 2 ] || fail "ElyMail did not take the second file"
+  else
+    waits "$slug" "$(opened "$second")"
+  fi
   pkill -f "$app/Contents/MacOS/$slug" || true
   echo "ok: $name"
 done <<<"$apps"

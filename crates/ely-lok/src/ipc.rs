@@ -96,6 +96,8 @@ pub mod tag {
 
 /// How a refusal for a changed document begins.
 pub const STALE: &str = "stale: ";
+/// How a refusal for an empty undo or redo begins.
+pub const NOTHING: &str = "nothing: ";
 
 #[cfg(test)]
 mod tests {

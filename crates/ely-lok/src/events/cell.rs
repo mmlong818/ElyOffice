@@ -5,6 +5,19 @@ use serde_json::Value;
 use super::Rect;
 use crate::ipc::{Pack, Unpack};
 
+/// The function names `id` offers now.
+pub fn offered(id: u64) -> Vec<String> {
+    let slots = super::slots().lock().expect("the events lock");
+    slots.get(&id).map_or_else(Vec::new, |slot| {
+        slot.batch
+            .cell
+            .functions
+            .iter()
+            .map(|function| function.name.clone())
+            .collect()
+    })
+}
+
 /// What a spreadsheet reports about the current cell.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Cell {

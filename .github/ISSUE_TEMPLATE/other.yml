@@ -1,0 +1,11 @@
+name: Other
+description: Questions, docs, ideas, anything else.
+title: "[Other] "
+labels: [question]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What's on your mind
+    validations:
+      required: true

@@ -121,9 +121,10 @@ impl Tree {
         let Some(net) = self.opened_mut(id).and_then(|opened| opened.net.as_mut()) else {
             return;
         };
-        net.stopping = true;
-        if let Err(error) = net.stop.now() {
-            self.failed("tree.error.stop_remote", &error.to_string(), cx);
+        // Only a stop asked for turns failure quiet.
+        match net.stop.now() {
+            Ok(()) => net.stopping = true,
+            Err(error) => self.failed("tree.error.stop_remote", &error.to_string(), cx),
         }
         cx.notify();
     }
@@ -263,9 +264,6 @@ impl Tree {
                 this.update(cx, |tree, cx| tree.stop_remote(id, cx)).ok();
             });
         let alert = Alert::new("tree-net", Severity::Info, verb).body(net.said.clone());
-        if !crate::running::STOPS {
-            return Some(alert.into_any_element());
-        }
         Some(alert.action(stop.into_any_element()).into_any_element())
     }
 }

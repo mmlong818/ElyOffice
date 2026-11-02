@@ -1,0 +1,296 @@
+{
+  "html_body": [
+    1
+  ],
+  "text_body": [
+    1
+  ],
+  "attachments": [
+    2,
+    3
+  ],
+  "parts": [
+    {
+      "headers": [
+        {
+          "name": "message_id",
+          "value": {
+            "Text": "4.2.0.58.20000519005818.00a86aa0@pop.example.com"
+          },
+          "offset_field": 0,
+          "offset_start": 11,
+          "offset_end": 63
+        },
+        {
+          "name": {
+            "other": "X-Sender"
+          },
+          "value": {
+            "Text": "dwsauder@pop.example.com (Unverified)"
+          },
+          "offset_field": 63,
+          "offset_start": 72,
+          "offset_end": 111
+        },
+        {
+          "name": {
+            "other": "X-Mailer"
+          },
+          "value": {
+            "Text": "QUALCOMM Windows Eudora Pro Version 4.2.0.58"
+          },
+          "offset_field": 111,
+          "offset_start": 120,
+          "offset_end": 167
+        },
+        {
+          "name": "date",
+          "value": {
+            "DateTime": {
+              "year": 2000,
+              "month": 5,
+              "day": 19,
+              "hour": 0,
+              "minute": 59,
+              "second": 31,
+              "tz_before_gmt": true,
+              "tz_hour": 4,
+              "tz_minute": 0
+            }
+          },
+          "offset_field": 167,
+          "offset_start": 172,
+          "offset_end": 205
+        },
+        {
+          "name": "to",
+          "value": {
+            "Address": {
+              "List": [
+                {
+                  "name": "Heinz Müller",
+                  "address": "mueller@example.com"
+                }
+              ]
+            }
+          },
+          "offset_field": 205,
+          "offset_start": 208,
+          "offset_end": 261
+        },
+        {
+          "name": "from",
+          "value": {
+            "Address": {
+              "List": [
+                {
+                  "name": "Doug Sauder",
+                  "address": "dwsauder@example.com"
+                }
+              ]
+            }
+          },
+          "offset_field": 261,
+          "offset_start": 266,
+          "offset_end": 302
+        },
+        {
+          "name": "subject",
+          "value": {
+            "Text": "Die Hasen und die Frösche"
+          },
+          "offset_field": 302,
+          "offset_start": 310,
+          "offset_end": 354
+        },
+        {
+          "name": "mime_version",
+          "value": {
+            "Text": "1.0"
+          },
+          "offset_field": 354,
+          "offset_start": 367,
+          "offset_end": 372
+        },
+        {
+          "name": "content_type",
+          "value": {
+            "ContentType": {
+              "c_type": "multipart",
+              "c_subtype": "mixed",
+              "attributes": [
+                {
+                  "name": "boundary",
+                  "value": "=====================_716740438==_"
+                }
+              ]
+            }
+          },
+          "offset_field": 372,
+          "offset_start": 385,
+          "offset_end": 450
+        }
+      ],
+      "is_encoding_problem": false,
+      "body": {
+        "Multipart": [
+          1,
+          2,
+          3
+        ]
+      },
+      "offset_header": 0,
+      "offset_body": 451,
+      "offset_end": 3659
+    },
+    {
+      "headers": [
+        {
+          "name": "content_type",
+          "value": {
+            "ContentType": {
+              "c_type": "text",
+              "c_subtype": "plain",
+              "attributes": [
+                {
+                  "name": "charset",
+                  "value": "iso-8859-1"
+                }
+              ]
+            }
+          },
+          "offset_field": 488,
+          "offset_start": 501,
+          "offset_end": 535
+        },
+        {
+          "name": "content_transfer_encoding",
+          "value": {
+            "Text": "quoted-printable"
+          },
+          "offset_field": 535,
+          "offset_start": 561,
+          "offset_end": 579
+        }
+      ],
+      "is_encoding_problem": false,
+      "body": {
+        "Text": "Die Hasen und die Frösche\n\nDie Hasen klagten einst über ihre mißliche Lage; \"wir leben\", sprach ein Redner, \"in steter Furcht vor Menschen und Tieren, eine Beute der Hunde, der Adler, ja fast aller Raubtiere! Unsere stete Angst ist ärger als der Tod selbst. Auf, laßt uns ein für allemal sterben.\" \n\nIn einem nahen Teich wollten sie sich nun ersäufen; sie eilten ihm zu; allein das außerordentliche Getöse und ihre wunderbare Gestalt erschreckte eine Menge Frösche, die am Ufer saßen, so sehr, daß sie aufs schnellste untertauchten. \n\n\"Halt\", rief nun eben dieser Sprecher, \"wir wollen das Ersäufen noch ein wenig aufschieben, denn auch uns fürchten, wie ihr seht, einige Tiere, welche also wohl noch unglücklicher sein müssen als wir.\" \n\n"
+      },
+      "offset_header": 488,
+      "offset_body": 580,
+      "offset_end": 1373
+    },
+    {
+      "headers": [
+        {
+          "name": "content_type",
+          "value": {
+            "ContentType": {
+              "c_type": "text",
+              "c_subtype": "plain",
+              "attributes": [
+                {
+                  "name": "name",
+                  "value": "HasenundFr�sche.txt"
+                },
+                {
+                  "name": "x-mac-type",
+                  "value": "54455854"
+                },
+                {
+                  "name": "x-mac-creator",
+                  "value": "74747874"
+                }
+              ]
+            }
+          },
+          "offset_field": 1411,
+          "offset_start": 1424,
+          "offset_end": 1514
+        },
+        {
+          "name": "content_transfer_encoding",
+          "value": {
+            "Text": "x-uuencode"
+          },
+          "offset_field": 1514,
+          "offset_start": 1540,
+          "offset_end": 1552
+        },
+        {
+          "name": "content_disposition",
+          "value": {
+            "ContentType": {
+              "c_type": "attachment",
+              "c_subtype": null,
+              "attributes": [
+                {
+                  "name": "filename",
+                  "value": "HasenundFr�sche.txt"
+                }
+              ]
+            }
+          },
+          "offset_field": 1552,
+          "offset_start": 1572,
+          "offset_end": 1616
+        }
+      ],
+      "is_encoding_problem": false,
+      "body": {
+        "Text": "\nbegin 600 HasenundFr�sche.txt\nM1&EE($AA<V5N('5N9\"!D:64@1G+V<V-H90T*#0I$:64@2&%S96X@:VQA9W1E\nM;B!E:6YS=\"#\\8F5R(&EH<F4@;6G?;&EC:&4@3&%G93L@(G=I<B!L96)E;B(L\nM('-P<F%C:\"!E:6X@4F5D;F5R+\"`B:6X@<W1E=&5R($9U<F-H=\"!V;W(@365N\nM<V-H96X@=6YD(%1I97)E;BP@96EN92!\"975T92!D97(@2'5N9&4L(&1E<B!!\nM9&QE<BP@:F$@9F%S=\"!A;&QE<B!2875B=&EE<F4A(%5N<V5R92!S=&5T92!!\nM;F=S=\"!I<W0@Y')G97(@86QS(&1E<B!4;V0@<V5L8G-T+B!!=68L(&QAWW0@\nM=6YS(&5I;B!F_'(@86QL96UA;\"!S=&5R8F5N+B(@#0H-\"DEN(&5I;F5M(&YA\nM:&5N(%1E:6-H('=O;&QT96X@<VEE('-I8V@@;G5N(&5R<^1U9F5N.R!S:64@\nM96EL=&5N(&EH;2!Z=3L@86QL96EN(&1A<R!A==]E<F]R9&5N=&QI8VAE($=E\nM=/9S92!U;F0@:6AR92!W=6YD97)B87)E($=E<W1A;'0@97)S8VAR96-K=&4@\nM96EN92!-96YG92!&<O9S8VAE+\"!D:64@86T@569E<B!S8=]E;BP@<V\\@<V5H\nM<BP@9&'?('-I92!A=69S('-C:&YE;&QS=&4@=6YT97)T875C:'1E;BX@#0H-\nM\"B)(86QT(BP@<FEE9B!N=6X@96)E;B!D:65S97(@4W!R96-H97(L(\")W:7(@\nM=V]L;&5N(&1A<R!%<G/D=69E;B!N;V-H(&5I;B!W96YI9R!A=69S8VAI96)E\nM;BP@9&5N;B!A=6-H('5N<R!F_')C:'1E;BP@=VEE(&EH<B!S96AT+\"!E:6YI\nM9V4@5&EE<F4L('=E;&-H92!A;'-O('=O:&P@;F]C:\"!U;F=L_&-K;&EC:&5R\n;('-E:6X@;?QS<V5N(&%L<R!W:7(N(B`-\"@T*\n`\nend\n"
+      },
+      "offset_header": 1411,
+      "offset_body": 1617,
+      "offset_end": 2684
+    },
+    {
+      "headers": [
+        {
+          "name": "content_type",
+          "value": {
+            "ContentType": {
+              "c_type": "text",
+              "c_subtype": "plain",
+              "attributes": [
+                {
+                  "name": "charset",
+                  "value": "us-ascii"
+                }
+              ]
+            }
+          },
+          "offset_field": 2722,
+          "offset_start": 2735,
+          "offset_end": 2767
+        },
+        {
+          "name": "content_disposition",
+          "value": {
+            "ContentType": {
+              "c_type": "attachment",
+              "c_subtype": null,
+              "attributes": [
+                {
+                  "name": "filename",
+                  "value": "farmerandstork.txt"
+                }
+              ]
+            }
+          },
+          "offset_field": 2767,
+          "offset_start": 2787,
+          "offset_end": 2830
+        }
+      ],
+      "is_encoding_problem": false,
+      "body": {
+        "Text": "\nThe Farmer and the Stork \n \nA FARMER placed nets on his newly-sown plowlands and caught a\nnumber of Cranes, which came to pick up his seed.  With them he\ntrapped a Stork that had fractured his leg in the net and was\nearnestly beseeching the Farmer to spare his life.  \"Pray save\nme, Master,\" he said, \"and let me go free this once.  My broken\nlimb should excite your pity.  Besides, I am no Crane, I am a\nStork, a bird of excellent character; and see how I love and\nslave for my father and mother.  Look too, at my feathers--\nthey are not the least like those of a Crane.\"   The Farmer \nlaughed aloud and said, \"It may be all as you say, I only know \nthis:  I have taken you with these robbers, the Cranes, and you \nmust die in their company.\"  \n \nBirds of a feather flock together.   \n"
+      },
+      "offset_header": 2722,
+      "offset_body": 2831,
+      "offset_end": 3618
+    }
+  ]
+}

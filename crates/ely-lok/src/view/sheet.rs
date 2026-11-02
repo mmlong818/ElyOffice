@@ -28,7 +28,7 @@ impl LokView {
     }
 
     /// Device pixels per twip, as the kernel paints our tiles.
-    fn ppt(&self) -> f64 {
+    pub(super) fn ppt(&self) -> f64 {
         f64::from(self.geom.tile_pixels()) / f64::from(TILE_TWIPS)
     }
 
@@ -49,10 +49,8 @@ impl LokView {
     }
 
     /// A print-twips rect in tile twips.
-    pub(super) fn tile_rect(&self, (x, y, w, h): Rect) -> Rect {
-        let (left, top) = self.tile_of((x, y));
-        let (right, bottom) = self.tile_of((x + w, y + h));
-        (left, top, right - left, bottom - top)
+    pub(super) fn tile_rect(&self, rect: Rect) -> Rect {
+        self.sheet.as_ref().map_or(rect, |sheet| sheet.text_rect(rect, None, self.ppt()))
     }
 
     /// The frozen extent in tile twips.

@@ -23,11 +23,11 @@ ely-ui.workspace = true
 gpui.workspace = true
 log.workspace = true
 futures.workspace = true
-markdown = "=1.0.0"
 jiff.workspace = true
 notify.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+unicode-segmentation.workspace = true
 
 [lints]
 workspace = true

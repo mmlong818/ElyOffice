@@ -110,6 +110,12 @@ pub(super) const ROWS: &[Command] = &[
         Check::Undoable,
     ),
     command(
+        "cells.text_color",
+        ".uno:Color",
+        &[Arg::Int("Color.Color", "long", -1, 0xFF_FFFF)],
+        Check::Undoable,
+    ),
+    command(
         "data.sort",
         ".uno:DataSort",
         &[

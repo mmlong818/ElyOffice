@@ -5,11 +5,17 @@ use ely_gpui_component::{
     primitives::raise,
 };
 use gpui::{
-    AnyElement, Bounds, Context, Hsla, IntoElement, Keystroke, Modifiers, ParentElement, Pixels,
-    anchored, rgb,
+    AnyElement, Bounds, Context, Hsla, InteractiveElement, IntoElement, Keystroke, Modifiers,
+    ParentElement, Pixels, anchored, div, rgb,
 };
 
-use super::{LokView, input::Input};
+use super::{
+    LokView,
+    input::{Input, vcl_key},
+};
+
+mod completion;
+pub(super) use completion::Completion;
 
 impl LokView {
     /// The sheet shown, which reference marks follow.
@@ -48,7 +54,7 @@ impl LokView {
     /// Up and Down walk the offered functions.
     pub(super) fn walk(&mut self, keystroke: &Keystroke, cx: &mut Context<Self>) -> bool {
         let count = self.cell.functions.len();
-        if count == 0 || keystroke.modifiers != Modifiers::none() {
+        if count == 0 || self.completion.pending() || keystroke.modifiers != Modifiers::none() {
             return false;
         }
         self.picked = match keystroke.key.as_str() {
@@ -60,32 +66,50 @@ impl LokView {
         true
     }
 
-    /// Takes the chosen function, in order with typing.
-    pub(super) fn complete(&mut self) -> bool {
-        let Some(item) = self.offered().into_iter().nth(self.picked) else {
-            return false;
-        };
-        log::info!("lok: completes {}", item.label);
-        self.send(Input::Complete(item.label.to_string()));
-        true
+    /// Enter or Tab: the kernel's function then, else the key.
+    pub(super) fn complete_or_press(&mut self, keystroke: &Keystroke) {
+        let key = vcl_key(keystroke).expect("Enter and Tab are vcl keys");
+        let name = (!self.completion.pending())
+            .then(|| self.offered().into_iter().nth(self.picked))
+            .flatten()
+            .map(|item| item.label.to_string());
+        self.take(name, Some(key));
+    }
+
+    /// A clicked function, if the kernel still offers it then.
+    fn complete_function(&mut self, name: &str) {
+        if !self.completion.pending() {
+            self.take(Some(name.to_string()), None);
+        }
+    }
+
+    /// Queues the choice in order with typing; the worker decides.
+    fn take(&mut self, name: Option<String>, key: Option<(u32, i32)>) {
+        self.send(Input::Complete { name, key });
+        self.completion.queued(self.sent);
+        self.picked = 0;
     }
 
     /// The offered functions, else the call's usage, under the cell.
     pub(super) fn hints(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let cell = self.screen_rect(self.cell.cursor?);
+        if self.completion.pending() {
+            return None;
+        }
+        let cell = self.cell.cursor?;
+        if !self.is_visible(cell) {
+            return None;
+        }
+        let cell = self.screen_rect(cell);
         let hint = if self.cell.functions.is_empty() {
             SignatureHelp::new("lok-view-usage", [usage(&self.cell.usage)?]).into_any_element()
         } else {
             let this = cx.entity();
             let offered = self.offered();
-            let labels: Vec<_> = offered.iter().map(|item| item.label.clone()).collect();
             CompletionMenu::new("lok-view-functions", offered)
                 .selected(self.picked)
                 .on_pick(move |item, _, cx| {
-                    let at = labels.iter().position(|label| *label == item.label);
                     this.update(cx, |view, cx| {
-                        view.picked = at.expect("a picked item is offered");
-                        view.complete();
+                        view.complete_function(&item.label);
                         cx.notify();
                     })
                 })
@@ -94,7 +118,7 @@ impl LokView {
         let place = anchored()
             .position(cell.bottom_left())
             .snap_to_window()
-            .child(hint);
+            .child(div().block_mouse_except_scroll().child(hint));
         Some(raise("lok-view-hints", place).into_any_element())
     }
 }

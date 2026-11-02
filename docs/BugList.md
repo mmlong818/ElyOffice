@@ -227,7 +227,7 @@
 
 ### P-04 `TEXT_BLOCKS` 对每个文字块重跑一遍整页内容过滤，编辑工具长时间无反应
 - 严重度：高 ｜ 置信度：可能（代价推断，未计时）
-- 位置：`crates/ely-pdf-engine/shim/ely_text.c:227-245`、`:156-179`、`:133-145`（每块一次 `pdf_filter_page_contents`）；`apps/ely-pdf/src/content.rs:129-156`（逐页读）、`:169-171`（层未到即静默返回）
+- 位置：`crates/ely-pdf-worker/shim/ely_text.c:227-245`、`:156-179`、`:133-145`（每块一次 `pdf_filter_page_contents`）；`apps/ely-pdf/src/content.rs:129-156`（逐页读）、`:169-171`（层未到即静默返回）
 - 现象：密集页面上开编辑工具很久不出框，点击被忽略，图块与缩略图也停住（worker 单线程被占满）。
 - 修法：每页一遍干跑记下全部字形原点与字符，再逐块比对；或只对点中的块判定可编辑。
 
@@ -240,13 +240,13 @@
 
 ### P-06 默认字体“原字体”在 Type 1/Type 3 字体的文件上失败，只给引擎原话
 - 严重度：中 ｜ 置信度：可能（`pdf_font_writing_supported` 只认 TrueType/CFF/OpenType）
-- 位置：`apps/ely-pdf/src/editing.rs:77`、`crates/ely-pdf-engine/shim/ely_write.c:61-67`、`apps/ely-pdf/src/writes.rs:115`、`:138-142`
+- 位置：`apps/ely-pdf/src/editing.rs:77`、`crates/ely-pdf-worker/shim/ely_write.c:61-67`、`apps/ely-pdf/src/writes.rs:115`、`:138-142`
 - 现象：LaTeX 或旧 PDF 上“应用”报“previewing text failed: the document's font cannot write new text”，不提示换字体（缺字形的情形倒有 `pdf.text.missing` 提示）。
 - 修法：像 `Wrote::Missing` 一样在面板里提示换字体，或读块时预判可写性、默认 Helvetica。
 
 ### P-07 含连字的文字块永远不可编辑
 - 严重度：中 ｜ 置信度：可能
-- 位置：`crates/ely-pdf-engine/shim/ely_text.c:91-109`（`block_targets` 按 stext 字符计数）、`:112-130`（`take_glyph` 按字形计数）、`:167`
+- 位置：`crates/ely-pdf-worker/shim/ely_text.c:91-109`（`block_targets` 按 stext 字符计数）、`:112-130`（`take_glyph` 按字形计数）、`:167`
 - 现象：含 fi、fl、ffi 连字的段落不出编辑框、点击无效；真放过去 `ely_remove_block` 也会报“N of M glyphs were found”。
 - 修法：按同一原点的字符分组计字形，或每字形按 `ucslen` 多计命中。
 
@@ -269,12 +269,12 @@
 
 ### P-11 撤销或重做在 MuPDF 侧失败后 worker 的步数不再同步
 - 严重度：低 ｜ 置信度：已确认
-- 位置：`crates/ely-pdf-engine/src/bin/ely-pdf-worker/main.rs:62-86`、`:161-165`
+- 位置：`crates/ely-pdf-worker/src/main.rs:62-86`、`:161-165`
 - 修法：失败时 `doc.sync(&self.mupdf, None)`。
 
 ### P-12 `unhook` 中途抛出时泄漏保留的对象
 - 严重度：低 ｜ 置信度：已确认
-- 位置：`crates/ely-pdf-engine/shim/ely_insert.c:17-49`、`:352-356`（`n` 只在返回时发布，`fz_always` 以 0 释放）
+- 位置：`crates/ely-pdf-worker/shim/ely_insert.c:17-49`、`:352-356`（`n` 只在返回时发布，`fz_always` 以 0 释放）
 - 修法：以 `int *n` 传入并逐个递增。
 
 ### P-13 优化导出的“之前”大小取磁盘文件而非当前文档
@@ -284,7 +284,7 @@
 
 ### P-14 文字块含控制字符时 JSON 回复不可解析
 - 严重度：低 ｜ 置信度：可能
-- 位置：`crates/ely-pdf-engine/shim/ely_text.c:240`（`%q` 不是 JSON 转义；别处用的是 `ely_json_string`）
+- 位置：`crates/ely-pdf-worker/shim/ely_text.c:240`（`%q` 不是 JSON 转义；别处用的是 `ely_json_string`）
 - 现象：ToUnicode 坏掉的文件文字里有 U+0001–U+001F，`text_blocks` 解析失败，编辑工具永远读不到该页，并落入 P-08 的循环。
 - 修法：`text`、`font` 用 `ely_json_string` 写。
 
@@ -347,7 +347,7 @@
 
 ### M-01 键入期间外部以相同内容重写文件，丢掉上次停顿之后键入的全部文字
 - 严重度：高 ｜ 置信度：已确认
-- 位置：`apps/ely-mark/src/outside.rs:223-224`（`(true, _) | (false, false) => take_disk`）、`:243-268`（`take_disk`）、`apps/ely-mark/src/view.rs:184-196`（`refresh` 把 `changed`、`reported` 归零）、`apps/ely-mark/web/src/main.js:52-59`（全文停手 300 毫秒才送）、`:179-187`（`refresh` 清掉待送）
+- 位置：`apps/ely-mark/src/outside.rs:223-224`（`(true, _) | (false, false) => take_disk`）、`:243-268`（`take_disk`）、`apps/ely-mark/src/view.rs:184-196`（`refresh` 把 `changed`、`reported` 归零）、`apps/ely-mark/web/src/main.js（已移除）:52-59`（全文停手 300 毫秒才送）、`:179-187`（`refresh` 清掉待送）
 - 现象：连续键入时外部进程以相同字节重写文件（`touch`、同内容的 `git checkout`/`stash pop`、云同步重盖、格式化器输出相同），编辑器以旧文字重建，上次停顿以来键入的字全部消失，标签还显示已保存；无提示。
 - 原因：页面只在停手 300 毫秒后送全文，键入中 Rust 侧 `doc.current` 是停顿前的文字；`disk.text == current` 的分支不看 `dirty`（它含 `edit_pending`），直接 `take_disk`。与 agents.md “有未保存内容（含页面还没送回的编辑）即不动磁盘与编辑器”相悖。
 - 复现：打开 `a.md` 连续键入几秒，期间在终端 `touch a.md`。
@@ -355,7 +355,7 @@
 
 ### M-02 `refresh` 归零版本计数却不换代，在途的一键让标签一直“未落定”
 - 严重度：中 ｜ 置信度：可能
-- 位置：`apps/ely-mark/src/view.rs:193`、`:264-272`（`Loaded` 路径有换代）、`apps/ely-mark/web/src/main.js:179-187`、`crates/ely-web-content/src/engine.rs:127-143`；受影响 `crates/ely-office/src/close.rs:96-99`、`save.rs:325-326`、`apps/ely-mark/src/compare.rs:381-382`
+- 位置：`apps/ely-mark/src/view.rs:193`、`:264-272`（`Loaded` 路径有换代）、`apps/ely-mark/web/src/main.js（已移除）:179-187`、`crates/ely-web-content/src/engine.rs（已移除）:127-143`；受影响 `crates/ely-office/src/close.rs:96-99`、`save.rs:325-326`、`apps/ely-mark/src/compare.rs:381-382`
 - 现象：干净标签被外部改动刷新后，Cmd+S、Cmd+W、Cmd+Q、比较与自动保存都静静等 `when_settled`，直到再键入一个字才一起执行。
 - 原因：刷新前排队的一键在渲染进程里先产生 `changed = N+1`，再执行 `refresh` 丢掉待送全文；Rust 已归零又收到 `changed`，没有 `text` 跟上，`settled()` 为假；`refresh` 不像 `Loaded` 那样换代，旧回报没被丢。
 - 修法：`refresh` 自己换一代（`self.load += 1` 传给 `ely.refresh(text, load)`）。
@@ -369,13 +369,13 @@
 
 ### M-04 第二次打印或导出 PDF 悄悄取消第一次，没有文件也没有错误
 - 严重度：中 ｜ 置信度：已确认
-- 位置：`apps/ely-mark/src/export.rs:93-97`、`:276`（打印与导出共用 `print-{id}.html`）、`:315-334`（`self.printing = Some(..)` 覆盖）
+- 位置：`apps/ely-mark/src/export.rs（已移除）:93-97`、`:276`（打印与导出共用 `print-{id}.html`）、`:315-334`（`self.printing = Some(..)` 覆盖）
 - 原因：`Desk.printing` 只有一个槽，赋新值即丢掉上一个的隐藏 `WebView` 与订阅，第一份的 `Event::Printed` 无人接。
 - 修法：按作业编号保存多份，或一份未完时拒绝第二份并提示。
 
 ### M-05 点页面里的链接什么也不发生
 - 严重度：中 ｜ 置信度：已确认
-- 位置：`apps/ely-mark/src/view.rs:274`（`Event::Leave(url) => log::info!(..)`）、`crates/ely-web-content/src/fence.rs:319-324`
+- 位置：`apps/ely-mark/src/view.rs:274`（`Event::Leave(url) => log::info!(..)`）、`crates/ely-web-content/src/fence.rs（已移除）:319-324`
 - 现象：预览与可视模式里点 `http(s)`/`mailto` 链接：不跳转、不开浏览器、不提示。PRD 允许用户主动打开外部链接，agents.md 说“交给应用”，应用没处理。
 - 修法：`Leave` 时 `http`、`https`、`mailto` 交系统打开，其他协议提示拒绝（同 ElyPDF 的链接策略）。
 
@@ -392,46 +392,46 @@
 
 ### M-08 页面重载后悬着的渲染回调永不完成，导出既不成功也不报错
 - 严重度：低 ｜ 置信度：已确认
-- 位置：`apps/ely-mark/src/view.rs:264-272`（`Loaded` 不清 `renders`）、`:210-220`、`apps/ely-mark/src/export.rs:165-185`
+- 位置：`apps/ely-mark/src/view.rs:264-272`（`Loaded` 不清 `renders`）、`:210-220`、`apps/ely-mark/src/export.rs（已移除）:165-185`
 - 修法：`Loaded`、`Failed` 时把 `renders` 全部以错误结束。
 
 ### M-09 导出的保存面板出错被当作取消
 - 严重度：低 ｜ 置信度：已确认
-- 位置：`apps/ely-mark/src/export.rs:129-131`（`let Ok(Ok(Some(path))) = chosen.await else { return log::info!(..) }`）
+- 位置：`apps/ely-mark/src/export.rs（已移除）:129-131`（`let Ok(Ok(Some(path))) = chosen.await else { return log::info!(..) }`）
 - 修法：照 `Desk::open_picked` 分三种情形，错误走 `panel_failed`。
 
 ### M-10 关闭查找框只清当前标签的高亮
 - 严重度：低 ｜ 置信度：已确认
-- 位置：`apps/ely-mark/src/finding.rs:116-124`（`close_find` 只对 `active_view` 发 `unfind`）、`:60-69`、`apps/ely-mark/web/src/main.js:132`、`:270-273`
+- 位置：`apps/ely-mark/src/finding.rs:116-124`（`close_find` 只对 `active_view` 发 `unfind`）、`:60-69`、`apps/ely-mark/web/src/main.js（已移除）:132`、`:270-273`
 - 修法：对每个标签的视图发 `unfind`。
 
 ### M-11 页面把搜索词写进应用日志
 - 严重度：低 ｜ 置信度：已确认
-- 位置：`apps/ely-mark/web/src/main.js:246`（`console.warn` 带 `place.query`）、`crates/ely-web-content/src/handlers.rs:272-275`（控制台警告进 `log::warn!`）
+- 位置：`apps/ely-mark/web/src/main.js（已移除）:246`（`console.warn` 带 `place.query`）、`crates/ely-web-content/src/handlers.rs（已移除）:272-275`（控制台警告进 `log::warn!`）
 - 原因：违反规则 4（日志不含正文）。
 - 修法：只记行号与是否标题。
 
 ### M-12 浏览器创建完成前 `WebView` 已释放，浏览器泄漏
 - 严重度：低 ｜ 置信度：已确认
-- 位置：`crates/ely-web-content/src/view.rs:582-587`（`Drop` 时还没有浏览器）、`crates/ely-web-content/src/handlers.rs:349-354`（`on_after_created` 无条件存入）、`crates/ely-web-content/src/engine.rs:165-170`
+- 位置：`crates/ely-web-content/src/view.rs（已移除）:582-587`（`Drop` 时还没有浏览器）、`crates/ely-web-content/src/handlers.rs（已移除）:349-354`（`on_after_created` 无条件存入）、`crates/ely-web-content/src/engine.rs（已移除）:165-170`
 - 现象：开了标签在约 100 毫秒内关掉，渲染进程留到退出。
 - 修法：`on_after_created` 发现 `surface.closed` 即 `close_browser(true)`。
 
 ### M-13 编辑器构建失败时页面空白且不上报
 - 严重度：低 ｜ 置信度：已确认
-- 位置：`apps/ely-mark/web/src/main.js:117-139`（`show` 无 `try/catch`）、`apps/ely-mark/web/src/visual.js:106-109`
+- 位置：`apps/ely-mark/web/src/main.js（已移除）:117-139`（`show` 无 `try/catch`）、`apps/ely-mark/web/src/visual.js（已移除）:106-109`
 - 现象：Milkdown `create()` 或 `newTable` 抛出时没有 `shown` 也没有 `Failed`，`#document` 空着，`MarkView.shown` 永为假（跳转、外观等一直等）。
 - 修法：`build` 包 `try/catch`，可视失败退回源码并 `tell({kind:'failed'})`。
 
 ### M-14 `render_pdf` 在界面线程内嵌图片并写文件
 - 严重度：低 ｜ 置信度：已确认
-- 位置：`apps/ely-mark/src/export.rs:276-282`（渲染回调里 `inline`、`read_to_string`、`fs::write`）；对照 `:172-176` 的 `write_output` 已在后台
+- 位置：`apps/ely-mark/src/export.rs（已移除）:276-282`（渲染回调里 `inline`、`read_to_string`、`fs::write`）；对照 `:172-176` 的 `write_output` 已在后台
 - 修法：暂存步骤移到 `background_spawn`。
 
 
 ### M-15 打印与导出 PDF 的暂存页执行文档里的脚本
 - 严重度：中 ｜ 置信度：已确认（M-11 第 2、3 轮审查在 Windows 与 WSL 的 CEF 上复现）
-- 位置：`apps/ely-mark/web/src/render.js`（`allowDangerousHtml` 原样保留 HTML 块）、`apps/ely-mark/src/export.rs`（`render_pdf`、打印把同一 HTML 暂存后交不显示的 CEF 视图）
+- 位置：`apps/ely-mark/web/src/render.js`（已移除）（`allowDangerousHtml` 原样保留 HTML 块）、`apps/ely-mark/src/export.rs`（已移除）（`render_pdf`、打印把同一 HTML 暂存后交不显示的 CEF 视图）
 - 现象：Markdown 里的 `<script src="data:...">` 在打印与导出 PDF 时运行，可调 `console`、`elyQuery`，可读暂存页。
 - 修法：暂存页不运行脚本。
 
@@ -632,7 +632,7 @@ T-01、T-04、T-07 与 S-01 的根源都在这一层，这里只列此外的问�
 - 位置：`crates/ely-platform/src/print.rs:87-89`（打印，各文档应用“文件›打印…”与 Cmd+P 照常）、`crates/ely-platform/src/trust.rs:23`（PDF 签名对话框）、`crates/ely-platform/src/media.rs:52`（ElyShow 插入媒体）、`crates/ely-files/src/rename.rs:63`（改名）
 - 修法：按 `cfg` 或能力标志禁用菜单项，或补齐平台实现。
 
-### X-14 `agents.md` 引用的 `docs/engineering-risks.md` 不存在
+### X-14 `agents.md` 引用的 `docs/engineering-risks.md`（已移除） 不存在
 - 严重度：低 ｜ 置信度：已确认
-- 位置：`agents.md`（三处引用“证据见 `docs/engineering-risks.md` R-01”等）；`docs/` 下无此文件
+- 位置：`agents.md`（三处引用“证据见 `docs/engineering-risks.md`（已移除） R-01”等）；`docs/` 下无此文件
 - 修法：补回文件或改引用。

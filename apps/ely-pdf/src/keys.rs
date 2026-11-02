@@ -1,5 +1,7 @@
 //! Menus and keys of the viewer (PDF-01).
 
+use ely_gpui_component::secondary;
+use ely_gpui_component::shell::ZoomStep;
 use ely_ui::commands;
 use gpui::{
     App, Context, Div, InteractiveElement as _, KeyBinding, Menu, MenuItem, Window, actions,
@@ -15,6 +17,7 @@ actions!(
         Continuous,
         SinglePage,
         TwoPages,
+        Horizontal,
         ZoomIn,
         ZoomOut,
         FitWidth,
@@ -39,17 +42,17 @@ pub fn bind(cx: &mut App) {
     crate::writes::bind(cx);
     let at = Some(commands::CONTEXT);
     cx.bind_keys([
-        KeyBinding::new("secondary-=", ZoomIn, at),
-        KeyBinding::new("secondary--", ZoomOut, at),
-        KeyBinding::new("secondary-0", ActualSize, at),
-        KeyBinding::new("secondary-]", RotateRight, at),
-        KeyBinding::new("secondary-[", RotateLeft, at),
+        KeyBinding::new(secondary!("="), ZoomIn, at),
+        KeyBinding::new(secondary!("-"), ZoomOut, at),
+        KeyBinding::new(secondary!("0"), ActualSize, at),
+        KeyBinding::new(secondary!("]"), RotateRight, at),
+        KeyBinding::new(secondary!("["), RotateLeft, at),
         KeyBinding::new("pagedown", NextPage, at),
         KeyBinding::new("pageup", PreviousPage, at),
         KeyBinding::new("home", FirstPage, at),
         KeyBinding::new("end", LastPage, at),
-        KeyBinding::new("secondary-c", CopyText, at),
-        KeyBinding::new("secondary-f", Find, at),
+        KeyBinding::new(secondary!("c"), CopyText, at),
+        KeyBinding::new(secondary!("f"), Find, at),
     ]);
 }
 
@@ -66,6 +69,7 @@ pub fn menus(cx: &App) -> Vec<Menu> {
             MenuItem::action(label("pdf.view.continuous"), Continuous),
             MenuItem::action(label("pdf.view.single"), SinglePage),
             MenuItem::action(label("pdf.view.two"), TwoPages),
+            MenuItem::action(label("pdf.view.horizontal"), Horizontal),
             MenuItem::separator(),
             MenuItem::action(label("pdf.view.zoom_in"), ZoomIn),
             MenuItem::action(label("pdf.view.zoom_out"), ZoomOut),
@@ -75,6 +79,9 @@ pub fn menus(cx: &App) -> Vec<Menu> {
             MenuItem::separator(),
             MenuItem::action(label("pdf.view.rotate_left"), RotateLeft),
             MenuItem::action(label("pdf.view.rotate_right"), RotateRight),
+            MenuItem::separator(),
+            ely_ui::commands::left_panel_item(cx),
+            ely_ui::commands::right_panel_item(cx),
         ]),
         crate::organize::menu(cx),
     ]
@@ -82,6 +89,16 @@ pub fn menus(cx: &App) -> Vec<Menu> {
     .chain(crate::marking::menus(cx))
     .chain([crate::document::menu(cx)])
     .collect()
+}
+
+/// A zoom step: key, menu or status bar.
+pub fn zoom(viewer: &Viewer, step: ZoomStep, cx: &mut App) {
+    let to = move |now| match step {
+        ZoomStep::In => stepped(now, true),
+        ZoomStep::Out => stepped(now, false),
+        ZoomStep::Reset => ACTUAL,
+    };
+    viewer.on_view(|view, cx| view.change(|view, now| view.zoom = Zoom::Scale(to(now)), cx), cx);
 }
 
 /// The next zoom step up or down from `now`.
@@ -98,20 +115,13 @@ pub fn on(root: Div, cx: &mut Context<Viewer>) -> Div {
         move |viewer: &mut Viewer, cx: &mut Context<Viewer>| viewer.on_view(|view, cx| view.change(change, cx), cx)
     };
     let turn = |by: isize| move |viewer: &mut Viewer, cx: &mut Context<Viewer>| viewer.on_view(|view, cx| view.turn(by, cx), cx);
-    let (continuous, single, two) = (
+    let (continuous, single, two, row) = (
         change(|view, _| view.mode = Mode::Continuous),
         change(|view, _| view.mode = Mode::Single),
         change(|view, _| view.mode = Mode::Two),
+        change(|view, _| view.mode = Mode::Horizontal),
     );
-    let (width, page, actual) = (
-        change(|view, _| view.zoom = Zoom::Width),
-        change(|view, _| view.zoom = Zoom::Page),
-        change(|view, _| view.zoom = Zoom::Scale(ACTUAL)),
-    );
-    let (zoom_in, zoom_out) = (
-        change(|view, now| view.zoom = Zoom::Scale(stepped(now, true))),
-        change(|view, now| view.zoom = Zoom::Scale(stepped(now, false))),
-    );
+    let (width, page) = (change(|view, _| view.zoom = Zoom::Width), change(|view, _| view.zoom = Zoom::Page));
     let (right, left) = (
         change(|view, _| view.rotate = (view.rotate + 90) % 360),
         change(|view, _| view.rotate = (view.rotate + 270) % 360),
@@ -120,11 +130,12 @@ pub fn on(root: Div, cx: &mut Context<Viewer>) -> Div {
     root.on_action(cx.listener(move |v, _: &Continuous, _, cx| continuous(v, cx)))
         .on_action(cx.listener(move |v, _: &SinglePage, _, cx| single(v, cx)))
         .on_action(cx.listener(move |v, _: &TwoPages, _, cx| two(v, cx)))
+        .on_action(cx.listener(move |v, _: &Horizontal, _, cx| row(v, cx)))
         .on_action(cx.listener(move |v, _: &FitWidth, _, cx| width(v, cx)))
         .on_action(cx.listener(move |v, _: &FitPage, _, cx| page(v, cx)))
-        .on_action(cx.listener(move |v, _: &ActualSize, _, cx| actual(v, cx)))
-        .on_action(cx.listener(move |v, _: &ZoomIn, _, cx| zoom_in(v, cx)))
-        .on_action(cx.listener(move |v, _: &ZoomOut, _, cx| zoom_out(v, cx)))
+        .on_action(cx.listener(|v, _: &ActualSize, _, cx| zoom(v, ZoomStep::Reset, cx)))
+        .on_action(cx.listener(|v, _: &ZoomIn, _, cx| zoom(v, ZoomStep::In, cx)))
+        .on_action(cx.listener(|v, _: &ZoomOut, _, cx| zoom(v, ZoomStep::Out, cx)))
         .on_action(cx.listener(move |v, _: &RotateRight, _, cx| right(v, cx)))
         .on_action(cx.listener(move |v, _: &RotateLeft, _, cx| left(v, cx)))
         .on_action(cx.listener(move |v, _: &NextPage, _, cx| next(v, cx)))

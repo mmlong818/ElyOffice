@@ -180,5 +180,15 @@ for f in $own; do must "$dir/$f" uninstall; done
 for f in ely-probe.exe ely-probe-worker.exe extra.txt licenses/LICENSE data bin zz uninstall.exe .ely-installed; do
   mustnt "$dir/$f" uninstall
 done
+# An in-app update runs the next setup over it (#10).
+dir="$work/Ely Office/ElyProbe"
+[ "$(install 1 "$dir")" = 0 ] || fail "update: setup 1"
+ELY_TEST_SETUP=$(cygpath -w "$work/setup-2.exe") ELY_TEST_DIR=$(cygpath -w "$dir")   cargo test -q -p ely-platform --test install a_real_setup_installs_over_its_folder -- --exact >"$work/update.log" 2>&1 ||
+  { cat "$work/update.log" >&2; fail "update: the after-quit step"; }
+grep -q "1 passed" "$work/update.log" || fail "update: the test did not run"
+must "$dir/extra.txt" "update"
+must "$dir/zz/deep.txt" "update"
+[ "$(cat "$dir/ely-probe-worker.exe")" = 2 ] || fail "update: version 1 stays"
+mustnt "$work/Ely Office/ElyProbe/.ely-old" "update"
 rm -rf "$work"
 echo "PASS: windows installer"

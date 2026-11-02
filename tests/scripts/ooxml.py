@@ -181,7 +181,7 @@ def sheet(path):
 
 
 def notes_body(notes):
-    """The text of a notes page's body placeholder, the editable notes."""
+    """A notes page's body placeholder text: the editable notes."""
     found = []
     for shape in notes.iter(P + "sp"):
         holder = shape.find(f"{P}nvSpPr/{P}nvPr/{P}ph")
@@ -217,7 +217,85 @@ def deck(path):
         check(not any("Speaker" in text for text in spoken[1:]), f"only slide one has the notes: {spoken}")
 
 
-CASES = {"contract": contract, "sheet": sheet, "deck": deck}
+CUBE = 'CUBEVALUE("Sales","[Measures].[Total]")'
+# tests/fixtures/table/kept.xlsx: what Calc cannot compute keeps the file's result.
+KEPT = {
+    "A1": (None, "n", "2"),
+    "B1": (CUBE, "n", "41"),
+    "C1": ("B1+1", "n", "42"),
+    "D1": ("A1*" + CUBE, "n", "82"),
+    "E1": ('_xlfn.TRANSLATE("hello","en","de")', "str", "hallo"),
+    "F1": ("SUM(A1,1)", "n", "3"),
+    "A2": (None, "n", "10"),
+    "B2": ('CUBEVALUE("Sales",A2)', "n", "100"),
+    "B3": ('CUBEVALUE("Sales",A3)', "n", "200"),
+}
+# After A1 and A2 change, their dependents are unknown.
+EDITED = KEPT | {
+    "A1": (None, "n", "3"),
+    "D1": ("A1*" + CUBE, "e", "#NAME?"),
+    "F1": ("SUM(A1,1)", "n", "4"),
+    "A2": (None, "n", "11"),
+    "B2": ('CUBEVALUE("Sales",A2)', "e", "#NAME?"),
+}
+
+# tests/fixtures/table/kept-more.xlsx: each kind of result the file holds.
+MORE = {
+    "A1": ("FUTUREFN(1)", "b", "1"),
+    "B1": ("FUTUREFN(2)", "str", None),
+    "C1": ("FUTUREFN(3)", "e", "#NAME?"),
+    "D1": ("FUTUREFN(4)", "e", "#NAME?"),
+    "E1": (CUBE, "n", "41"),
+    "A2": ("FUTUREFN(I2)", "b", "1"),
+    "A3": ("FUTUREFN(I3)", "b", "0"),
+    "B2": ("FUTUREFN(I2)", "str", None),
+    "B3": ("FUTUREFN(I3)", "str", "ok"),
+    "G5": ("FUTUREFN(1)", "n", "1"),
+    "H5": (None, "n", "2"),
+    "G6": (None, "n", "3"),
+    "H6": (None, "str", "four"),
+    "K8": ('FUTUREFN(INDIRECT("J8"))', "n", "42"),
+    "L8": ("FUTUREFN(OFFSET(J8,0,0))", "n", "43"),
+    "J1": ("FUTUREFN(9)", "b", "1"),
+    "G10": ("FUTUREFN(5)", "b", "1"),
+    "H10": (None, "b", "0"),
+    "G11": ("FUTUREFN(6)", "n", "41"),
+    "H11": (None, "str", None),
+    "G12": ("FUTUREFN(7)", "e", "#NAME?"),
+    "H12": (None, "e", "#NAME?"),
+    "G13": ("FUTUREFN(8)", "e", "#NAME?"),
+    "H13": (None, "e", "#NAME?"),
+    "G14": ("FUTUREFN(10)", "b", "1"),
+    "H14": (None, "n", "41"),
+    "G15": ("FUTUREFN(11)", "n", "41"),
+    "H15": (None, "b", "1"),
+}
+# A sheet copy is a change: volatile cells recalculate.
+COPIED = MORE | {
+    "K8": ('FUTUREFN(INDIRECT("J8"))', "e", "#NAME?"),
+    "L8": ("FUTUREFN(OFFSET(J8,0,0))", "e", "#NAME?"),
+}
+
+
+def cells_are(path, expected):
+    """Formulas as written, with the file's type and value."""
+    with zipfile.ZipFile(path) as archive:
+        found = cells(archive)
+    for ref, want in expected.items():
+        if check(ref in found, f"{ref} is there"):
+            got = (found[ref][1], found[ref][0], found[ref][2])
+            check(got == want, f"{ref} is {got!r}, not {want!r}")
+
+
+CASES = {
+    "contract": contract,
+    "sheet": sheet,
+    "deck": deck,
+    "kept": lambda path: cells_are(path, KEPT),
+    "kept-edited": lambda path: cells_are(path, EDITED),
+    "kept-more": lambda path: cells_are(path, MORE),
+    "kept-copied": lambda path: cells_are(path, COPIED),
+}
 
 # Damage each check must catch: part, pattern, replacement.
 MUTATIONS = {
@@ -232,6 +310,25 @@ MUTATIONS = {
     "sheet": [
         ("xl/worksheets/sheet1.xml", r'(<c r="H1"[^>]*><v>)7(</v>)', r"\g<1>70\g<2>"),
         ("xl/_rels/workbook.xml.rels", r"worksheets/sheet1\.xml", "worksheets/missing.xml"),
+    ],
+    "kept": [
+        ("xl/worksheets/sheet1.xml", r'(<c r="B1"[^>]*>.*?<v>)41(</v>)', r"\g<1>0\g<2>"),
+        ("xl/worksheets/sheet1.xml", r"CUBEVALUE\(&quot;Sales&quot;,&quot;\[", "cubevalue(&quot;Sales&quot;,&quot;["),
+        ("xl/worksheets/sheet1.xml", r'<c r="E1"[^>]*t="str"', '<c r="E1" s="0" t="e"'),
+    ],
+    "kept-edited": [
+        ("xl/worksheets/sheet1.xml", r'<c r="D1"[^>]*t="e"><f([^>]*)>(.*?)</f><v>#NAME\?</v>', r'<c r="D1" t="n"><f\1>\2</f><v>82</v>'),
+        ("xl/worksheets/sheet1.xml", r'(<c r="B3"[^>]*>.*?<v>)200(</v>)', r"\g<1>0\g<2>"),
+    ],
+    "kept-more": [
+        ("xl/worksheets/sheet1.xml", r'(<c r="A1"[^>]*)t="b"', r'\g<1>t="n"'),
+        ("xl/worksheets/sheet1.xml", r'(<c r="H10"[^>]*)t="b"', r'\g<1>t="n"'),
+        ("xl/worksheets/sheet1.xml", r'(<c r="H6"[^>]*><v>)four(</v>)', r"\g<1>five\g<2>"),
+        ("xl/worksheets/sheet1.xml", r'(<c r="K8"[^>]*>.*?<v>)42(</v>)', r"\g<1>0\g<2>"),
+    ],
+    "kept-copied": [
+        ("xl/worksheets/sheet1.xml", r'(<c r="H10"[^>]*)t="b"', r'\g<1>t="n"'),
+        ("xl/worksheets/sheet1.xml", r'(<c r="K8"[^>]*)t="e"', r'\g<1>t="n"'),
     ],
     "deck": [
         ("ppt/_rels/presentation.xml.rels", r"slides/slide2\.xml", "slides/missing.xml"),

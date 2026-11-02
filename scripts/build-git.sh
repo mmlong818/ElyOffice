@@ -34,10 +34,16 @@ rsync -a --delete --exclude .git "$root/reference/git/" "$src/"
 flags="prefix=$out RUNTIME_PREFIX=YesPlease INSTALL_SYMLINKS=YesPlease NO_GETTEXT=YesPlease NO_TCLTK=YesPlease NO_PERL=YesPlease NO_PYTHON=YesPlease"
 # The bundles say macOS 14; Git must not need newer.
 [ "$(uname)" = Darwin ] && export MACOSX_DEPLOYMENT_TARGET=14.0 && flags="$flags MACOSX_DEPLOYMENT_TARGET=14.0"
-if [ "$(cat "$out/.flags" 2>/dev/null)" != "$flags" ]; then
+# Linux: imap-send uses curl; no OpenSSL to ship.
+[ "$(uname)" = Linux ] && flags="$flags NO_OPENSSL=YesPlease"
+# Clang ignores Rosetta, so Intel builds name their architecture.
+compiler=()
+[ "$(uname)" != Darwin ] || compiler=("CC=cc -arch $(uname -m)")
+record="$flags${compiler[@]+ ${compiler[*]}}"
+if [ "$(cat "$out/.flags" 2>/dev/null)" != "$record" ]; then
   rm -rf "$out"
 fi
 # shellcheck disable=SC2086
-env -u CARGO_TARGET_DIR make -C "$src" $flags -j"$jobs" install # Git's Rust uses its target/
-echo "$flags" >"$out/.flags"
+env -u CARGO_TARGET_DIR make -C "$src" $flags ${compiler[@]+"${compiler[@]}"} -j"$jobs" install # Git's Rust uses its target/
+echo "$record" >"$out/.flags"
 "$out/bin/git" --version

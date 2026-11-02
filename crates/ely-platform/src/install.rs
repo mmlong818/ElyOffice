@@ -1,5 +1,8 @@
 //! Puts a downloaded release in place of the running app.
 
+mod after;
+mod package;
+
 use std::{
     io,
     path::{Path, PathBuf},
@@ -7,10 +10,66 @@ use std::{
 #[cfg(target_os = "macos")]
 use std::process::{Command, Stdio};
 
-/// The `.app` running this process; none in dev builds.
-pub fn running_bundle() -> io::Result<Option<PathBuf>> {
+pub use after::{INSTALL, after_quit};
+pub use package::Package;
+
+/// How this app was installed, and so how it updates.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Installed {
+    /// A macOS `.app`.
+    Bundle(PathBuf),
+    /// The folder a Windows setup wrote, and the app.
+    Folder { dir: PathBuf, exe: PathBuf },
+    /// A Linux AppImage file.
+    AppImage(PathBuf),
+    /// A deb, rpm or Arch package: its manager updates it.
+    Package(Package),
+}
+
+/// The list a Windows setup leaves in its folder.
+const LISTED: &str = ".ely-installed";
+/// Where Linux packages install; the manager owns them.
+const PACKAGED: [&str; 4] = ["/usr", "/opt", "/app", "/snap"];
+/// The Nix store: Nix updates what it holds.
+const NIX: &str = "/nix/store";
+
+/// How the running app updates; none for dev or Nix.
+pub fn running(slug: &str) -> io::Result<Option<Installed>> {
     let exe = std::env::current_exe()?;
-    Ok(bundle_of(&exe).map(Path::to_path_buf))
+    let image = std::env::var_os("APPIMAGE").map(PathBuf::from);
+    let mount = std::env::var_os("APPDIR").map(PathBuf::from);
+    installed(std::env::consts::OS, &exe, image.zip(mount), Path::new("/"), slug, &package::rpm_lists)
+}
+
+/// `image` is an AppImage and its mount; `rpm` asks rpm.
+fn installed(
+    os: &str,
+    exe: &Path,
+    image: Option<(PathBuf, PathBuf)>,
+    root: &Path,
+    slug: &str,
+    rpm: &dyn Fn(&str) -> io::Result<bool>,
+) -> io::Result<Option<Installed>> {
+    Ok(match os {
+        "macos" => bundle_of(exe).map(|bundle| Installed::Bundle(bundle.to_path_buf())),
+        "windows" => {
+            let dir = exe.parent().ok_or_else(|| io::Error::other("the app has no folder"))?;
+            dir.join(LISTED)
+                .try_exists()?
+                .then(|| Installed::Folder { dir: dir.to_path_buf(), exe: exe.to_path_buf() })
+        }
+        // An AppImage's terminal passes its variables on.
+        "linux" => match image.filter(|(_, mount)| exe.starts_with(mount)) {
+            // Nix wraps the AppImage; its store is read-only.
+            _ if exe.starts_with(NIX) => None,
+            Some((image, _)) => Some(Installed::AppImage(image)),
+            None if PACKAGED.iter().any(|prefix| exe.starts_with(prefix)) => {
+                Some(Installed::Package(Package::of(root, slug, rpm)?))
+            }
+            None => None,
+        },
+        _ => None,
+    })
 }
 
 fn bundle_of(exe: &Path) -> Option<&Path> {
@@ -29,11 +88,6 @@ pub fn install(dmg: &Path, bundle: &Path) -> io::Result<()> {
     let staged = copied?;
     detached?;
     swap(&staged, bundle)
-}
-
-#[cfg(not(target_os = "macos"))]
-pub fn install(_dmg: &Path, _bundle: &Path) -> io::Result<()> {
-    Err(io::Error::new(io::ErrorKind::Unsupported, "installing updates is not built for this platform"))
 }
 
 /// Copies the new app beside the old, hidden.
@@ -72,25 +126,17 @@ fn swap(staged: &Path, bundle: &Path) -> io::Result<()> {
 }
 
 /// Returns once process `pid` has ended.
-#[cfg(unix)]
+#[cfg(target_os = "macos")]
 pub fn wait_for_exit(pid: u32) {
     while unsafe { libc::kill(pid as libc::pid_t, 0) } == 0 {
         std::thread::sleep(std::time::Duration::from_millis(200));
     }
 }
 
-#[cfg(not(unix))]
-pub fn wait_for_exit(_pid: u32) {}
-
 /// Opens `bundle` as a fresh launch.
 #[cfg(target_os = "macos")]
 pub fn reopen(bundle: &Path) -> io::Result<()> {
     run(Command::new("open").arg(bundle))
-}
-
-#[cfg(not(target_os = "macos"))]
-pub fn reopen(_bundle: &Path) -> io::Result<()> {
-    Err(io::Error::new(io::ErrorKind::Unsupported, "reopening after an update is not built for this platform"))
 }
 
 /// Runs `command`; a failure carries what it said.
@@ -105,58 +151,4 @@ fn run(command: &mut Command) -> io::Result<()> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_bundle_is_the_nearest_app_folder() {
-        let exe = Path::new("/Applications/ElyDoc.app/Contents/MacOS/ely-doc");
-        assert_eq!(bundle_of(exe), Some(Path::new("/Applications/ElyDoc.app")));
-        assert_eq!(bundle_of(Path::new("/repo/target/debug/ely-doc")), None);
-    }
-
-    #[test]
-    fn a_swap_replaces_the_app_and_leaves_no_copy() {
-        let dir = tempfile::tempdir().expect("a temp dir");
-        let (bundle, staged) = (dir.path().join("ElyDoc.app"), dir.path().join(".ElyDoc.app.new"));
-        std::fs::create_dir_all(bundle.join("old")).expect("the old app");
-        std::fs::create_dir_all(staged.join("new")).expect("the new app");
-        swap(&staged, &bundle).expect("swaps");
-        assert!(bundle.join("new").exists() && !bundle.join("old").exists());
-        assert_eq!(std::fs::read_dir(dir.path()).expect("lists").count(), 1, "nothing else is left");
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn an_old_copy_that_will_not_go_leaves_the_install_done() {
-        let dir = tempfile::tempdir().expect("a temp dir");
-        let (bundle, staged) = (dir.path().join("ElyDoc.app"), dir.path().join(".ElyDoc.app.new"));
-        std::fs::create_dir_all(&bundle).expect("the old app");
-        std::fs::write(bundle.join("version"), "old").expect("marks it");
-        std::fs::create_dir_all(&staged).expect("the new app");
-        std::fs::write(staged.join("version"), "new").expect("marks it");
-        run(Command::new("chflags").arg("uchg").arg(bundle.join("version"))).expect("locks a file");
-        swap(&staged, &bundle).expect("installed although the old copy stays");
-        assert_eq!(std::fs::read_to_string(bundle.join("version")).expect("reads"), "new");
-        let old = dir.path().join(".ElyDoc.app.old");
-        run(Command::new("chflags").arg("nouchg").arg(old.join("version"))).expect("unlocks");
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn a_dmg_installs_over_the_app() {
-        let dir = tempfile::tempdir().expect("a temp dir");
-        let source = dir.path().join("src");
-        std::fs::create_dir_all(source.join("ElyDoc.app/Contents")).expect("the new app");
-        std::fs::write(source.join("ElyDoc.app/Contents/version"), "new").expect("marks it");
-        let dmg = dir.path().join("ElyDoc.dmg");
-        run(Command::new("hdiutil").args(["create", "-quiet", "-fs", "HFS+", "-srcfolder"]).arg(&source).arg(&dmg)).expect("a dmg");
-        let bundle = dir.path().join("Applications/ElyDoc.app");
-        std::fs::create_dir_all(bundle.join("Contents")).expect("the old app");
-        std::fs::write(bundle.join("Contents/version"), "old").expect("marks it");
-        install(&dmg, &bundle).expect("installs");
-        assert_eq!(std::fs::read_to_string(bundle.join("Contents/version")).expect("reads"), "new");
-        let empty = dir.path().join("Applications/Other.app");
-        assert!(install(&dmg, &empty).is_err(), "a dmg without that app is refused");
-    }
-}
+mod tests;

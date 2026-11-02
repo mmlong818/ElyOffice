@@ -233,7 +233,7 @@ impl Docs {
             Ask::Caption(category) => self.run_active("caption.insert", &[category, text], cx),
             Ask::Formula(_) => self.run_active("formula.insert", &[text], cx),
             Ask::Comment => {
-                self.side = crate::docs::Side::Review;
+                self.show_side(crate::docs::Side::Review, cx);
                 self.run_active("comment.insert", &[text], cx);
             }
         }
@@ -354,6 +354,7 @@ pub fn reference_dialog(
             .iter()
             .map(|name| Choice::new(name.clone(), name.clone()));
         Select::new("doc-reference-mark", choices)
+            .label(Docs::text(cx, "doc.reference.target", &[]))
             .selected(mark.to_string())
             .on_change(move |name, _, cx| {
                 this.update(cx, |docs, cx| {
@@ -370,6 +371,7 @@ pub fn reference_dialog(
             .iter()
             .map(|(value, key)| Choice::new(*value, Docs::text(cx, key, &[])));
         Select::new("doc-reference-show", choices)
+            .label(Docs::text(cx, "doc.reference.show", &[]))
             .selected(show)
             .on_change(move |value, _, cx| {
                 let Some((value, _)) = SHOWN.iter().find(|(shown, _)| *shown == value.as_ref())

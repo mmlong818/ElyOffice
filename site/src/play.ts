@@ -24,6 +24,7 @@ const HOMES: Record<string, Cell> = {
   ElyTable: [5, 1],
   ElyShow: [9, 1],
   ElyPDF: [14, 1],
+  ElyMail: [9, 9],
   ElyMark: [1, 9],
   ElyTree: [13, 11],
 };

@@ -1,19 +1,16 @@
 //! The system player against a small H.264/AAC clip.
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows, target_os = "linux"))]
 fn main() {
     use std::time::{Duration, Instant};
 
     use ely_platform::media::{Player, State};
-    use objc2_foundation::{NSDate, NSRunLoop};
 
-    // The player works through the main run loop.
     let pump = |until: &dyn Fn() -> bool| {
         let end = Instant::now() + Duration::from_secs(10);
         while !until() {
             assert!(Instant::now() < end, "the player never got there");
-            let soon = NSDate::dateWithTimeIntervalSinceNow(0.02);
-            NSRunLoop::currentRunLoop().runUntilDate(&soon);
+            wait();
         }
     };
     let clip = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -53,10 +50,36 @@ fn main() {
     let broken = Player::open(&junk).expect("opens the file");
     pump(&|| broken.tick(false) != Ok(true));
     assert!(matches!(broken.tick(false), Err(reason) if !reason.is_empty()));
+    // A track no one decodes fails; no half playback.
+    let bytes = std::fs::read(&clip).expect("reads the clip");
+    for (at, codec, track) in [(461, b"avc1", "video"), (1234, b"mp4a", "sound")] {
+        assert_eq!(&bytes[at..at + 4], codec);
+        let mut odd = bytes.clone();
+        odd[at..at + 4].copy_from_slice(b"elyx");
+        let path = dir.path().join(format!("odd-{track}.mp4"));
+        std::fs::write(&path, odd).expect("writes");
+        let player = Player::open(&path).expect("opens the file");
+        pump(&|| player.state() != State::Loading);
+        let state = player.state();
+        assert!(matches!(&state, State::Failed(reason) if !reason.is_empty()), "odd {track}: {state:?}");
+    }
     println!("media: plays, shows frames, and fails with reasons");
 }
 
-#[cfg(not(target_os = "macos"))]
+/// macOS plays through the main run loop.
+#[cfg(target_os = "macos")]
+fn wait() {
+    use objc2_foundation::{NSDate, NSRunLoop};
+    NSRunLoop::currentRunLoop().runUntilDate(&NSDate::dateWithTimeIntervalSinceNow(0.02));
+}
+
+/// Media Foundation and GStreamer play on their own threads.
+#[cfg(any(windows, target_os = "linux"))]
+fn wait() {
+    std::thread::sleep(std::time::Duration::from_millis(20));
+}
+
+#[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
 fn main() {
     println!("SKIP: no system player is built on this platform");
 }

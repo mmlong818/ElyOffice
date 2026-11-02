@@ -1,0 +1,50 @@
+# Rules and engine-free tests, on GitHub's machines only.
+name: pr
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    env:
+      ELY_REQUIRE_ENGINES: '1'
+      CARGO_TERM_COLOR: never
+      # Panic counts compare with the commit before the change.
+      PANICS_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+      # Linux's MuPDF links the pinned static OpenSSL.
+      PKG_CONFIG_PATH: ${{ github.workspace }}/engines/openssl/lib/pkgconfig
+      # Engine crates; release-tests.sh runs their tests.
+      NO_ENGINES: >-
+        --workspace --exclude ely-lok --exclude ely-office --exclude ely-doc --exclude ely-table
+        --exclude ely-show --exclude ely-pdf --exclude ely-pdf-worker --exclude ely-mark
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: README's libraries (the runner has Docker and Node)
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q libdbus-1-dev libfontconfig-dev libxcb1-dev libxkbcommon-x11-dev
+          # GStreamer plays the media test's H.264 and AAC clip.
+          sudo apt-get install -y -q libgstreamer-plugins-base1.0-0 gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-libav
+      - name: Tools
+        run: |
+          npm install -g pnpm
+          cargo install cargo-deny --locked --version 0.20.2
+          (cd site && pnpm install --frozen-lockfile)
+      - name: MuPDF, so the PDF worker compiles
+        run: scripts/fetch-references.sh mupdf && scripts/build-openssl.sh && scripts/build-mupdf.sh
+      - name: Project rules
+        run: scripts/check.sh
+      - name: Records cite what exists; the test map is current
+        run: python3 tests/scripts/records.py && python3 scripts/test-map.py && git diff --exit-code docs/test-map.md
+      - name: Licences, advisories and sources
+        run: scripts/deny.sh
+      - name: Panics listed with reasons
+        run: git fetch -q --depth 1 origin "$PANICS_BASE" && python3 scripts/panics.py
+      - name: Clippy, warnings fail
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Tests that need no engine
+        run: ELY_GIT=$(command -v git) cargo test $NO_ENGINES

@@ -133,17 +133,24 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_failing_version_query_is_no_version() {
-        use std::os::unix::fs::PermissionsExt as _;
-        let dir = tempfile::tempdir().unwrap();
-        let fake = dir.path().join("git");
-        std::fs::write(&fake, "#!/bin/sh\necho 'git version 2.56.0'\necho 'fatal: version query failed' >&2\nexit 7\n").unwrap();
-        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // Committed: one written here races other tests' forks.
+        let fake = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/git/git-fails");
         let error = super::system_version(&fake).expect_err("a failed run");
         assert!(
             error.to_string().contains("version query failed"),
             "{error}"
         );
         assert!(super::version_of(&fake).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_system_git_before_the_floor_is_refused() {
+        let fake = |name: &str| Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/git").join(name);
+        let old = super::system_version(&fake("git-2.39")).expect_err("too old");
+        assert_eq!(old.kind(), std::io::ErrorKind::Unsupported);
+        assert!(old.to_string().contains("older than 2.40"), "{old}");
+        assert_eq!(super::system_version(&fake("git-2.40")).expect("the floor"), "git version 2.40.0");
     }
 
     #[test]

@@ -136,13 +136,20 @@ fn every_toc_entry_has_its_heading() {
     }
 }
 
+/// The quickest of five: load only ever adds time.
+fn fastest(mut time: impl FnMut() -> std::time::Duration) -> std::time::Duration {
+    (0..5).map(|_| time()).min().expect("five runs")
+}
+
 #[test]
 fn a_long_html_block_writes_in_linear_time() {
     let took = |count: usize| {
         let source = format!("<div>{}</div>\n", "<b>x</b> ".repeat(count));
-        let start = std::time::Instant::now();
-        html(&source);
-        start.elapsed()
+        fastest(|| {
+            let start = std::time::Instant::now();
+            html(&source);
+            start.elapsed()
+        })
     };
     let (small, large) = (took(8_000), took(32_000));
     // Four times the input; squared would be sixteen.
@@ -161,10 +168,12 @@ fn notes_under_deep_marks_write_in_linear_time() {
             "x[^n] ".repeat(count)
         );
         let tree = markdown_tree(&source);
-        let mut placed = Placed::new(None, &Pictures::Inline);
-        let start = std::time::Instant::now();
-        write(&tree, &source, &mut placed, &mut Page::default()).expect("written");
-        start.elapsed()
+        fastest(|| {
+            let mut placed = Placed::new(None, &Pictures::Inline);
+            let start = std::time::Instant::now();
+            write(&tree, &source, &mut placed, &mut Page::default()).expect("written");
+            start.elapsed()
+        })
     };
     // Parsing grows squared upstream; untimed.
     let (small, large) = (took(4_000), took(16_000));
@@ -180,7 +189,7 @@ fn a_blank_formula_is_dropped_with_its_text() {
     ] {
         html(source);
     }
-    let page = page("$ $ ![p](p.png)\nnext $\\sqrt{$\n", None, &Pictures::Inline);
+    let page = page("$ $ ![p](p.png)\nnext $\\frac{a}$\n", None, &Pictures::Inline);
     let lines: Vec<usize> = page.formulas.iter().map(|(line, _)| *line).collect();
     assert_eq!(lines, [2], "{}", page.html);
 }
@@ -250,4 +259,46 @@ y+1
     assert_eq!(page.html.matches("<svg").count(), 2, "{}", page.html);
     assert!(page.formulas.is_empty(), "{:?}", page.formulas);
     assert_eq!(text(source), "a x^2 b\n\ny+1\n");
+}
+
+#[test]
+fn a_loose_list_keeps_its_paragraphs_and_a_tight_one_drops_them() {
+    assert!(html("- a\n- b\n").contains("<li>a</li><li>b</li>"));
+    assert!(html("- a\n\n- b\n").contains("<li><p>a</p></li><li><p>b</p></li>"));
+}
+
+#[test]
+fn a_formula_line_counts_crlf_once_and_a_lone_cr_as_a_line() {
+    for end in ["\n", "\r\n", "\r"] {
+        let text = ["one", "", "two", "", r"x $\frac{a}$"].join(end);
+        let page = page(&text, None, &Pictures::Inline);
+        let lines: Vec<usize> = page.formulas.iter().map(|(line, _)| *line).collect();
+        assert_eq!(lines, [5], "{end:?}");
+    }
+}
+
+#[test]
+fn cells_past_the_head_stay_out_as_they_stay_undrawn() {
+    let text = "| a | b |\n| - | - |\n| 1 | 2 | 3 |\n";
+    let page = html(text);
+    assert!(page.contains("<tr><td>1</td><td>2</td></tr>"), "{page}");
+    assert!(!page.contains('3'), "{page}");
+    assert_eq!(plain(text).expect("plain"), "a\tb\n1\t2\n");
+}
+
+#[test]
+fn formulas_far_down_a_page_write_in_linear_time() {
+    let took = |count: usize| {
+        let filler = "word ".repeat(40);
+        let source = format!("x $\\frac{{a}}$ {filler}\n\n").repeat(count);
+        let tree = markdown_tree(&source);
+        fastest(|| {
+            let mut placed = Placed::new(None, &Pictures::Inline);
+            let start = std::time::Instant::now();
+            write(&tree, &source, &mut placed, &mut Page::default()).expect("written");
+            start.elapsed()
+        })
+    };
+    let (small, large) = (took(1_000), took(4_000));
+    assert!(large < small * 8, "{small:?} then {large:?}");
 }

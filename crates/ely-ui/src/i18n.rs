@@ -4,6 +4,17 @@ mod analysis;
 mod calc;
 mod data;
 mod doc;
+mod mail;
+mod mail_drafts;
+mod mail_organize;
+mod mail_contacts;
+mod mail_migrate;
+mod mail_notify;
+mod mail_storage;
+mod mail_rules;
+mod mail_search;
+mod mail_outbox;
+mod mail_write;
 mod mark;
 mod mark_menus;
 mod motion;
@@ -24,9 +35,12 @@ use gpui::{App, SharedString};
 
 const EN: &[(&str, &str)] = &[
     ("menu.app.quit", "Quit {app}"),
+    ("tray.open", "Open {app}"),
     ("updates.failed", "The update did not finish: {error}"),
     ("updates.latest", "{app} {version} is the latest version."),
     ("menu.app.updates", "Check for Updates…"),
+    ("updates.package", "{app} {version} is out. Download its package from the release page, then run: {command}"),
+    ("updates.copy", "Copy Command"),
     ("menu.app.switch", "Open Ely App"),
     ("toast.open", "Open"),
     ("toast.open_failed", "The file did not open: {error}"),
@@ -79,9 +93,12 @@ const EN: &[(&str, &str)] = &[
 
 const ZH_CN: &[(&str, &str)] = &[
     ("menu.app.quit", "退出 {app}"),
+    ("tray.open", "打开 {app}"),
     ("updates.failed", "更新没有完成：{error}"),
     ("updates.latest", "{app} {version} 已是最新版本。"),
     ("menu.app.updates", "检查更新…"),
+    ("updates.package", "{app} {version} 已发布。从发布页下载其安装包后运行：{command}"),
+    ("updates.copy", "复制命令"),
     ("menu.app.switch", "打开 Ely 应用"),
     ("toast.open", "打开"),
     ("toast.open_failed", "文件没能打开：{error}"),
@@ -165,6 +182,17 @@ fn catalogs() -> (Catalog, Catalog) {
         .chain(office::EN)
         .chain(doc::EN)
         .chain(refs::EN)
+        .chain(mail::EN)
+        .chain(mail_write::EN)
+        .chain(mail_drafts::EN)
+        .chain(mail_outbox::EN)
+        .chain(mail_organize::EN)
+        .chain(mail_contacts::EN)
+        .chain(mail_migrate::EN)
+        .chain(mail_notify::EN)
+        .chain(mail_storage::EN)
+        .chain(mail_rules::EN)
+        .chain(mail_search::EN)
         .chain(tools::EN)
         .chain(table::EN)
         .chain(calc::EN)
@@ -189,6 +217,17 @@ fn catalogs() -> (Catalog, Catalog) {
         .chain(office::ZH_CN)
         .chain(doc::ZH_CN)
         .chain(refs::ZH_CN)
+        .chain(mail::ZH_CN)
+        .chain(mail_write::ZH_CN)
+        .chain(mail_drafts::ZH_CN)
+        .chain(mail_outbox::ZH_CN)
+        .chain(mail_organize::ZH_CN)
+        .chain(mail_contacts::ZH_CN)
+        .chain(mail_migrate::ZH_CN)
+        .chain(mail_notify::ZH_CN)
+        .chain(mail_storage::ZH_CN)
+        .chain(mail_rules::ZH_CN)
+        .chain(mail_search::ZH_CN)
         .chain(tools::ZH_CN)
         .chain(table::ZH_CN)
         .chain(calc::ZH_CN)
@@ -228,6 +267,18 @@ pub fn text(cx: &App, key: &str, args: &[(&str, &str)]) -> SharedString {
 /// The message for `n` things: `key.one` when one, else `key`.
 pub fn counted(cx: &App, key: &str, n: u64, args: &[(&str, &str)]) -> SharedString {
     text(cx, &count_key(key, n), args)
+}
+
+/// Words and characters; with a selection, its words.
+pub fn word_count(cx: &App, words: u64, characters: u64, selected: Option<u64>) -> SharedString {
+    let count = |key, n: u64| counted(cx, key, n, &[("n", &n.to_string())]);
+    let Some(selected) = selected else {
+        let (words, characters) = (count("count.word", words), count("count.character", characters));
+        return text(cx, "count.words", &[("words", &words), ("characters", &characters)]);
+    };
+    let args = [("selected", selected.to_string()), ("words", words.to_string())];
+    let args: Vec<_> = args.iter().map(|(key, value)| (*key, value.as_str())).collect();
+    counted(cx, "count.selected", words, &args)
 }
 
 fn count_key(key: &str, n: u64) -> String {

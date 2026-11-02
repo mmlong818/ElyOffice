@@ -82,7 +82,7 @@ pub(super) fn mark_of(html: &str) -> Option<&str> {
 
 /// Pastes the system clipboard.
 pub(super) fn paste(worker: &mut Worker, doc: &Doc) -> io::Result<()> {
-    let Some(clip) = clipboard::read().map_err(io::Error::other)? else {
+    let Some(clip) = clipboard::read().map_err(|error| io::Error::other(format!("{error:#}")))? else {
         return Ok(());
     };
     let (mime, data) = flavor_of(clip);

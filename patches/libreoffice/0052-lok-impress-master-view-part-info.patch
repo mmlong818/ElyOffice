@@ -1,0 +1,23 @@
+LOK: in the master view, a part's info is its master
+
+In the master view getParts counts the masters and getPartName names
+them, but getPartInfo still read the slide at the same index. With
+more masters than slides the last parts had no page, so the info had
+no "visible" and clients could not list the parts; below that, each
+master carried its slide's visibility and size. Read the master page
+in the master view, as getPartName does.
+
+--- a/sd/source/ui/unoidl/unomodel.cxx
++++ b/sd/source/ui/unoidl/unomodel.cxx
+@@ -4583,7 +4583,10 @@
+     if (!pViewSh)
+         return OUString();
+ 
+-    SdPage* pSdPage = mpDoc->GetSdPage(nPart, pViewSh->GetPageKind());
++    // In the master view, parts are masters, as getParts counts.
++    SdPage* pSdPage = isMasterViewMode()
++                          ? mpDoc->GetMasterSdPage(nPart, PageKind::Standard)
++                          : mpDoc->GetSdPage(nPart, pViewSh->GetPageKind());
+     const sal_Int16 nMasterPageCount= pViewSh->GetDoc()->GetMasterSdPageCount(pViewSh->GetPageKind());
+ 
+     ::tools::JsonWriter jsonWriter;

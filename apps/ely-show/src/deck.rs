@@ -6,7 +6,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use ely_gpui_component::{feedback::EmptyState, primitives::IconName, shell::StatusBar};
+use ely_gpui_component::{primitives::IconName, shell::StatusBar};
 use ely_lok::{
     LokView, Worker,
     show::Design,
@@ -24,6 +24,9 @@ use crate::design::Panel;
 use crate::slides::Strip;
 
 pub use crate::extra::Extra;
+
+/// Menu checks: grid, guides, comments; undo, redo.
+pub type Snapped = ((bool, bool, bool), (bool, bool));
 
 pub struct Deck {
     pub core: Core<Deck>,
@@ -55,10 +58,10 @@ pub struct Deck {
     pub dialog_seen: (Option<std::mem::Discriminant<crate::dialog::Dialog>>, Option<u64>),
     pub active_remark: Option<SharedString>,
     pub remarks_pane: Entity<crate::remarks::Pane>,
-    /// What the menus last checked: grid, guides, comments.
-    pub snap_menus: Option<(bool, bool, bool)>,
+    /// What the menus last showed: grid, guides, comments; undo, redo.
+    pub snap_menus: Option<Snapped>,
     /// The canvas's right-click menu.
-    pub menu: Option<ely_office::menu::Offer<crate::menu::What>>,
+    pub menu: Option<ely_ui::menu::Offer<crate::menu::What>>,
     /// Pictures of closed tabs and ended previews, freed later.
     pub retired: ely_gpui_component::primitives::Retired,
 }
@@ -81,8 +84,9 @@ impl Host for Deck {
         &mut self.core
     }
 
-    fn tab_closed(&mut self, tab: &ely_office::Tab<Extra, ely_office::Lok>, _: &mut Context<Self>) {
+    fn tab_closed(&mut self, tab: &ely_office::Tab<Extra, ely_office::Lok>, cx: &mut Context<Self>) {
         self.retire_tab(tab);
+        self.sync_menus(cx);
     }
 
     fn read_at(&self, tab: u64, _: &gpui::App) -> Option<ely_lok::Doc> {
@@ -90,16 +94,6 @@ impl Host for Deck {
     }
 
     fn observed(&mut self, id: u64, view: &Entity<LokView>, cx: &mut Context<Self>) {
-        // A new deck fits once; a zoom then stays.
-        if let Some(tab) = self.tab_mut(id)
-            && !tab.extra.fitted
-        {
-            tab.extra.fitted = true;
-            view.update(cx, |view, cx| {
-                view.fit_page(cx);
-                view.turn_parts();
-            });
-        }
         // Pictures before the scheme landed are repainted.
         let lit = view.read(cx).lit();
         if let Some(tab) = self.tab_mut(id)
@@ -110,13 +104,18 @@ impl Host for Deck {
         }
         self.offer_menu(id, view, cx);
         self.reread(id, view, cx);
+        // Undo's state can change with no new read.
+        if self.core.active == Some(id) {
+            self.sync_menus(cx);
+        }
     }
 }
 
 /// ElyShow's menus after File.
-pub fn menus(on: (bool, bool, bool), cx: &App) -> Vec<gpui::Menu> {
+pub fn menus(on: (bool, bool, bool), undo: (bool, bool), cx: &App) -> Vec<gpui::Menu> {
     let [insert, view] = crate::insert::menus(on, cx);
-    vec![crate::slides::menu(cx), insert, view, crate::slideshow::menu(cx)]
+    let edit = gpui::Menu::new(ely_ui::i18n::text(cx, "menu.edit", &[])).items(ely_office::undo_items(undo, cx));
+    vec![edit, crate::slides::menu(cx), insert, view, crate::slideshow::menu(cx)]
 }
 
 /// The window root with a blank deck.
@@ -135,7 +134,8 @@ pub fn open(app: AppId, window: &mut Window, cx: &mut App) -> Entity<Root> {
     });
     crate::slideshow::bind_keys(cx);
     ely_office::bind_zoom_keys(cx);
-    let menus = crate::deck::menus((false, false, false), cx);
+    ely_office::bind_undo_keys(cx);
+    let menus = crate::deck::menus((false, false, false), (false, false), cx);
     let root = ely_ui::document_root(app, deck.clone().into(), &ely_ui::commands::FILE, menus, window, cx);
     deck.update(cx, |deck, cx| {
         deck.core.root = root.downgrade();
@@ -147,12 +147,14 @@ pub fn open(app: AppId, window: &mut Window, cx: &mut App) -> Entity<Root> {
         true => deck.new_blank(cx),
         false => launched.into_iter().for_each(|path| deck.open_file(path, cx)),
     });
+    let asked = deck.clone();
+    ely_ui::on_ask(cx, move |ask, cx| asked.update(cx, |deck, cx| deck.answer_request(ask, cx)));
     let opening = deck.clone();
     ely_ui::on_open(cx, move |path, cx| {
         opening.update(cx, |deck, cx| deck.open_file(path, cx))
     });
     let closing = deck.clone();
-    window.on_window_should_close(cx, move |window, cx| {
+    ely_gpui_component::shell::guard_close(window, cx, move |window, cx| {
         closing.update(cx, |deck, cx| deck.should_close(window, cx))
     });
     root
@@ -177,7 +179,7 @@ impl Deck {
             fonts: Vec::new(),
             reading_fonts: false,
             guide_drag: None,
-            snap_menus: Some((false, false, false)),
+            snap_menus: Some(((false, false, false), (false, false))),
             menu: None,
             notes: Default::default(),
             remarks_open: false,
@@ -345,15 +347,23 @@ impl Deck {
         self.reread(id, &view, cx);
     }
 
-    /// Checks the View menu's snapping to match the shown deck.
+    /// Checks snapping and greys Undo, Redo as the deck stands.
     pub fn sync_menus(&mut self, cx: &mut Context<Self>) {
-        let Some(objects) = self.active_tab().and_then(|tab| tab.extra.objects.as_ref()) else {
-            return;
+        let shown = match self.active_tab() {
+            // Its objects not read yet: the menus wait.
+            Some(tab) => match tab.extra.objects.as_ref() {
+                Some(objects) => (
+                    (objects.snap_grid, objects.snap_guides, self.remarks_open),
+                    ely_office::undo_able(tab.view.read(cx)),
+                ),
+                None => return,
+            },
+            None => ((false, false, self.remarks_open), (false, false)),
         };
-        let on = (objects.snap_grid, objects.snap_guides, self.remarks_open);
-        if self.snap_menus != Some(on) {
-            self.snap_menus = Some(on);
-            ely_ui::set_document_menus(AppId::Show, &ely_ui::commands::FILE, menus(on, cx), cx);
+        let on = shown.0;
+        if self.snap_menus != Some(shown) {
+            self.snap_menus = Some(shown);
+            ely_ui::set_document_menus(AppId::Show, &ely_ui::commands::FILE, menus(on, shown.1, cx), cx);
         }
     }
 
@@ -393,11 +403,7 @@ impl Deck {
 
     pub(crate) fn body(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let Some(tab) = self.active_tab() else {
-            let title = match self.core.loading.first() {
-                Some((_, name)) => Self::text(cx, "office.loading", &[("name", name)]),
-                None => Self::text(cx, "command.blocked.no_document", &[]),
-            };
-            return EmptyState::new("show-empty", IconName::Monitor, title).into_any_element();
+            return self.empty_body("show-empty", IconName::Monitor, cx);
         };
         let view = tab.view.clone();
         let guides = self.guide_layer(&view, cx);
@@ -429,6 +435,8 @@ impl Deck {
 impl Render for Deck {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.release_pictures(window);
+        // Switching or closing decks changes Undo too.
+        self.sync_menus(cx);
         let title = self
             .active_tab()
             .map_or_else(|| AppId::Show.name().into(), |tab| tab.name.clone());
@@ -462,7 +470,7 @@ impl Render for Deck {
             .children(self.dialog_element(cx))
             .children(self.context_menu(cx));
         let root = crate::slideshow::bind(crate::insert::bind(crate::slides::bind(root, cx), cx), cx);
-        Self::bind_zoom(root, cx)
+        Self::bind_undo(Self::bind_zoom(root, cx), cx)
     }
 }
 

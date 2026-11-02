@@ -136,3 +136,54 @@ fn right_clicks_open_powerpoint_rows_on_each_target() {
     let layout = |app: &gpui::App| deck.read(app).active_tab().and_then(|tab| tab.extra.design.as_ref().map(|d| d.layout));
     settle(&cx, |app| layout(app) == Some(20));
 }
+
+/// Whether the Edit menu offers Undo and Redo now.
+fn offered(app: &gpui::App) -> (bool, bool) {
+    // Menus are first set once the kernel has spoken.
+    let menus = app.get_menus().unwrap_or_default();
+    let on = |name: &str| {
+        menus.iter().flat_map(|menu| &menu.items).any(|item| {
+            matches!(item, gpui::OwnedMenuItem::Action { name: shown, disabled: false, .. } if shown == name)
+        })
+    };
+    (on("Undo"), on("Redo"))
+}
+
+#[test]
+fn undo_and_redo_follow_the_deck_history() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let mut cx = TestAppContext::single();
+    let Some(deck) = blank(&mut cx, dir.path()) else {
+        eprintln!("SKIP: no LOK build");
+        return;
+    };
+    assert_eq!(cx.update(|app| offered(app)), (false, false), "an empty history");
+    act(&mut cx, &deck, ("draw.shape", &["rectangle", "true"]), |o| {
+        o.selection.as_ref().is_some_and(|s| s.kind == "shape")
+    });
+    settle(&cx, |app| offered(app) == (true, false));
+    cx.update(|app| deck.update(app, |deck, cx| deck.run_active("edit.undo", &[], cx)));
+    settle(&cx, |app| offered(app).1);
+}
+
+#[test]
+fn closing_the_last_deck_greys_undo() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let mut cx = TestAppContext::single();
+    let Some(deck) = blank(&mut cx, dir.path()) else {
+        eprintln!("SKIP: no LOK build");
+        return;
+    };
+    act(&mut cx, &deck, ("draw.shape", &["rectangle", "true"]), |o| {
+        o.selection.as_ref().is_some_and(|s| s.kind == "shape")
+    });
+    settle(&cx, |app| offered(app) == (true, false));
+    cx.update(|app| {
+        deck.update(app, |deck, cx| {
+            let id = deck.core.active.expect("a deck");
+            deck.close_tab(id, cx);
+        })
+    });
+    settle(&cx, |app| offered(app) == (false, false));
+    assert_eq!(cx.update(|app| offered(app)), (false, false), "no deck, nothing to undo");
+}

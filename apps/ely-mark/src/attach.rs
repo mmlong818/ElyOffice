@@ -171,7 +171,7 @@ fn escaped(part: &str) -> String {
 mod tests {
     use std::{cell::RefCell, path::Path, rc::Rc};
 
-    use ely_gpui_component::documents::Attachment;
+    use ely_gpui_component::documents::{Attachment, markdown_tree, mdast::Node};
     use gpui::{Entity, Image, ImageFormat, TestAppContext, VisualTestContext};
 
     use super::link;
@@ -321,20 +321,19 @@ mod tests {
 b.png",
             ),
         );
-        let tree =
-            markdown::to_mdast(&written, &markdown::ParseOptions::default()).expect("parses");
+        let tree = markdown_tree(&written);
         let blocks = tree.children().expect("a root");
-        let [markdown::mdast::Node::Paragraph(line)] = blocks.as_slice() else {
+        let [Node::Paragraph(line)] = blocks.as_slice() else {
             panic!("one paragraph, not {blocks:?}")
         };
         assert!(
-            matches!(line.children.as_slice(), [markdown::mdast::Node::Image(_)]),
+            matches!(line.children.as_slice(), [Node::Image(_)]),
             "{written}"
         );
     }
 
     /// A file name that is no text.
-    #[cfg(unix)]
+    #[cfg(all(unix, not(target_os = "macos")))]
     fn odd_name() -> std::ffi::OsString {
         use std::os::unix::ffi::OsStrExt as _;
         std::ffi::OsStr::from_bytes(b"pic-\xFF.png").to_owned()
@@ -346,6 +345,8 @@ b.png",
         std::ffi::OsString::from_wide(&[0x70, 0xD800, 0x2E, 0x70, 0x6E, 0x67])
     }
 
+    // macOS takes only UTF-8 names: no such file.
+    #[cfg(not(target_os = "macos"))]
     #[gpui::test]
     fn a_name_that_is_no_text_is_refused(cx: &mut TestAppContext) {
         let (view, cx, [_, files], said) = saved(cx);

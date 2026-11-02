@@ -22,6 +22,8 @@ pub(super) const EN: &[(&str, &str)] = &[
     ("table.page.scale", "Scale"),
     ("table.page.percent", "Percent"),
     ("table.page.fit", "Pages wide × tall"),
+    ("table.page.wide", "Pages wide"),
+    ("table.page.tall", "Pages tall"),
     ("table.page.pages", "Pages in all"),
     ("table.page.apply", "Apply"),
     (
@@ -86,6 +88,10 @@ pub(super) const EN: &[(&str, &str)] = &[
         "table.links.stale",
         "Linked values are as last saved; not refreshed: {sources}",
     ),
+    (
+        "table.kept.stale",
+        "Results as saved in the file: ElyTable cannot compute their functions; changing an input shows #NAME?: {cells}",
+    ),
 ];
 
 pub(super) const ZH_CN: &[(&str, &str)] = &[
@@ -110,6 +116,8 @@ pub(super) const ZH_CN: &[(&str, &str)] = &[
     ("table.page.scale", "缩放"),
     ("table.page.percent", "百分比"),
     ("table.page.fit", "宽 × 高页数"),
+    ("table.page.wide", "页宽"),
+    ("table.page.tall", "页高"),
     ("table.page.pages", "总页数"),
     ("table.page.apply", "应用"),
     (
@@ -167,5 +175,9 @@ pub(super) const ZH_CN: &[(&str, &str)] = &[
     (
         "table.links.stale",
         "链接的值为上次保存时的值，未刷新：{sources}",
+    ),
+    (
+        "table.kept.stale",
+        "以下单元格显示文件里存的结果：ElyTable 不能计算其中的函数，输入一改即显示 #NAME?：{cells}",
     ),
 ];

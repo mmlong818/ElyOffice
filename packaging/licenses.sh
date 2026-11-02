@@ -17,10 +17,10 @@ put() { # into, files...
     cp "$file" "$into/"
   done
 }
-put . "$root/LICENSE"
+put . "$root/LICENSE" "$root/LICENSE-UPSTREAM-MIT"
 case $slug in
   ely-doc | ely-table | ely-show) crates=(ely-lok) ;;
-  ely-pdf | ely-mark) crates=(ely-pdf-engine) ;;
+  ely-pdf | ely-mark) crates=(ely-pdf-worker) ;;
   *) crates=() ;;
 esac
 python3 "$root/packaging/crates.py" "$slug" ${crates[@]+"${crates[@]}"} >"$out/rust-crates.txt"
@@ -73,10 +73,9 @@ case $slug in
     done
     case $(uname) in
       MINGW* | MSYS*) put OpenSSL "$root/engines/vcpkg/installed/x64-windows-static/share/openssl/copyright" ;;
-      Darwin) put OpenSSL "$(pkg-config --variable=prefix libcrypto)/LICENSE.txt" ;;
-      *) put OpenSSL /usr/share/doc/libssl-dev/copyright /usr/share/common-licenses/Apache-2.0 ;;
+      *) put OpenSSL "$(pkg-config --variable=prefix libcrypto)/LICENSE.txt" ;;
     esac
-    put GreatVibes "$root/crates/ely-pdf-engine/fonts/OFL.txt"
+    put GreatVibes "$root/crates/ely-pdf-worker/fonts/OFL.txt"
     ;;
 esac
 case $slug in

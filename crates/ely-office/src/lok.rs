@@ -10,7 +10,7 @@ use ely_lok::{Doc, LokError, LokView, Reported, Worker, sheet::csv::Import};
 use ely_platform::AppId;
 use gpui::{App, Context, Entity, FocusHandle, Window};
 
-use crate::engine::{Engine, Load};
+use crate::engine::{Engine, Load, Stop};
 use crate::{Host, Tabs, text};
 
 /// The LOK engine.
@@ -49,6 +49,26 @@ impl Engine for Lok {
     ) -> io::Result<(Doc, Entity<LokView>, String)> {
         let Loaded { doc, laid, mark } = loaded;
         let view = LokView::open(Arc::clone(worker), doc.clone(), laid, cx);
+        let (zoom, deck) = (ely_ui::settings::current(cx).doc_zoom, doc.is_deck());
+        let kind = match (doc.is_sheet(), deck) {
+            (true, _) => "office.view.sheet",
+            (_, true) => "office.view.deck",
+            _ => "office.view.text",
+        };
+        let name = text(cx, kind, &[]);
+        // Decided once: a later default leaves it.
+        view.update(cx, |view, cx| {
+            view.set_name(name);
+            if deck {
+                view.turn_parts();
+            }
+            match zoom {
+                ely_platform::settings::DocZoom::Percent(percent) => view.set_zoom(percent as f32 / 100.0, cx),
+                ely_platform::settings::DocZoom::Auto if deck => view.fit_page(cx),
+                ely_platform::settings::DocZoom::Auto => {}
+            }
+        });
+        log::info!("office: opens at {zoom:?}, deck {deck}");
         Ok((doc, view, mark))
     }
 
@@ -74,6 +94,11 @@ impl Engine for Lok {
 
     fn ended(worker: &mut Worker) -> Option<String> {
         worker.ended()
+    }
+
+    fn stopper(worker: &Worker) -> Option<Stop> {
+        let stopper = worker.stopper();
+        Some(Arc::new(move || stopper.stop()))
     }
 
     fn restart(app: AppId, worker: &mut Worker) -> io::Result<()> {
@@ -239,3 +264,19 @@ pub trait Commands: Host<Engine = Lok> {
 }
 
 impl<H: Host<Engine = Lok>> Commands for H {}
+
+/// A worker that shuts down when the test's thread ends.
+#[cfg(feature = "test-support")]
+pub fn test_worker(install: &Path, profile: &Path) -> Arc<Mutex<Worker>> {
+    let worker = Worker::spawn(install, profile).expect("the worker");
+    let worker = Arc::new(Mutex::new(worker));
+    let ending = worker.clone();
+    ely_ui::at_thread_end(move || match ending.lock() {
+        Ok(mut worker) => match worker.shutdown() {
+            Ok(()) => {}
+            Err(error) => log::warn!("lok: test worker shutdown failed: {error}"),
+        },
+        Err(_) => log::warn!("lok: a test panicked holding the worker"),
+    });
+    worker
+}

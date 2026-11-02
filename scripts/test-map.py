@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Writes docs/test-map.md: each PRD id, its tasks, their tests."""
 
+import glob
 import os
 import re
 import subprocess
+import sys
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-LATER = ("MAIL", "AGENT")
+LATER = ("AGENT",)
 # Where each area's tests live, named or not.
 WHERE = {
     "UX": "crates/ely-ui/tests、shell.sh、doc-shell.sh、settings.sh",
@@ -15,16 +17,17 @@ WHERE = {
     "DOC": "apps/ely-doc/src/tests、doc-props.sh",
     "TABLE": "apps/ely-table/src/tests、theme.sh",
     "SHOW": "apps/ely-show/src/tests",
-    "PDF": "apps/ely-pdf/src/tests、crates/ely-pdf-engine/tests、pdf-recovery.sh",
+    "PDF": "apps/ely-pdf/src/tests、crates/ely-pdf-worker/tests、pdf-recovery.sh",
     "TREE": "apps/ely-tree/src/tests",
     "MARK": "apps/ely-mark 单测、mark-*.sh",
+    "MAIL": "apps/ely-mail/src/tests、crates/ely-mail-engine/tests",
     "PERF": "tests/perf/bench.py、lag.sh",
-    "QA": "见 docs/qa.md",
+    "QA": "无库内证据：C22.2 的记录已移除，须重做",
 }
 
 
 def read(name):
-    with open(os.path.join(ROOT, name)) as text:
+    with open(os.path.join(ROOT, name), encoding="utf-8") as text:
         return text.read()
 
 
@@ -54,23 +57,68 @@ def tasks():
     for line in read("tasks/TASKS.md").splitlines():
         if m := re.match(r"- \[(.)\] (C[\d.]+[a-z]?) ", line):
             yield m.group(2) + ("" if m.group(1) == "x" else f"（{m.group(1)}）"), set(cites(line)), line
-    for line in read("agents.md").splitlines():
+    for line in read("docs/decisions.md").splitlines():
         if m := re.match(r"- (\d{4}-\d\d-\d\d)[^：]*：.*?（(C[\d.]+)", line):
             yield f"决策 {m.group(2)}", set(cites(line)), line
 
 
+# A test attribute, any others, then the test function.
+TEST = re.compile(r"#\[(?:\w+::)*test(?:\([^)]*\))?\]\s*(?:#\[[^\]]*\]\s*)*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+([a-z0-9_]+)")
+
+
+def tests(text):
+    """Functions under a test attribute in Rust source."""
+    return set(TEST.findall(text))
+
+
 def known():
     """Test function and script names present in the tree."""
-    found = subprocess.run(["grep", "-rhoE", r"fn [a-z0-9_]+\(", "crates", "apps", "--include=*.rs"],
-                           cwd=ROOT, capture_output=True, text=True).stdout
-    names = {name[3:-1] for name in found.split()}
+    names = set()
+    for top in ("crates", "apps"):
+        for path in glob.glob(os.path.join(ROOT, top, "**", "*.rs"), recursive=True):
+            with open(path, encoding="utf-8") as source:
+                names |= tests(source.read())
     names |= {f for f in os.listdir(os.path.join(ROOT, "tests", "scripts"))}
     return names
 
 
+def missing():
+    """Places in WHERE that are not in the tree."""
+    gone = []
+    for places in WHERE.values():
+        for place in re.split(r"[、\s]+", places):
+            if "/" in place:
+                found = os.path.exists(os.path.join(ROOT, place))
+            elif place.endswith(".sh"):
+                found = bool(glob.glob(os.path.join(ROOT, "tests", "scripts", place)))
+            else:
+                continue
+            if not found:
+                gone.append(place)
+    return gone
+
+
 def main():
     present = known()
-    rows = ["# 功能编号与测试对照", "", "对应 PRD §22。由 `scripts/test-map.py` 从 PRD、`tasks/TASKS.md` 与 `agents.md` 生成：每个编号列出引用它的任务与决策，其中写明、且在代码里确有其名的测试（单测函数名或 `tests/scripts` 的脚本），以及该领域测试所在之处。邮件与 Agent 属第二批，不列。", "",
+    # A whole name, digits included, reaches its row.
+    if "a11y_follows_the_focused_paragraph" not in present:
+        sys.exit("FAIL: test-map.py cuts test names short")
+    # Production methods and extern declarations are not tests.
+    if not_tests := {"run_in", "ely_open", "ely_scan"} & present:
+        sys.exit(f"FAIL: test-map.py counts {sorted(not_tests)} as tests")
+    sample = """#[gpui::test(iterations = 8)]
+#[ignore]
+async fn a() {}
+#[tokio::test]
+pub async fn b() {}
+fn c() {}
+unsafe extern "C" { fn d(); }
+"""
+    if tests(sample) != {"a", "b"}:
+        sys.exit(f"FAIL: test-map.py reads {sorted(tests(sample))} as the sample's tests")
+    if gone := missing():
+        sys.exit(f"FAIL: test-map.py cites places not in the tree: {gone}")
+    rows = ["# 功能编号与测试对照", "", "对应 PRD §22。由 `scripts/test-map.py` 从 PRD、`tasks/TASKS.md` 与 `docs/decisions.md` 生成：每个编号列出引用它的任务与决策，其中写明、且在代码里确有其名的测试（单测函数名或 `tests/scripts` 的脚本），以及该领域测试所在之处。Agent 属第二批，不列。", "",
             "| 编号 | 要求 | 任务 | 记下的测试 | 测试所在 |", "| --- | --- | --- | --- | --- |"]
     listed = list(tasks())
     for id_, need in ids():
@@ -86,7 +134,10 @@ def main():
         labels = list(dict.fromkeys(label for label, _ in mine))
         where = WHERE[id_.split("-")[0]]
         rows.append(f"| {id_} | {need} | {'、'.join(labels) or '无'} | {'、'.join(f'`{n}`' for n in named) or '—'} | {where} |")
-    with open(os.path.join(ROOT, "docs", "test-map.md"), "w") as out:
+    table = next(row for row in rows if row.startswith("| TABLE-01 |"))
+    if "`a11y_follows_the_focused_paragraph`" not in table:
+        sys.exit(f"FAIL: C09.1's recorded test is missing from TABLE-01: {table}")
+    with open(os.path.join(ROOT, "docs", "test-map.md"), "w", encoding="utf-8", newline="\n") as out:
         out.write("\n".join(rows) + "\n")
     print(f"docs/test-map.md: {len(rows) - 6} ids")
 

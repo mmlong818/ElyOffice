@@ -124,7 +124,7 @@ impl Worker {
         let reply = worker.request(tag::HELLO, &[])?;
         if Unpack::new(&reply).str()? != proto::BUILD {
             return Err(io::Error::other(format!(
-                "the pdf worker {} is from other sources; run cargo build -p ely-pdf-engine --bins",
+                "the pdf worker {} is from other sources; run cargo build -p ely-pdf-worker",
                 bin.display()
             )));
         }
@@ -151,6 +151,13 @@ impl Worker {
     #[cfg(any(test, feature = "test-support"))]
     pub fn pid(&self) -> u32 {
         self.child.id()
+    }
+
+    /// Ends the worker process, for crash tests.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn kill(&mut self) -> io::Result<()> {
+        self.child.kill()?;
+        self.child.wait().map(|_| ())
     }
 
     /// A request aimed at pages or objects `doc` saw.
@@ -219,20 +226,7 @@ impl Worker {
             .u64(first as u64)
             .u64(count as u64)
             .bytes();
-        let reply = self.request(tag::BOUNDS, &ask)?;
-        let mut reply = Unpack::new(&reply);
-        let mut boxes = Vec::with_capacity(count);
-        for _ in 0..count {
-            let mut one = [0f32; 4];
-            for value in &mut one {
-                *value = f32::from_bits(reply.u64()? as u32);
-            }
-            boxes.push(one);
-        }
-        match reply.rest().is_empty() {
-            true => Ok(boxes),
-            false => Err(io::Error::other("a bounds reply too long")),
-        }
+        proto::boxes(&self.request(tag::BOUNDS, &ask)?, count)
     }
 
     /// A page's device pixels `tile` (x, y, w, h), BGRA.

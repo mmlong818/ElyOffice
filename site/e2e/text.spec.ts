@@ -1,9 +1,10 @@
-import { DOWNLOADS, expect, test, VERSION, type Page } from "./fixtures.ts";
+import { DOWNLOADS, expect, INSTALLERS, SOURCES, test, VERSION, type Page } from "./fixtures.ts";
 import { TEXT, word, type Key, type Lang } from "../src/text.ts";
 
-const REPO = "https://git.zacharyzhang.com/ZacharyZhang-NY/ElyOffice";
-const APPS = ["ElyDoc", "ElyTable", "ElyShow", "ElyPDF", "ElyTree", "ElyMark"];
+const REPO = "https://github.com/ELY-Open-Source/ElyOffice";
+const APPS = ["ElyDoc", "ElyTable", "ElyShow", "ElyPDF", "ElyMail", "ElyTree", "ElyMark"];
 const RELEASES = `${REPO}/releases/latest`;
+const X = "https://x.com/ZacharyZhang";
 
 test.use({ reducedMotion: "reduce" });
 
@@ -70,11 +71,12 @@ test.describe("English locale", () => {
 
   test("the hero links keep their icons in either language", async ({ page }) => {
     await page.goto("/");
-    const icons = page.locator(".hero .links a > svg[aria-hidden=true]");
+    const icons = page.locator(".hero :is(a.button, .links a.icon) > svg[aria-hidden=true]");
     await expect(icons).toHaveCount(2);
     await page.locator(".lang").click();
     await expect(icons).toHaveCount(2);
-    await expect(page.locator(".hero .links a")).toHaveText(["前往下载", "源码"]);
+    await expect(page.locator(".hero a.button")).toHaveText("下载 Windows 版");
+    await expect(page.locator(".hero .links a")).toHaveText(["全部平台", "源码"]);
   });
 
   test("the language button switches every text and back", async ({ page }) => {
@@ -89,19 +91,45 @@ test.describe("English locale", () => {
     await expect(lang).toHaveText("中文");
   });
 
-  test("downloads go to the release page, never to a file", async ({ page }) => {
+  test("the buttons download the full installer; single apps stay on the release", async ({ page }) => {
     await page.goto("/");
+    for (const button of await page.locator("a.button").all()) await expect(button).toHaveAttribute("href", INSTALLERS.windows);
+    await expect(page.locator("a.button")).toHaveCount(2);
+    const cards = page.locator("#download a.card");
+    await expect(cards).toHaveText(["Mac, Apple siliconFull installer", "Mac, IntelFull installer", "WindowsFull installer", "LinuxPackages on GitHub"]);
+    const hrefs = [INSTALLERS.macArm, INSTALLERS.macIntel, INSTALLERS.windows, RELEASES];
+    for (const [i, href] of hrefs.entries()) await expect(cards.nth(i)).toHaveAttribute("href", href);
+    for (const a of await page.getByRole("link", { name: "GitHub Releases" }).all()) await expect(a).toHaveAttribute("href", RELEASES);
+    await expect(page.getByRole("link", { name: "GitHub Releases" })).toHaveCount(2);
     await expect(page.locator(".tour .get")).toHaveCount(APPS.length);
     for (const i of APPS.keys()) await expect(page.locator(".tour .get").nth(i)).toHaveAttribute("href", RELEASES);
-    await expect(page.locator("#download a")).toHaveCount(1);
-    await expect(page.locator("#download [data-t=get]")).toHaveAttribute("href", RELEASES);
-    await expect(page.locator(".hero .links a").last()).toHaveText("Source");
-    await expect(page.locator(".hero .links a").last()).toHaveAttribute("href", REPO);
-    await expect(page.locator(".hero .links a").first()).toHaveAttribute("href", RELEASES);
-    const files = await page.locator("a[href]").evaluateAll((as) =>
-      as.map((a) => (a as HTMLAnchorElement).href).filter((h) => /\.(dmg|tar\.gz|zip|exe|AppImage)$/.test(h)),
-    );
-    expect(files).toEqual([]);
+    // Source is this release's archive, never a moving branch.
+    await expect(page.locator(".hero .links a").last()).toHaveAttribute("href", SOURCES.own);
+    await expect(page.locator("#download .sources a")).toHaveText(["Source", "Upstream source"]);
+    for (const [i, href] of [SOURCES.own, SOURCES.upstream].entries())
+      await expect(page.locator("#download .sources a").nth(i)).toHaveAttribute("href", href);
+    await expect(page.locator(".hero .links a").first()).toHaveAttribute("href", "#download");
+  });
+
+  test("the hero asks for a follow on X and a star", async ({ page }) => {
+    await page.goto("/");
+    const like = page.locator(".hero .like");
+    await expect(like).toHaveText("Like it? Follow @ZacharyZhang on X and star the project on GitHub.");
+    await expect(like.getByRole("link", { name: "@ZacharyZhang" })).toHaveAttribute("href", X);
+    await expect(like.getByRole("link", { name: "star the project" })).toHaveAttribute("href", REPO);
+    await page.locator(".lang").click();
+    await expect(like).toHaveText("喜欢的话，欢迎在 X 关注 @ZacharyZhang，并给项目点个 Star。");
+  });
+
+  test("a release still building sends its missing installers to the release", async ({ page }) => {
+    const json = { version: VERSION, installers: { macArm: INSTALLERS.macArm }, sources: { own: SOURCES.own }, downloads: DOWNLOADS };
+    await page.route("**/release.json", (r) => r.fulfill({ json }));
+    await page.goto("/");
+    await expect(page.locator("#download h2")).toHaveText(`Ely Office ${VERSION}`);
+    await expect(page.locator(".hero a.button")).toHaveAttribute("href", RELEASES);
+    await expect(page.locator("#download a.card").first()).toHaveAttribute("href", INSTALLERS.macArm);
+    await expect(page.locator("#download .sources a").first()).toHaveAttribute("href", SOURCES.own);
+    await expect(page.locator("#download .sources a").last()).toHaveAttribute("href", `${REPO}/releases/tag/v${VERSION}`);
   });
 
   test("the hero and download area name the newest version and all downloads", async ({ page }) => {
@@ -114,22 +142,32 @@ test.describe("English locale", () => {
   });
 
   test("a failed version read shows as an error", async ({ page }) => {
-    await page.route("**/release.json", (r) => r.fulfill({ status: 502, body: "Gitea answered 500" }));
+    await page.route("**/release.json", (r) => r.fulfill({ status: 502, body: "GitHub answered 500" }));
     await page.goto("/");
     await expect.poll(() => errors.length).toBe(1);
-    expect(errors[0]).toContain("Gitea answered 500");
+    expect(errors[0]).toContain("GitHub answered 500");
     await expect(page.locator("#download h2")).toHaveText("Ely Office");
     for (const c of await page.locator("[data-t=count]").all()) await expect(c).toBeHidden();
     errors = [];
   });
 
   test("every external link answers @net", async ({ page, request }) => {
+    const res = await request.get("https://api.github.com/repos/ELY-Open-Source/ElyOffice/releases/latest");
+    const { tag_name: tag, assets } = (await res.json()) as { tag_name: string; assets: { name: string }[] };
+    const v = tag.slice(1);
+    const dl = `${REPO}/releases/download/${tag}`;
+    const installers = { macArm: `${dl}/ElyOffice-${v}-arm64.dmg`, macIntel: `${dl}/ElyOffice-${v}-x86_64.dmg`, windows: `${dl}/ElyOffice-${v}-windows-x86_64-setup.exe` };
+    const named = (end: string) => `${dl}/${assets.find((a) => a.name.endsWith(end) && !a.name.slice(0, -end.length).endsWith("-upstream"))!.name}`;
+    const sources = { own: named("-source.tar.gz"), upstream: named("-upstream-source.tar.gz") };
+    await page.route("**/release.json", (r) => r.fulfill({ json: { version: v, installers, sources, downloads: DOWNLOADS } }));
     await page.goto("/");
+    await expect(page.locator(".hero a.button")).toHaveAttribute("href", installers.windows);
     const hrefs = await page.locator("a[href^='http']").evaluateAll((as) => as.map((a) => (a as HTMLAnchorElement).href));
     const unique = [...new Set(hrefs)];
-    expect(unique.sort()).toEqual([REPO, RELEASES].sort());
+    expect(unique.sort()).toEqual([REPO, RELEASES, X, ...Object.values(installers), ...Object.values(sources)].sort());
     for (const url of unique) {
-      const res = await request.head(url);
+      // X refuses HEAD and browser-like clients; a plain GET answers.
+      const res = url === X ? await request.get(url, { headers: { "user-agent": "curl/8" } }) : await request.head(url);
       expect(res.status(), url).toBeLessThan(400);
     }
   });
@@ -175,19 +213,28 @@ test("the hero links share one baseline in either language", async ({ browser })
   }
 });
 
-test("the download area tells how to open an unnotarized app", async ({ browser }) => {
-  for (const [locale, words] of [
-    ["en-US", ["System Settings", "Privacy & Security", "Open Anyway"]],
-    ["zh-CN", ["系统设置", "隐私与安全性", "仍要打开"]],
-  ] as const) {
-    const page = await browser.newPage({ locale, reducedMotion: "reduce" });
-    await page.goto("/");
-    const steps = page.locator("#download [data-t=unsigned]");
-    await expect(steps).toBeVisible();
-    for (const word of words) await expect(steps).toContainText(word);
-    await page.locator(".lang").click();
-    await expect(steps).toBeVisible();
-    await expect(steps).not.toContainText(words[0]);
-    await page.close();
-  }
-});
+const MAC = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0 Safari/537.36";
+const LINUX = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0 Safari/537.36";
+// The chip hint Chromium gives; Safari and Firefox give none.
+for (const [name, ua, chip, button, href] of [
+  ["a Mac without a chip hint", MAC, null, "Download for Mac (Apple silicon)", INSTALLERS.macArm],
+  ["an Apple silicon Mac", MAC, "arm", "Download for Mac (Apple silicon)", INSTALLERS.macArm],
+  ["an Intel Mac", MAC, "x86", "Download for Mac (Intel)", INSTALLERS.macIntel],
+  ["Linux", LINUX, null, "Download for Linux", RELEASES],
+] as const) {
+  test.describe(`on ${name}`, () => {
+    test.use({ userAgent: ua, locale: "en-US" });
+
+    test("the button offers this platform", async ({ page }) => {
+      await page.addInitScript((arch) => {
+        const hints = arch && { platform: "macOS", getHighEntropyValues: async () => ({ architecture: arch }) };
+        Object.defineProperty(Navigator.prototype, "userAgentData", { get: () => hints || undefined });
+      }, chip);
+      await page.goto("/");
+      await expect(page.locator("#download h2")).toHaveText(`Ely Office ${VERSION}`);
+      await expect(page.locator(".hero a.button")).toHaveText(button);
+      await expect(page.locator(".hero a.button")).toHaveAttribute("href", href);
+      await expect(page.locator(".hero [data-t=whole]")).toBeVisible({ visible: href !== RELEASES });
+    });
+  });
+}

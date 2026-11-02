@@ -57,11 +57,11 @@ impl Docs {
     }
 
     pub fn on_show_review(&mut self, _: &ShowReview, _: &mut Window, cx: &mut Context<Self>) {
-        self.side = match self.side {
-            Side::Review => Side::Props,
+        let side = match self.side {
+            Side::Review if ely_ui::settings::panels::shown(false, cx) => Side::Props,
             _ => Side::Review,
         };
-        cx.notify();
+        self.show_side(side, cx);
     }
 }
 

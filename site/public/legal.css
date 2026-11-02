@@ -1,0 +1,108 @@
+/* Privacy and terms pages. */
+:root {
+  color-scheme: light dark;
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "PingFang SC", sans-serif;
+  --text: #1d1d1f;
+  --quiet: #6e6e73;
+  --link: #2a6ad0;
+  --accent: #3d7fe5;
+  color: var(--text);
+  background: #fbfbfa;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --text: #f5f5f7;
+    --quiet: #a1a1a6;
+    --link: #6ea2f2;
+    background: #252525;
+  }
+}
+
+body {
+  margin: 0;
+}
+
+main {
+  max-width: 40rem;
+  margin: 0 auto;
+  padding: 3rem 1.5rem 9rem;
+}
+
+nav {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 6rem;
+  font-size: 0.9375rem;
+}
+
+article + article {
+  margin-top: 9rem;
+}
+
+h1 {
+  margin: 0;
+  font-size: clamp(2.25rem, 6vw, 3.25rem);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+
+h2 {
+  margin: 3rem 0 0.75rem;
+  font-size: 1.25rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+h3 {
+  margin: 1.75rem 0 0.5rem;
+  font-size: 1.0625rem;
+  font-weight: 600;
+}
+
+p,
+li {
+  font-size: 1.0625rem;
+  font-weight: 300;
+  line-height: 1.6;
+  color: var(--quiet);
+}
+
+p {
+  margin: 0 0 1rem;
+}
+
+ul {
+  margin: 0 0 1rem;
+  padding-inline-start: 1.25rem;
+}
+
+li + li {
+  margin-top: 0.5rem;
+}
+
+strong {
+  font-weight: 500;
+  color: var(--text);
+}
+
+.date {
+  margin: 0.75rem 0 3rem;
+  font-size: 0.9375rem;
+}
+
+a {
+  color: var(--link);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+  border-radius: 2px;
+}

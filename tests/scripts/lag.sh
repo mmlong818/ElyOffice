@@ -12,7 +12,8 @@ fail() {
   exit 1
 }
 
-cargo build -q -p ely-lok --bins -p "$app" --manifest-path "$root/Cargo.toml"
+cargo build -q -p ely-lok --bin ely-lok-worker --manifest-path "$root/Cargo.toml"
+cargo build -q -p "$(cargo pkgid --manifest-path "$root/apps/$app/Cargo.toml")" --manifest-path "$root/Cargo.toml"
 swiftc -O -o "$work/axv" "$root/tests/scripts/ax-values.swift"
 [ "$("$work/axv" $$)" != untrusted ] || { echo "SKIP: needs Accessibility permission"; exit 0; }
 ELY_SMOKE=hold ELY_LOG=debug ELY_LOCALE=en HOME="$work" XDG_DATA_HOME="$work/data" \
@@ -37,7 +38,7 @@ stats() {
 }
 line=$(grep -n "lok: input" "$(log)" | sed -n "$((start + 1))p" | cut -d: -f1)
 [ -n "$line" ] || { [ -z "${ELY_LAG_LOG:-}" ] || cp "$(log)" "$ELY_LAG_LOG"; fail "no typed input reached the view"; }
-echo "$app inputs: $(stats 'lok: input [0-9]+ waited' "$line")"
+echo "$app inputs: $(stats 'lok: input [0-9]+ [a-z._]+ waited' "$line")"
 echo "$app tiles: $(stats 'lok: tile .* in [0-9]+ ms' "$line")"
 echo "$app edit to tile: $(stats 'lok: edit to tile' "$line")"
 [ -z "${ELY_LAG_LOG:-}" ] || { cp "$(log)" "$ELY_LAG_LOG"; cp "$work/err" "$ELY_LAG_LOG.err"; }

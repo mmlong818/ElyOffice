@@ -47,14 +47,14 @@ impl LokView {
                     let done = select_biased! {
                         input = input_queue.next() => {
                             let Some((seq, input, sent)) = input else { break };
-                            let (waited, edits) = (sent.elapsed().as_millis(), input.edits());
+                            let (waited, edits, kind) = (sent.elapsed().as_millis(), input.edits(), input.kind());
                             let switched = matches!(input, super::input::Input::Part(_));
                             let outcome = super::input::run(&worker, &doc, input);
                             let took = sent.elapsed().as_millis();
                             if took > SLOW_MS {
-                                log::warn!("lok: input {seq} waited {waited}, took {took} ms");
+                                log::warn!("lok: input {seq} {kind} waited {waited}, took {took} ms");
                             } else {
-                                log::debug!("lok: input {seq} waited {waited}, took {took} ms");
+                                log::debug!("lok: input {seq} {kind} waited {waited}, took {took} ms");
                             }
                             Landed::Input(seq, edits, switched, outcome)
                         }
@@ -107,6 +107,9 @@ impl LokView {
                     }
                     self.edited += u64::from(edits);
                     let (outcome, now) = outcome;
+                    // A plain key took nothing; the menu may return.
+                    let taken = matches!(outcome, Ok(Some(Back::Completed(true))));
+                    self.completion.landed(seq, if taken { now } else { None });
                     if edits {
                         self.clock.landed(now);
                     }
@@ -118,8 +121,9 @@ impl LokView {
                             self.part = part;
                             self.invalidate(cx);
                         }
-                        Ok(Some(Back::Shown(_))) => {}
+                        Ok(Some(Back::Shown(_) | Back::Completed(_))) => {}
                         Ok(None) => {}
+                        Err(error) if crate::is_nothing(&error) => log::info!("lok: nothing to undo or redo"),
                         Err(error) => {
                             log::error!("lok: input failed ({:?})", error.kind());
                             cx.emit(LokError(error.to_string()));

@@ -1,38 +1,44 @@
 # ElyOffice
 
-ElyOffice 是一套面向本地文件的开源桌面办公应用，提供文档、表格、演示文稿、PDF、Git 仓库管理和 Markdown 编辑。本仓库维护其 Windows 派生版本，当前源码跟进原作者 v0.1.8 系列。文件保存在你的设备上，处理本地文件无需账号或云端存储。
+ElyOffice 是一套面向本地文件的开源桌面应用，主要包含文档、表格、演示文稿、PDF、Git 和 Markdown 工具。文件保存在你的设备上，处理本地文件无需账号或云端存储。
 
-ElyOffice is an open-source desktop suite for local files, with apps for documents, spreadsheets, presentations, PDFs, Git repositories, and Markdown. This repository maintains a Windows derivative whose source follows the original author's v0.1.8 line. Your files stay on your device; working with local files requires no account or cloud storage.
+ElyOffice is an open-source desktop suite for local files, with document, spreadsheet, presentation, PDF, Git, and Markdown apps. Local-file work stays on your device and does not require an account or cloud storage.
 
-## 应用 | Apps
+## Apps | 应用
 
-| 应用 | 用途 | Purpose |
+| App | Purpose | Engine |
 | --- | --- | --- |
-| ElyDoc | 编辑文档，改进 Word 公式与行内图片显示 | Edit documents, with improved rendering of Word formulas and inline images |
-| ElyTable | 处理表格与 CSV；工作表较多时可横向滚动标签 | Work with spreadsheets and CSV; scroll sheet tabs horizontally when there are many |
-| ElyShow | 制作演示文稿 | Create presentations |
-| ElyPDF | 阅读与处理 PDF | Read and work with PDFs |
-| ElyTree | 管理 Git 仓库 | Manage Git repositories |
-| ElyMark | 原生 Markdown 编辑器，支持行内与块级数学公式 | Native Markdown editor with inline and block math |
+| ElyDoc | Word processing | LibreOfficeKit |
+| ElyTable | Spreadsheets and CSV | LibreOfficeKit |
+| ElyShow | Presentations and media | LibreOfficeKit, system media |
+| ElyPDF | PDF reading and editing, OCR, signatures | MuPDF, Tesseract |
+| ElyMail | Mail over IMAP, POP3 and SMTP | Rust mail engine, SQLite |
+| ElyTree | Git repository management | Git |
+| ElyMark | Markdown editing, math and diagrams | GPUI, markdown-rs |
+| ElyAgent | AI assistant | Kigi CLI |
 
-## 获取 ElyOffice | Get ElyOffice
+## Get ElyOffice | 获取 ElyOffice
 
-本仓库目前提供源码，尚未发布可下载的 Windows 安装包或二进制版本。请查看[本仓库 Releases](https://github.com/mmlong818/ElyOffice/releases)。如需 Windows 安装包，可访问[原作者 v0.1.8 下载页](https://git.zacharyzhang.com/ZacharyZhang-NY/ElyOffice/releases/tag/v0.1.8)，其中提供 Windows 套件及六个单应用包。这些安装包来自原作者版本，不包含本 fork 额外的稳定性与安装器修复。
+This fork currently provides source code and has no binary release or installer. See [this fork's Releases](https://github.com/mmlong818/ElyOffice/releases). The original project publishes builds from its [v0.1.13 release](https://github.com/ELY-Open-Source/ElyOffice/releases/tag/v0.1.13); those are upstream packages and do not include this fork's Windows worker and installer changes.
 
-This repository currently provides source code and has not published a downloadable Windows installer or binary release. Check [this fork's Releases](https://github.com/mmlong818/ElyOffice/releases). For Windows installers, visit [the original author's v0.1.8 downloads](https://git.zacharyzhang.com/ZacharyZhang-NY/ElyOffice/releases/tag/v0.1.8), which include the suite and six standalone app packages. Those are the original author's packages and do not include the additional stability and installer fixes maintained in this fork.
+本 fork 当前提供源码，尚未发布二进制版本或安装包。请查看[本 fork 的 Releases](https://github.com/mmlong818/ElyOffice/releases)。原项目在 [v0.1.13 release](https://github.com/ELY-Open-Source/ElyOffice/releases/tag/v0.1.13) 发布的安装包属于上游版本，不包含本 fork 的 Windows worker 与安装器改动。
 
-## 开发 | Development
+This source follows the original project's `v0.1.13` tag. It includes that version's product features, including ElyShow system media, ElyTable filter search, ElyMark cross-paragraph selection, document CLI operations, and signed updates, together with the fork's Windows stability and installer protections. See the [integration report](docs/UPSTREAM_V0113_INTEGRATION.md) for the verified scope and limitations.
 
-界面使用 Rust 与 GPUI 构建；ElyDoc、ElyTable 和 ElyShow 通过 LibreOfficeKit 使用 LibreOffice 文档引擎，ElyPDF 使用 MuPDF 与 Tesseract。Windows 构建与打包现状见[上游 v0.1.8 整合报告](docs/UPSTREAM_V018_INTEGRATION.md)。贡献入口见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+本仓库源码跟进原项目 `v0.1.13` tag，保留该版本的产品功能，包括 ElyShow 系统媒体、ElyTable 筛选搜索、ElyMark 跨段选择、文档 CLI 操作和签名更新，并整合本 fork 的 Windows 稳定性与安装器保护。已验证范围和限制见[整合报告](docs/UPSTREAM_V0113_INTEGRATION.md)。
 
-The interface is built with Rust and GPUI. ElyDoc, ElyTable, and ElyShow use the LibreOffice document engine through LibreOfficeKit; ElyPDF uses MuPDF and Tesseract. See the [upstream v0.1.8 integration report](docs/UPSTREAM_V018_INTEGRATION.md) for the current Windows build and packaging status. See [CONTRIBUTING.md](CONTRIBUTING.md) to get started contributing.
+## Development | 开发
 
-## 来源与许可 | Credits and licence
+The interface uses Rust and GPUI. ElyDoc, ElyTable, and ElyShow use LibreOffice through LibreOfficeKit; ElyPDF uses MuPDF and Tesseract. See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and the [integration report](docs/UPSTREAM_V0113_INTEGRATION.md) for Windows build and runtime notes.
 
-ElyOffice 由 [ZacharyZhang-NY](https://github.com/ZacharyZhang-NY) 创建（[X](https://x.com/ZacharyZhang)）。原仓库为 [github.com/ZacharyZhang-NY/ElyOffice](https://github.com/ZacharyZhang-NY/ElyOffice)，现已迁移至 [git.zacharyzhang.com/ZacharyZhang-NY/ElyOffice](https://git.zacharyzhang.com/ZacharyZhang-NY/ElyOffice)。本 fork 位于 [github.com/mmlong818/ElyOffice](https://github.com/mmlong818/ElyOffice)，由 `mmlong818` 维护。文档引擎来自 [LibreOffice 社区](https://zh-cn.libreoffice.org/)开发的 LibreOffice。项目沿革与详细归属见[来源说明](ORIGIN.md)。
+界面使用 Rust 与 GPUI。ElyDoc、ElyTable 和 ElyShow 通过 LibreOfficeKit 使用 LibreOffice；ElyPDF 使用 MuPDF 与 Tesseract。开发环境见 [CONTRIBUTING.md](CONTRIBUTING.md)，Windows 构建与运行记录见[整合报告](docs/UPSTREAM_V0113_INTEGRATION.md)。
 
-ElyOffice was created by [ZacharyZhang-NY](https://github.com/ZacharyZhang-NY) ([X](https://x.com/ZacharyZhang)). The original repository is [github.com/ZacharyZhang-NY/ElyOffice](https://github.com/ZacharyZhang-NY/ElyOffice), now migrated to [git.zacharyzhang.com/ZacharyZhang-NY/ElyOffice](https://git.zacharyzhang.com/ZacharyZhang-NY/ElyOffice). This fork is [github.com/mmlong818/ElyOffice](https://github.com/mmlong818/ElyOffice), maintained by `mmlong818`. The document engine comes from LibreOffice, developed by the [LibreOffice community](https://zh-cn.libreoffice.org/). See [ORIGIN.md](ORIGIN.md) for project history and detailed attribution.
+## Credits and licence | 来源与许可
 
-自有代码采用 AGPL-3.0-or-later，见 [LICENSE](LICENSE)。第三方组件各自采用其许可，详见[许可与源码说明](docs/licenses.md)。
+ElyOffice was created by [ZacharyZhang-NY](https://github.com/ZacharyZhang-NY) ([X](https://x.com/ZacharyZhang)). The original source moved from [its historical GitHub repository](https://github.com/ZacharyZhang-NY/ElyOffice) to [the author's Gitea repository](https://git.zacharyzhang.com/ZacharyZhang-NY/ElyOffice), then to the current [ELY-Open-Source/ElyOffice](https://github.com/ELY-Open-Source/ElyOffice) GitHub project. This public fork is [mmlong818/ElyOffice](https://github.com/mmlong818/ElyOffice), maintained by `mmlong818`. LibreOffice and LibreOfficeKit are developed by the [LibreOffice community](https://www.libreoffice.org/). See [ORIGIN.md](ORIGIN.md) for project history and attribution.
 
-ElyOffice code is licensed under AGPL-3.0-or-later; see [LICENSE](LICENSE). Third-party components retain their respective licences; see [licence and source notes](docs/licenses.md).
+ElyOffice 由 [ZacharyZhang-NY](https://github.com/ZacharyZhang-NY) 创建（[X](https://x.com/ZacharyZhang)）。原始源码先由[历史 GitHub 仓库](https://github.com/ZacharyZhang-NY/ElyOffice)迁至[作者的 Gitea 仓库](https://git.zacharyzhang.com/ZacharyZhang-NY/ElyOffice)，随后迁至当前的 [ELY-Open-Source/ElyOffice](https://github.com/ELY-Open-Source/ElyOffice) GitHub 项目。本公开 fork 位于 [mmlong818/ElyOffice](https://github.com/mmlong818/ElyOffice)，由 `mmlong818` 维护。LibreOffice 与 LibreOfficeKit 由 [LibreOffice 社区](https://www.libreoffice.org/)开发。项目沿革与归属见 [ORIGIN.md](ORIGIN.md)。
+
+本 fork 沿用 [AGPL-3.0-or-later](LICENSE)。合入的上游 v0.1.13 代码保留其 MIT 版权与许可声明，全文见 [LICENSE-UPSTREAM-MIT](LICENSE-UPSTREAM-MIT)。第三方组件适用各自许可，详见[许可与来源说明](docs/licenses.md)。
+
+This fork continues under [AGPL-3.0-or-later](LICENSE). The merged upstream v0.1.13 code retains its MIT copyright and license notice in [LICENSE-UPSTREAM-MIT](LICENSE-UPSTREAM-MIT). Third-party components retain their respective licences; see the [licence and source notes](docs/licenses.md).

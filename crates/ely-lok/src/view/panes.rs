@@ -8,6 +8,24 @@ pub(super) struct Axis {
 }
 
 impl Axis {
+    /// Whether a document span intersects a visible pane.
+    pub fn visible(self, start: i32, length: i32, view: i32) -> bool {
+        if length < 0 || view <= 0 {
+            return false;
+        }
+        let (start, end) = (
+            i64::from(start),
+            i64::from(start) + i64::from(length.max(1)),
+        );
+        let (frozen, scroll, view) = (
+            i64::from(self.frozen),
+            i64::from(self.scroll),
+            i64::from(view),
+        );
+        (frozen > 0 && start < frozen.min(view) && end > 0)
+            || (frozen < view && start < scroll + view && end > scroll + frozen)
+    }
+
     /// Where document `doc` shows, in twips from the view's start.
     pub fn show(self, doc: i32) -> i32 {
         if doc < self.frozen {
@@ -41,6 +59,60 @@ impl Axis {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hidden_spans_do_not_become_edge_anchors() {
+        let axis = Axis {
+            frozen: 0,
+            scroll: 4000,
+        };
+        for (start, length, visible) in [
+            (317, 0, false),
+            (4000, 0, true),
+            (6999, 0, true),
+            (7000, 0, false),
+            (3990, 20, true),
+            (500, 100, false),
+            (-10, 5, false),
+            (-10, 20, false),
+        ] {
+            assert_eq!(
+                axis.visible(start, length, 3000),
+                visible,
+                "{start}, {length}"
+            );
+        }
+    }
+
+    #[test]
+    fn frozen_spans_stay_visible_but_the_hidden_band_does_not() {
+        let axis = Axis {
+            frozen: 300,
+            scroll: 1000,
+        };
+        for (start, length, visible) in [
+            (100, 0, true),
+            (400, 20, false),
+            (1290, 20, true),
+            (1300, 0, true),
+            (299, 10, true),
+            (3000, 0, false),
+        ] {
+            assert_eq!(
+                axis.visible(start, length, 2000),
+                visible,
+                "{start}, {length}"
+            );
+        }
+        let axis = Axis {
+            frozen: 1000,
+            scroll: 500,
+        };
+        assert!(axis.visible(200, 20, 500));
+        assert!(!axis.visible(600, 20, 500));
+        assert!(!axis.visible(1600, 20, 500));
+        assert!(!axis.visible(0, 1, 0));
+    }
 
     #[test]
     fn the_frozen_part_stays_and_the_rest_scrolls() {

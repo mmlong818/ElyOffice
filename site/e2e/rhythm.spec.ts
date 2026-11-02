@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "./fixtures.ts";
 
-const APPS = ["ElyDoc", "ElyTable", "ElyShow", "ElyPDF", "ElyTree", "ElyMark"];
+const APPS = ["ElyDoc", "ElyTable", "ElyShow", "ElyPDF", "ElyMail", "ElyTree", "ElyMark"];
 
 let errors: string[] = [];
 
@@ -48,7 +48,7 @@ test("the speaker plays and pauses the music", async ({ page }) => {
   await expect(button(page)).toHaveAccessibleName("Play music");
 });
 
-test("buildings hop on the beat; all six on the bar", async ({ page }) => {
+test("buildings hop on the beat; all seven on the bar", async ({ page }) => {
   const rest = await tops(page);
   await button(page).click();
   await page.waitForFunction(
@@ -104,7 +104,7 @@ test("the desk cell under the pointer rises", async ({ page }) => {
   const at = await page.evaluate(() => {
     const svg = document.querySelector<SVGSVGElement>(".tour .stage")!;
     const [cos, sin, unit, top] = [Math.cos(Math.PI / 6), 0.5, 28, 0.6];
-    const p = new DOMPoint((11.5 - 9.5) * cos * unit, ((11.5 + 9.5) * sin - top) * unit).matrixTransform(
+    const p = new DOMPoint((10.5 - 10.5) * cos * unit, ((10.5 + 10.5) * sin - top) * unit).matrixTransform(
       svg.getScreenCTM()!,
     );
     return { x: p.x, y: p.y };

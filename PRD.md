@@ -6,7 +6,7 @@
 目标平台：Linux、Windows、macOS  
 产品形态：开源、离线优先、可独立安装和运行的桌面应用套件
 
-本文中的“必须”是发布要求。“默认”是初始设置，用户可以按文中规定修改。功能表中的所有条目均属于首个正式版本，不代表分阶段计划。性能数值是验收目标，不是已有测试结果。第三方项目提供的能力与 Ely 已完成的能力分开记录。
+本文中的“必须”是发布要求。“默认”是初始设置，用户可以按文中规定修改。功能表的条目属于其应用所在的发布批次（§1.2 第 1 条）。性能数值是验收目标，不是已有测试结果。第三方项目提供的能力与 Ely 已完成的能力分开记录。
 
 ## 1. 产品定义
 
@@ -22,18 +22,18 @@ Ely Office 提供八个桌面应用。用户可以写文档、计算表格、制
 | ElyTable | 电子表格编辑与计算 | LOK | XLSX、ODS、CSV |
 | ElyShow | 演示文稿编辑与放映 | LOK | PPTX、ODP |
 | ElyPDF | PDF 阅读、编辑、批注、表单和页面处理 | MuPDF；OCR 复用 Tesseract | PDF |
-| ElyMail | 邮件收发、本地存储和搜索 | MailCore 2，加本地同步与存储 | 邮件、附件、草稿 |
+| ElyMail | 邮件收发、本地存储和搜索 | Rust 的 mail-send、mail-parser、mail-builder（IMAP 与 POP3 由引擎自写），加本地同步与存储 | 邮件、附件、草稿 |
 | ElyTree | Git 图形化版本管理 | Git CLI | 本地 Git 仓库 |
 | ElyMark | 本地 Markdown 编辑 | Ely-GPUI-Components 的 Markdown 文档组件，markdown-rs 解析；参考 MarkText、ColaMD、Markion | Markdown 与本地附件 |
 | ElyAgent | 独立的 Agent 配置与会话管理 | 嵌入的 Kigi CLI Rust 代码 | 配置、会话记录、运行状态 |
 
-LOK、MuPDF 和 GPUI 是已确定的方向。MailCore 2、Markdown 文档组件、邮件正文渲染和下文的发行默认值，是本 PRD 采用的工程基线，仍须通过三端接入验收。不得把未测试的接口写成已支持功能。
+LOK、MuPDF 和 GPUI 是已确定的方向。邮件协议 crate、Markdown 文档组件、邮件正文渲染和下文的发行默认值，是本 PRD 采用的工程基线，仍须通过三端接入验收。不得把未测试的接口写成已支持功能。
 
 ElyAgent 参考 Magpie 的独立工具定位，但不要求复制其全部功能。它不是其他七个应用的聊天侧栏，也不是整个套件的控制中枢。[S19]
 
 ### 1.2 固定决策
 
-1. 首个正式版交付全部八个应用及本文定义的功能，不发布只有入口和占位界面的套件。
+1. 分两批发布（用户 2026-10-08 定）：首批 ElyDoc、ElyTable、ElyShow、ElyPDF、ElyMail、ElyTree、ElyMark，第二批 ElyAgent（§15）；批次记在 `packaging/apps.tsv`。每批交付其应用在本文定义的全部功能，不发布只有入口和占位界面的应用。
 2. Doc、Table、Show 共用 LOK 适配实现。PDF 使用 MuPDF。不开设替代内核路线。
 3. GPUI 负责应用界面。专业内容区域可以使用内核渲染结果，但外观和行为必须遵守 Ely 规范；不用 CEF 与 Electron。
 4. 应用可以独立启动、更新和卸载。安装 ElyMark、ElyTree 或 ElyAgent 不得强制安装 LOK。
@@ -375,16 +375,18 @@ XFA 动态表单、任意嵌入脚本执行、专业印前分色及 PDF 到 Offi
 
 ### 12.1 定位与后端
 
-提供多账号邮件客户端，不建设邮件托管服务。MailCore 2 负责 IMAP、POP、SMTP 和邮件解析等能力。Ely 负责账号流程、本地存储、搜索、同步队列和界面。MailCore 2 官方列出 C++ API 与三端支持，但发行前仍须验证实际构建和依赖。[S10]
+提供多账号邮件客户端，不建设邮件托管服务。协议与 MIME 用 Rust crate（用户 2026-10-19 定，取代 MailCore 2）：IMAP（imap-proto 解析）与 POP3 由 Ely 自写（async-imap 与 async-pop 有数处缺陷，C12.1 审查查出），mail-send 发 SMTP，mail-parser 读 MIME，mail-builder 写 MIME。它们在应用进程的后台任务里运行，不另起工作进程。Ely 负责账号流程、本地存储、搜索、同步队列和界面。
 
-默认布局为账号与文件夹、邮件列表、阅读区。写信可在独立窗口打开。HTML 正文和富文本撰写区不用 CEF 与 Electron，渲染方式随 ElyMail 任务另定；不能把正文 HTML 解析当成完整页面渲染。
+默认布局为账号与文件夹、邮件列表、阅读区。写信可在独立窗口打开。HTML 正文与写信不用 CEF 与 Electron（用户 2026-10-19 定）：正文以 html5ever 解析，净化后按块的子集由 GPUI 绘制（段落、标题、列表、引用、表格、图片、链接、粗斜体与颜色），脚本、定位、浮动与样式表之外的版式不画，不当作完整页面渲染；写信用组件库的 Markdown 文档组件，发出纯文本与由 markdown-rs 生成的 HTML 两部分。
+
+内置登录：Microsoft 走 OAuth；Gmail 走应用专用密码（用户 2026-10-22 定：未经 Google 验证的客户端见警告、上限 100 人，Gmail 范围须过 CASA 评估）。应用专用密码要求开启两步验证，两步验证只用安全密钥、账号加入高级保护计划或组织管理员关掉时 Google 不提供，添加页写明此前提、被拒时写明怎么办。Gmail 的 OAuth 计划：先过 Google 的应用验证与受限范围 `https://mail.google.com/` 每年一次的 CASA 评估，过了再加 OAuth 登录、与应用专用密码并存；何时启动由用户定，未启动前不写进发布说明；iCloud 不给第三方 OAuth，走应用专用密码向导（服务器 `imap.mail.me.com:993`、`smtp.mail.me.com:587`，无 POP3）[S10]。网络随系统代理（HTTP CONNECT、SOCKS5）。OAuth 的客户端 ID 在构建时注入，缺 ID 的构建里该登录写明不可用。
 
 ### 12.2 功能要求
 
 | 编号 | 功能 | 完成要求 |
 | --- | --- | --- |
 | MAIL-01 | 账号 | 支持多个 IMAP/SMTP 账号、POP3 账号、服务器配置、TLS 与连通性检查 |
-| MAIL-02 | 授权 | 提供 Gmail 与 Microsoft 邮箱的 OAuth 流程；支持服务商允许的应用密码或自定义认证配置 |
+| MAIL-02 | 授权 | 提供 Microsoft 邮箱的 OAuth 流程，Gmail 与 iCloud 的应用专用密码向导；支持服务商允许的应用密码或自定义认证配置 |
 | MAIL-03 | 邮箱视图 | 支持统一收件箱、账号独立视图、文件夹、未读、标记和附件筛选 |
 | MAIL-04 | 阅读 | 支持纯文本、HTML、内嵌图片、附件、原始邮件头与会话线程 |
 | MAIL-05 | 写信 | 支持收件人、抄送、密送、回复、回复全部、转发、签名、附件和纯文本/富文本撰写 |
@@ -399,7 +401,7 @@ XFA 动态表单、任意嵌入脚本执行、专业印前分色及 PDF 到 Offi
 | MAIL-14 | 同步控制 | 支持手动刷新、运行期间定时同步、暂停和按文件夹离线下载 |
 | MAIL-15 | 通知 | 支持新邮件通知与静音；锁屏通知默认不显示正文 |
 
-Gmail 和 Microsoft 的 IMAP/SMTP OAuth 有各自的应用注册、权限与服务端条件。正式版内置登录必须完成适用的注册及审核。不得把用户自行申请开发者凭据作为普通账号接入的默认步骤，也不得承诺绕过组织禁用 IMAP/SMTP 的策略。[S11][S12]
+Microsoft 的 IMAP/SMTP OAuth 有其应用注册、权限与服务端条件（Gmail 的 OAuth 同样，故 Gmail 改走应用专用密码）。正式版内置登录必须完成适用的注册及审核。不得把用户自行申请开发者凭据作为普通账号接入的默认步骤，也不得承诺绕过组织禁用 IMAP/SMTP 的策略。[S11][S12]
 
 ### 12.3 缓存与同步
 
@@ -525,6 +527,8 @@ AI 或脚本修改文件与其他外部修改使用同一套处理规则。ElyMa
 
 ## 15. ElyAgent
 
+第二批发布（§1.2 第 1 条），本章全部条目属于第二批。
+
 ### 15.1 定位与独立性
 
 提供独立的 Agent 配置和会话管理界面。用户选择已安装的 Agent、工作目录、模型配置和执行参数，查看输入输出、工具调用、文件改动和运行状态。
@@ -607,7 +611,8 @@ ely-office/
     ely-platform/    # 文件对话框、打印、凭据、系统集成
     ely-files/       # 文件会话、保存、恢复、监听
     ely-lok/         # LOK 接入；仅 Doc/Table/Show 使用
-    ely-pdf-engine/  # MuPDF 与 OCR 接入
+    ely-pdf-engine/  # PDF worker 的协议与客户端，不链 MuPDF
+    ely-pdf-worker/  # MuPDF 与 OCR 接入，独立进程
     ely-mail-engine/ # 邮件协议、同步和本地存储
   assets/
   tests/
@@ -630,7 +635,7 @@ C/C++ 异常、原生错误与资源释放在 FFI 边界处理，不能跨 Rust 
 
 ### 17.3 内容渲染
 
-不用 CEF，不用 Electron（用户 2026-10-11 定）。Mark 的编辑与预览全部由 GPUI 绘制（§14.1）。Mail 的 HTML 正文和富文本撰写的渲染方式随 ElyMail 任务另定，定前不写成已有。
+不用 CEF，不用 Electron（用户 2026-10-11 定）。Mark 的编辑与预览全部由 GPUI 绘制（§14.1）。Mail 的 HTML 正文按块的子集由 GPUI 绘制，写信用 Markdown 文档组件（§12.1）。
 
 Ely 主题 token 用于内容区。键盘、焦点、选择、缩放、右键菜单和输入法进入统一适配规则。对话框和应用菜单由 GPUI 展示。
 
@@ -756,7 +761,7 @@ Doc、Table、Show 的 PDF 输出由 LOK 完成，不要求安装 ElyPDF。ElyMa
 
 ### 21.1 自有代码默认许可
 
-本 PRD 对新增应用代码采用 AGPL-3.0-or-later 作为发行默认，便于与 MuPDF 的开源使用路线保持一致。Ely GPUI Components 继续保留现有 MIT/Apache-2.0 许可，不因被应用使用而改写其许可证。[S1]
+本 PRD 对新增应用代码采用 MIT 作为发行默认（用户 2026-10-19 定，原为 AGPL-3.0-or-later）。MIT 只管 Ely 的自有代码：链接 MuPDF 的 ElyPDF 发行包整体仍须按 MuPDF 的 AGPL 条款提供对应源码。Ely GPUI Components 继续保留现有 MIT/Apache-2.0 许可，不因被应用使用而改写其许可证。[S1]
 
 第三方代码保持原许可证。不得把 LibreOffice、Git 或其他依赖的版权声明统一替换成 Ely 的声明。最终发行须按实际链接、进程调用、修改和打包方式审查，进程隔离不作为免除许可义务的依据。
 
@@ -766,7 +771,6 @@ Doc、Table、Show 的 PDF 输出由 LOK 完成，不要求安装 ElyPDF。ElyMa
 | --- | --- |
 | MuPDF | 按锁定版本的 AGPL 条款提供对应源码、修改、集成和构建资料；不把公开 UI 仓库当成已完成合规 [S8][S9] |
 | LibreOffice/LOK | 保留 MPL 2.0 及附带依赖的相应声明；发布对受约束文件的修改与所需资料 [S5] |
-| MailCore 2 | 保留其许可、版权和免责条款，并检查其传递依赖 [S24] |
 | Git | 作为独立程序分发并遵守其 GPLv2 等实际适用条款；提供所发行版本的源码取得方式 [S23] |
 | Markdown | 保留 markdown-rs、RaTeX（含随带字体）、mermaid-rs-renderer 及其依赖的许可；逐项检查实际发行包 [S14][S15][S16] |
 | OCR、字体、词典和媒体组件 | 记录每个资源的来源、版本和再分发条件，不从系统目录随意拷贝受限资源 |
@@ -841,7 +845,7 @@ UI 自动测试、内核测试和手工交互测试互相补充。三端的输�
 | LOK 三端嵌入 | Doc/Table/Show 的编辑、保存、中文输入与窗口操作录像及日志 | 修复适配或更新设计决策；不能只交付查看器 |
 | LOK 高级功能 | 母版、放映、图表、修订、输入法、打印和无障碍的接口映射及用例 | 补齐桥接或维护必要上游补丁，不跳回上游原生 UI |
 | MuPDF 编辑 | 字体、对象修改、表单、删除及保存的样本结果 | 修复对象编辑与输出；不得改为视觉覆盖冒充编辑 |
-| MailCore 2 | 三端可重复构建、TLS、OAuth、同步和 MIME 测试 | 处理依赖及适配问题；替换后端必须显式修订选型 |
+| 邮件协议 crate | 三端 TLS、OAuth、IMAP 与 POP3 同步、SMTP 发送和 MIME 测试 | 修复或换 crate；换后端须显式修订选型 |
 | Markdown 原生编辑 | 可视、源码、预览的输入、焦点、缩放、输入法和辅助技术测试 | 未通过不能以 CEF、WebView 或 Electron 代替 |
 | Markdown 原文保留 | 无编辑保存、模式切换、局部修改和外部冲突的字节级差异 | 修复映射与保存；未知语法回到原文模式，不删除 |
 | 邮箱服务注册 | 正式 OAuth 配置、适用审核状态与用户流程 | 不将未获许可的内置登录描述为可用 |
@@ -895,8 +899,8 @@ UI 自动测试、内核测试和手工交互测试互相补充。三端的输�
 [S9] GNU Affero General Public License 第 3 版原文。  
 `https://www.gnu.org/licenses/agpl-3.0.en.html`
 
-[S10] MailCore 2 官方介绍，协议、API 与平台范围。  
-`https://etpan.org/mailcore2.html`
+[S10] Apple，iCloud 邮件用于其他邮件应用的服务器设置。  
+`https://support.apple.com/en-us/102525`
 
 [S11] Google，Gmail IMAP/POP/SMTP OAuth 2.0 与权限要求。  
 `https://developers.google.com/workspace/gmail/imap/xoauth2-protocol`
@@ -934,9 +938,6 @@ UI 自动测试、内核测试和手工交互测试互相补充。三端的输�
 
 [S23] Git 官方 COPYING 文件。  
 `https://raw.githubusercontent.com/git/git/master/COPYING`
-
-[S24] MailCore 2 官方 LICENSE 文件。  
-`https://raw.githubusercontent.com/MailCore/mailcore2/master/LICENSE`
 
 [S25] Typora 官方快捷键说明；对照的程序为 Typora 1.14.10 Windows 安装包（本机 `TyporaRef`，不入库）。  
 `https://support.typora.io/Shortcut-Keys/`

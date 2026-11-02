@@ -10,24 +10,12 @@ use ely_gpui_component::primitives::Severity;
 use gpui::{Context, TaskExt as _, Window};
 
 use crate::files::{self, file_name};
-use crate::{After, Closing, Dialog, Engine, Host, Opening, Tab, Tabs, in_window, text};
+use crate::{After, Closing, Dialog, Engine, Host, Opening, Tabs, in_window, text};
 
-/// The file a path names, links resolved.
-fn identity(path: &Path) -> io::Result<PathBuf> {
-    let real = match std::fs::canonicalize(path) {
-        Ok(real) => real,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            let parent = path.parent().unwrap_or(Path::new("."));
-            let name = path
-                .file_name()
-                .ok_or_else(|| io::Error::other("no file name"))?;
-            std::fs::canonicalize(parent)?.join(name)
-        }
-        Err(error) => return Err(error),
-    };
-    // Whole path only: a name may need `\\?\`.
-    Ok(dunce::simplified(&real).to_path_buf())
-}
+mod gone;
+mod paths;
+pub use paths::folder;
+use paths::identity;
 
 pub trait Saving: Host {
     /// The tab whose source file is `target`.
@@ -53,6 +41,14 @@ pub trait Saving: Host {
         }
     }
 
+    /// Tab `id` went before its save; its close goes on.
+    fn closed_first(&mut self, id: u64, then: Option<After>, window: &mut Window, cx: &mut Context<Self>) {
+        log::info!("office: tab {id} closed before its save");
+        if let Some(after) = then {
+            self.proceed(after, window, cx);
+        }
+    }
+
     /// Saves in place in its own format.
     fn save(&mut self, id: u64, then: Option<After>, window: &mut Window, cx: &mut Context<Self>) {
         if !self.settled(id, cx) {
@@ -62,7 +58,7 @@ pub trait Saving: Host {
             return self.after_export(id, move |host, window, cx| host.save(id, then, window, cx));
         }
         let Some(tab) = self.tab(id) else {
-            return log::info!("office: tab {id} closed before its save");
+            return self.closed_first(id, then, window, cx);
         };
         let Some(path) = tab
             .session
@@ -72,6 +68,15 @@ pub trait Saving: Host {
         else {
             return self.save_as(id, then, cx);
         };
+        // Moved or deleted outside: ask where instead.
+        match path.try_exists() {
+            Ok(true) => {}
+            Ok(false) => return gone::gone(self, id, &path, then, cx),
+            Err(error) => {
+                let error = io::Error::new(error.kind(), format!("{}: {error}", path.display()));
+                return self.finish(id, Err(SaveError::Io(error)), None, then, window, cx);
+            }
+        }
         let format = match files::kept_format(&Self::KIND, &path) {
             Ok(format) => format,
             Err(error) => {
@@ -138,7 +143,10 @@ pub trait Saving: Host {
                     .partition(|(tab, _)| *tab == id);
                 host.core_mut().queued_saves = rest;
                 let Some(tab) = host.tab_mut(id) else {
-                    return log::info!("office: tab {id} closed during its save");
+                    // The end is told; the close and queue go on.
+                    host.core_mut().answer_saves(id, Err(format!("tab {id} closed during its save")));
+                    host.closed_first(id, then, window, cx);
+                    return queued.into_iter().for_each(|(_, save)| save(host, window, cx));
                 };
                 tab.exporting = false;
                 let (saved, history) = match read {
@@ -216,7 +224,7 @@ pub trait Saving: Host {
         id: u64,
         path: PathBuf,
         then: Option<After>,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if !self.settled(id, cx) {
@@ -229,7 +237,11 @@ pub trait Saving: Host {
                 host.write_as(id, path, then, window, cx)
             });
         }
-        let name = self.tab(id).map(|tab| tab.name.clone()).unwrap_or_default();
+        // A gone tab's close goes on, whatever the target.
+        let Some(tab) = self.tab(id) else {
+            return self.closed_first(id, then, window, cx);
+        };
+        let name = tab.name.clone();
         let unsaved = |error: io::Error, cx: &mut Context<Self>| {
             text(cx, "office.error.save", &[("name", &name), ("error", &error.to_string())])
         };
@@ -241,9 +253,6 @@ pub trait Saving: Host {
             let formats = Self::KIND.save_as.join(", .");
             let text = text(cx, "office.error.format", &[("formats", &formats)]);
             return self.refuse_save(&then, text, cx);
-        };
-        let Some(tab) = self.tab(id) else {
-            return log::info!("office: tab {id} closed before its save");
         };
         let holder = match self.holder(&target) {
             Ok(holder) => holder,
@@ -332,7 +341,7 @@ pub trait Saving: Host {
             });
         }
         let Some(tab) = self.tab(id) else {
-            return log::info!("office: tab {id} closed before its save");
+            return self.closed_first(id, then, window, cx);
         };
         let format = tab
             .session
@@ -403,6 +412,13 @@ pub trait Saving: Host {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let ended = match &saved {
+            Ok(done) => Ok(done.path.as_path()),
+            Err(SaveError::Conflict) => Err("the file changed on disk since it was opened".to_string()),
+            Err(SaveError::Refused(state)) => Err(format!("the save was refused: {state:?}")),
+            Err(SaveError::Io(error)) => Err(error.to_string()),
+        };
+        self.core_mut().answer_saves(id, ended);
         match saved {
             Ok(done) => {
                 log::info!("office: saved {}", done.path.display());
@@ -468,18 +484,6 @@ pub trait Saving: Host {
 }
 
 impl<H: Host> Saving for H {}
-
-/// Where a panel for `tab` opens: beside it, else Documents.
-pub fn folder<E, G: Engine>(tab: &Tab<E, G>) -> Option<PathBuf> {
-    tab.session
-        .path()
-        .and_then(|path| path.parent().map(PathBuf::from))
-        .or_else(|| {
-            directories::UserDirs::new()?
-                .document_dir()
-                .map(PathBuf::from)
-        })
-}
 
 #[cfg(all(test, windows))]
 mod tests;

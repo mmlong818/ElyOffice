@@ -11,6 +11,9 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 share=$work/share
 mkdir -p "$share/engines" "$share/reference" "$share/engines"$'\n' "$share/reference"$'\n' "$work/elsewhere"
+# Intel Macs check for the pinned OpenSSL.
+mkdir -p "$share/engines/openssl/lib/pkgconfig"
+: >"$share/engines/openssl/lib/pkgconfig/libcrypto.pc"
 version=$(awk -F'"' '/^version = / { print $2; exit }' "$root/Cargo.toml")
 # A macOS clone whose packaging stub stops before any upload.
 attempt() { # name, setup; sets status, writes the output
@@ -19,11 +22,14 @@ attempt() { # name, setup; sets status, writes the output
   cp "$root/scripts/ci.sh" "$clone/scripts/"
   printf '#!/usr/bin/env bash\necho "packaging reached"\nexit 1\n' >"$clone/packaging/macos/release.sh"
   chmod +x "$clone/packaging/macos/release.sh"
-  cp "$root/Cargo.toml" "$clone/"
+  cp "$root/Cargo.toml" "$root/rust-toolchain.toml" "$clone/"
   cp "$root/packaging/apps.tsv" "$clone/packaging/"
+  mkdir -p "$clone/tests/scripts"
+  printf '#!/usr/bin/env bash\n' >"$clone/tests/scripts/engine-arch.sh"
+  chmod +x "$clone/tests/scripts/engine-arch.sh"
   (cd "$clone" && eval "$2")
   status=0
-  ELY_SHARE=$share ELY_RELEASE_TOKEN=unused ELY_SIGN_IDENTITY=unused ELY_NOTARY_PROFILE=unused \
+  ELY_SHARE=$share ELY_RELEASE_TOKEN=unused ELY_MICROSOFT_CLIENT_ID=unused ELY_UPDATE_KEY=unused ELY_SIGN_IDENTITY=unused ELY_NOTARY_PROFILE=unused \
     "$clone/scripts/ci.sh" macos "v$version" >"$work/$1.out" 2>&1 ||
     status=$?
 }

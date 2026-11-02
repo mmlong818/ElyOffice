@@ -70,3 +70,13 @@ fn a_failed_print_says_printing_failed() {
         root.read(app).toasts(app).iter().any(|(text, severity)| *severity == Some(Severity::Danger) && text.starts_with(prefix.as_ref()))
     });
 }
+
+#[test]
+fn a_color_state_reads_as_mixed_auto_or_a_color() {
+    use crate::format::paint;
+    use ely_lok::show::Paint;
+    assert_eq!(paint(Some(ely_lok::MIXED)), Paint::Mixed);
+    assert_eq!(paint(Some("16711680")), Paint::Color(0xFF0000));
+    assert_eq!(paint(Some("-1")), Paint::None);
+    assert_eq!(paint(None), Paint::None);
+}

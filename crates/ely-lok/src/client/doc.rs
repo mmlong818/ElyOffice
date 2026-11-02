@@ -76,12 +76,26 @@ impl Doc {
         Unpack::new(&payload).str()
     }
 
-    /// Completes the function name being typed (TABLE-03).
-    pub fn complete_function(&self, worker: &mut Worker, name: &str) -> io::Result<()> {
-        log::info!("lok: completes a function");
-        let request = Pack::new().u64(worker.doc_id(self)?).str(name).bytes();
-        worker.request(tag::COMPLETE_FUNCTION, &request)?;
-        Ok(())
+    /// Completes `name` if still offered (TABLE-03).
+    pub fn complete_function(
+        &self,
+        worker: &mut Worker,
+        name: Option<&str>,
+        key: Option<(u32, i32)>,
+    ) -> io::Result<bool> {
+        let pack = Pack::new().u64(worker.doc_id(self)?);
+        let pack = match name {
+            Some(name) => pack.u64(1).str(name),
+            None => pack.u64(0),
+        };
+        // Key code 0: no key, as for a click.
+        let (char_code, key_code) = key.unwrap_or((0, 0));
+        let request = pack
+            .i64(i64::from(char_code))
+            .i64(i64::from(key_code))
+            .bytes();
+        let reply = worker.request(tag::COMPLETE_FUNCTION, &request)?;
+        Ok(Unpack::new(&reply).u64()? == 1)
     }
 
     /// Shows sheet `part`, from 0.
@@ -173,7 +187,9 @@ impl Doc {
             .u64(u64::from(pixels.0))
             .u64(u64::from(pixels.1))
             .bytes();
-        worker.request(tag::PAINT_PART, &request)
+        let painted = worker.request(tag::PAINT_PART, &request)?;
+        crate::show::sized(&painted, pixels)?;
+        Ok(painted)
     }
 
     /// Slide `part`'s slideshow layers at about `pixels`.

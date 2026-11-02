@@ -14,3 +14,5 @@ ely-pdf	pdf	application/pdf
 ely-mark	md	text/markdown
 ely-mark	markdown	text/markdown
 ely-tree	/	inode/directory
+ely-mail	eml	message/rfc822
+ely-mail	mailto:	x-scheme-handler/mailto

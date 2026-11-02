@@ -363,7 +363,7 @@ impl Book {
             Ok(Some(Clip::Html { html, .. })) => Some(html),
             Ok(_) => None,
             Err(error) => {
-                let text = Book::text(cx, "table.data.clipboard", &[("error", &error.to_string())]);
+                let text = Book::text(cx, "table.data.clipboard", &[("error", &format!("{error:#}"))]);
                 return self.toast(text, Severity::Danger, cx);
             }
         };
@@ -386,8 +386,9 @@ impl Book {
                 let json = worker.values(doc, &sheet::cell_query(sheet::FILTER, column, row))?;
                 sheet::filter_values(&json)
             },
-            move |book, read, _, cx| match read {
+            move |book, read, window, cx| match read {
                 Ok(filter) => {
+                    let search = dialogs::search_field(window, cx);
                     let picked = filter
                         .entries
                         .iter()
@@ -400,6 +401,7 @@ impl Book {
                         row,
                         entries: filter.entries,
                         picked,
+                        search,
                     });
                     cx.notify();
                 }
@@ -417,6 +419,7 @@ impl Book {
             row,
             entries,
             picked,
+            ..
         }) = self.dialog.take()
         else {
             return;

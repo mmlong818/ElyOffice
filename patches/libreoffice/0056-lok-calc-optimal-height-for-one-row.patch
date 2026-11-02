@@ -1,0 +1,46 @@
+Calc: the optimal row height can name its row
+
+.uno:SetOptimalColumnWidth takes the column in FN_PARAM_1 and sizes it,
+or every marked column when it is marked (ScColBar::SetEntrySize does
+the same for a double click on a header edge). The row command had no
+such parameter, so a client's double click on a row edge could only
+size the marked rows. SetOptimalRowHeight now takes Row the same way.
+
+--- a/sc/sdi/scalc.sdi
++++ b/sc/sdi/scalc.sdi
+@@ -5079,7 +5079,7 @@
+ 
+ 
+ SfxVoidItem SetOptimalRowHeight FID_ROW_OPT_HEIGHT
+-(SfxUInt16Item aExtraHeight FID_ROW_OPT_HEIGHT)
++(SfxUInt16Item aExtraHeight FID_ROW_OPT_HEIGHT,SfxInt32Item Row FN_PARAM_1)
+ [
+     AutoUpdate = FALSE,
+     FastCall = FALSE,
+--- a/sc/source/ui/view/cellsh3.cxx
++++ b/sc/source/ui/view/cellsh3.cxx
+@@ -882,8 +882,22 @@
+                     const SfxUInt16Item&  rUInt16Item = pReqArgs->Get( FID_ROW_OPT_HEIGHT );
+ 
+                     // #101390#; the value of the macro is in HMM so use convertMm100ToTwip to convert
+-                    pTabViewShell->SetMarkedWidthOrHeight( false, SC_SIZE_OPTIMAL,
+-                                    o3tl::toTwips(rUInt16Item.GetValue(), o3tl::Length::mm100) );
++                    const sal_uInt16 nSizeTwips
++                        = o3tl::toTwips(rUInt16Item.GetValue(), o3tl::Length::mm100);
++                    // One row; every marked row when marked, as columns do.
++                    if (const SfxPoolItem* pItem; pReqArgs->HasItem(FN_PARAM_1, &pItem))
++                    {
++                        SCROW nRow = static_cast<const SfxInt32Item*>(pItem)->GetValue() - 1;
++                        std::vector<sc::ColRowSpan> aRanges;
++                        ScMarkData& rMark = GetViewData().GetMarkData();
++                        if (rMark.IsRowMarked(nRow))
++                            aRanges = rMark.GetMarkedRowSpans();
++                        else
++                            aRanges.emplace_back(nRow, nRow);
++                        pTabViewShell->SetWidthOrHeight(false, aRanges, SC_SIZE_OPTIMAL, nSizeTwips);
++                    }
++                    else
++                        pTabViewShell->SetMarkedWidthOrHeight( false, SC_SIZE_OPTIMAL, nSizeTwips );
+                     ScGlobal::nLastRowHeightExtra = rUInt16Item.GetValue();
+ 
+                     if( ! rReq.IsAPI() )

@@ -10,6 +10,7 @@ use ely_office::panel::{Panel as _, known, muted, row, send};
 use gpui::{AnyElement, Context, IntoElement, ParentElement as _, SharedString, Styled as _, div};
 
 use super::Props;
+use super::builtin::{self, PAGE};
 use super::sheet::Sheet;
 #[cfg(test)]
 use super::sheet::{page_of, size_of};
@@ -47,6 +48,16 @@ const FOOTER: Part = Part {
 };
 const TOP_BOTTOM: (&str, &str) = (".uno:PageULMargin", "page.margins_ul");
 
+/// The row label of one margin.
+fn margin_key(pair: (&str, &str), second: bool) -> &'static str {
+    match (pair == TOP_BOTTOM, second) {
+        (true, false) => "doc.props.top",
+        (true, true) => "doc.props.bottom",
+        (false, false) => "doc.props.margin_left",
+        (false, true) => "doc.props.margin_right",
+    }
+}
+
 /// The offered paper within the kernel's rounding of `size`.
 fn paper_of((width, height): (i32, i32)) -> Option<&'static str> {
     let (short, long) = (width.min(height), width.max(height));
@@ -83,7 +94,10 @@ impl Props {
             return muted("—".into(), cx);
         };
         let this = cx.entity();
-        let choices = PAPERS.iter().map(|(name, ..)| Choice::new(*name, *name));
+        let choices = PAPERS.iter().map(|(name, ..)| {
+            let key = format!("doc.paper.{}", name.to_ascii_lowercase());
+            Choice::new(*name, Docs::text(cx, &key, &[]))
+        });
         let cm = |mm100: i32| format!("{:.2}", f64::from(mm100) / 1000.0);
         let custom = Docs::text(
             cx,
@@ -91,6 +105,7 @@ impl Props {
             &[("w", &cm(size.0)), ("h", &cm(size.1))],
         );
         let mut menu = Select::new("doc-props-paper", choices)
+            .label(Docs::text(cx, "doc.props.paper", &[]))
             .size(ControlSize::Sm)
             .placeholder(custom)
             .on_change(move |name, _, cx| this.update(cx, |props, cx| props.set_paper(name, cx)));
@@ -170,6 +185,7 @@ impl Props {
         let mine = if second { other } else { first };
         let id = SharedString::from(format!("doc-props-{}-{second}", pair.1));
         let field = NumberInput::new(id, f64::from(mine) / 1000.0)
+            .label(Docs::text(cx, margin_key(pair, second), &[]))
             .range(0.0, 99.99)
             .step(0.1)
             .precision(2)
@@ -207,18 +223,21 @@ impl Props {
             .unwrap_or_default();
         let current = self
             .state(".uno:PageStyleName", cx)
-            .filter(|name| known(name));
+            .filter(|name| known(name))
+            .map(|name| SharedString::from(builtin::listed(&PAGE, &name)));
         let this = cx.entity();
         let empty = names.is_empty();
         let mut menu = Select::new(
             "doc-props-section",
-            names
-                .into_iter()
-                .map(|name| Choice::new(name.clone(), name)),
+            names.into_iter().map(|name| {
+                let label = builtin::shown(&PAGE, &name, cx);
+                Choice::new(name, label)
+            }),
         )
+            .label(Docs::text(cx, "doc.props.section", &[]))
         .size(ControlSize::Sm)
         .disabled(empty)
-        .placeholder(current.clone().unwrap_or_default())
+        .placeholder(current.as_deref().map(|name| builtin::shown(&PAGE, name, cx)).unwrap_or_default())
         .on_change(move |name, _, cx| {
             send(&this, "format.style", &[name.as_ref(), "PageStyles"], cx)
         });

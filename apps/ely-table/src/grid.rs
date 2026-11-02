@@ -7,7 +7,7 @@ use ely_lok::{
 };
 use ely_office::prelude::*;
 use gpui::{
-    AnyElement, ClickEvent, Context, CursorStyle, Entity, InteractiveElement as _, IntoElement,
+    AnyElement, App, ClickEvent, Context, CursorStyle, Entity, InteractiveElement as _, IntoElement,
     Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement as _,
     Pixels, Point, Role, StatefulInteractiveElement as _, Styled as _, Window, div, px,
     transparent_black,
@@ -17,8 +17,8 @@ use crate::book::Book;
 
 /// A drag over the grid.
 pub enum Drag {
-    /// A column or row edge.
-    Size { column: bool, index: u32 },
+    /// A column or row edge; `at` the pointer along it.
+    Size { column: bool, index: u32, at: Option<Pixels> },
     /// The fill handle, to the cell under the pointer.
     Fill { to: Option<(u32, u32)> },
 }
@@ -28,9 +28,9 @@ const EDGE: f32 = 4.0;
 const HANDLE: f32 = 7.0;
 
 /// The vcl modifier bits a header click takes.
-fn modifier(modifiers: &Modifiers) -> String {
+fn modifier(modifiers: &Modifiers, cx: &App) -> String {
     let shift = if modifiers.shift { 0x1000 } else { 0 };
-    let add = if modifiers.secondary() { 0x2000 } else { 0 };
+    let add = if modifiers.secondary(cx) { 0x2000 } else { 0 };
     (shift | add).to_string()
 }
 
@@ -65,6 +65,11 @@ impl Book {
             .bg(sunken)
             .on_mouse_move(cx.listener(Self::on_drag_move))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_drag_end))
+            .on_mouse_up_out(MouseButton::Left, cx.listener(|book, _, _, cx| {
+                if book.drag.take().is_some() {
+                    cx.notify();
+                }
+            }))
             .child(div().flex().child(corner).child(column_strip))
             .child(
                 div().flex_1().min_h_0().flex().child(row_strip).child(
@@ -73,6 +78,7 @@ impl Book {
                         .flex_1()
                         .min_w_0()
                         .child(view.clone())
+                        .children(self.guide(&view, cx))
                         .children(self.fill_handle(&view, cx))
                         .children(self.cell_aids(&view, cx))
                         .children(self.find_box(cx)),
@@ -146,6 +152,30 @@ impl Book {
         self.run_active(id, &[&index.to_string(), modifier], cx);
     }
 
+    /// Sizes a column or row to its content.
+    fn fit(&mut self, column: bool, index: u32, cx: &mut Context<Self>) {
+        let id = if column { "columns.fit" } else { "rows.fit" };
+        log::info!("table: {id} {}", index + 1);
+        self.run_active(id, &["0", &(index + 1).to_string()], cx);
+    }
+
+    /// Where a dragged edge will land, across the sheet.
+    fn guide(&self, view: &Entity<LokView>, cx: &Context<Self>) -> Option<AnyElement> {
+        let Some(Drag::Size { column, at: Some(at), .. }) = self.drag else {
+            return None;
+        };
+        let origin = view.read(cx).origin();
+        let line = div()
+            .absolute()
+            .debug_selector(|| "table-guide".into())
+            .bg(cx.theme().colors.focus);
+        let line = match column {
+            true => line.top_0().bottom_0().w(px(1.)).left(at - origin.x),
+            false => line.left_0().right_0().h(px(1.)).top(at - origin.y),
+        };
+        Some(line.into_any_element())
+    }
+
     /// One row or column header with its sizing edge.
     fn header(
         &self,
@@ -172,9 +202,14 @@ impl Book {
             })
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(move |book, _: &MouseDownEvent, _, cx| {
+                cx.listener(move |book, event: &MouseDownEvent, _, cx| {
                     cx.stop_propagation();
-                    book.drag = Some(Drag::Size { column, index });
+                    // A double click fits the content (#15).
+                    if event.click_count == 2 {
+                        book.drag = None;
+                        return book.fit(column, index, cx);
+                    }
+                    book.drag = Some(Drag::Size { column, index, at: None });
                 }),
             );
         let edge = if column {
@@ -215,7 +250,7 @@ impl Book {
                 }),
             )
             .on_click(cx.listener(move |book, event: &ClickEvent, _, cx| {
-                book.select_header(column, index, &modifier(&event.modifiers()), cx);
+                book.select_header(column, index, &modifier(&event.modifiers(), cx), cx);
             }))
             .child(label);
         let cell = div()
@@ -245,7 +280,13 @@ impl Book {
     /// The square at the selection's corner; dragging it fills.
     fn fill_handle(&self, view: &Entity<LokView>, cx: &mut Context<Self>) -> Option<AnyElement> {
         let read = view.read(cx);
+        if read.cell_text_selected() {
+            return None;
+        }
         let area = span(read.selection()).or(read.cell().cursor)?;
+        if !read.is_visible(area) {
+            return None;
+        }
         let corner = read.place((area.0 + area.2, area.1 + area.3));
         let start = read.place((area.0, area.1));
         // Scrolled under the frozen part, the area shows nothing.
@@ -291,6 +332,10 @@ impl Book {
     }
 
     fn on_drag_move(&mut self, event: &MouseMoveEvent, _: &mut Window, cx: &mut Context<Self>) {
+        if let Some(Drag::Size { column, at, .. }) = &mut self.drag {
+            *at = Some(if *column { event.position.x } else { event.position.y });
+            return cx.notify();
+        }
         if !matches!(self.drag, Some(Drag::Fill { .. })) {
             return;
         }
@@ -311,6 +356,8 @@ impl Book {
         };
         cx.notify();
         match drag {
+            // A press without a move sizes nothing.
+            Drag::Size { at: None, .. } => {}
             Drag::Size { column, index, .. } => {
                 let Some(tab) = self.active_tab() else {
                     return;

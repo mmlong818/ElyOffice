@@ -16,8 +16,10 @@ mod worker;
 
 pub use client::{
     A11y, Cell, Doc, Events, Function, MIXED, Mark, Mouse, Pdf, Rect, Request, Sheet, Sheets, Tile,
-    Worker, install_dir, is_stale, templates,
+    Worker, install_dir, is_nothing, is_stale, templates,
 };
+#[cfg(any(test, feature = "test-support"))]
+pub use client::test_install;
 #[cfg(feature = "view")]
 pub use view::{
     CONTEXT, Copy, Cut, Geom, Layout, LokError, LokView, Paste, Reported, ZOOM_STEPS, notch,

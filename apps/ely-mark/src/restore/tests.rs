@@ -488,3 +488,6 @@ mod window {
         assert_eq!(kept, want);
     }
 }
+
+mod closing;
+mod off;

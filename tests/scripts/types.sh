@@ -8,6 +8,32 @@ fail() {
   echo "FAIL: $*" >&2
   exit 1
 }
+# Apple's UTI for each MIME type, kept apart from documents.sh.
+uti() {
+  case $1 in
+    application/vnd.openxmlformats-officedocument.wordprocessingml.document) echo org.openxmlformats.wordprocessingml.document ;;
+    application/vnd.oasis.opendocument.text) echo org.oasis-open.opendocument.text ;;
+    application/msword) echo com.microsoft.word.doc ;;
+    application/rtf) echo public.rtf ;;
+    application/vnd.openxmlformats-officedocument.spreadsheetml.sheet) echo org.openxmlformats.spreadsheetml.sheet ;;
+    application/vnd.oasis.opendocument.spreadsheet) echo org.oasis-open.opendocument.spreadsheet ;;
+    application/vnd.ms-excel) echo com.microsoft.excel.xls ;;
+    text/csv) echo public.comma-separated-values-text ;;
+    text/tab-separated-values) echo public.tab-separated-values-text ;;
+    application/vnd.openxmlformats-officedocument.presentationml.presentation) echo org.openxmlformats.presentationml.presentation ;;
+    application/vnd.oasis.opendocument.presentation) echo org.oasis-open.opendocument.presentation ;;
+    application/vnd.ms-powerpoint) echo com.microsoft.powerpoint.ppt ;;
+    application/pdf) echo com.adobe.pdf ;;
+    text/markdown) echo net.daringfireball.markdown ;;
+    message/rfc822) echo com.apple.mail.email ;;
+    inode/directory) echo public.folder ;;
+    *) fail "no UTI known for $1" ;;
+  esac
+}
+# Every first-batch app opens a file type or a link.
+for slug in $(awk -F'\t' '$4 == 1 { print $1 }' "$root/packaging/apps.tsv"); do
+  cut -f1 "$types" | grep -qxF "$slug" || fail "$slug declares no file type or link in types.tsv"
+done
 count=0
 for slug in $(cut -f1 "$types" | sort -u); do
   desktop=$("$root/packaging/linux/package.sh" --desktop "$slug")
@@ -15,7 +41,14 @@ for slug in $(cut -f1 "$types" | sort -u); do
   rows=$(awk -F'\t' -v slug="$slug" '$1 == slug' "$types")
   while IFS=$'\t' read -r _ ext mime; do
     grep -q "^MimeType=.*$mime;" <<<"$desktop" || fail "$slug: Linux misses $mime"
-    if [ "$ext" = / ]; then
+    if [ "${ext%:}" != "$ext" ]; then
+      scheme=${ext%:}
+      grep -q '^Exec=.* %U$' <<<"$desktop" || fail "$slug: Linux passes no links"
+      grep -q "URLAssociations\" \"$scheme\"" <<<"$windows" || fail "$slug: Windows misses $scheme"
+      grep -q 'DeleteRegValue HKCU "Software\\RegisteredApplications"' <<<"$windows" || fail "$slug: uninstall keeps $scheme"
+      ! grep -q "Classes\\\\$scheme[\\\\\"]" <<<"$windows" || fail "$slug: Windows takes $scheme over"
+      grep -q "<string>$scheme</string>" <<<"$("$root/packaging/macos/documents.sh" "$slug")" || fail "$slug: macOS misses $scheme"
+    elif [ "$ext" = / ]; then
       grep -q 'Directory\\shell' <<<"$windows" || fail "$slug: Windows misses folders"
     else
       grep -q "\\\\.$ext\\\\OpenWithProgids" <<<"$windows" || fail "$slug: Windows misses .$ext"
@@ -23,16 +56,12 @@ for slug in $(cut -f1 "$types" | sort -u); do
     fi
     count=$((count + 1))
   done <<<"$rows"
-  # One macOS type per MIME type; md and markdown share.
-  utis=$("$root/packaging/macos/documents.sh" "$slug" | grep -c '^      <string>')
-  mimes=$(cut -f3 <<<"$rows" | sort -u | wc -l | tr -d ' ')
-  [ "$utis" -eq "$mimes" ] || fail "$slug: macOS declares $utis types, the table $mimes"
-done
-# Never the default: Windows fills only a handlerless type.
-for s in $(cut -f1 "$types" | sort -u); do
-  "$root/packaging/windows/types.sh" "$s" | awk -v slug="$s" '
-    /WriteRegStr HKCU "Software\\Classes\\\.[a-z]*" ""/ && (prev !~ /\$\{OrIf\} \$\{Errors\}$/ || prev2 !~ /\$\{If\} \$0 == ""$/) { print slug ": " $0; bad = 1 }
-    { prev2 = prev; prev = $0 } END { exit bad }' || fail "Windows sets a default handler"
+  # macOS declares each MIME type's own UTI, never as owner.
+  mac=$("$root/packaging/macos/documents.sh" "$slug")
+  grep -q '<key>LSHandlerRank</key><string>Alternate</string>' <<<"$mac" || fail "$slug: macOS rank is not Alternate"
+  declared=$(sed -n '/CFBundleURLTypes/q; s|^      <string>\(.*\)</string>$|\1|p' <<<"$mac" | sort)
+  wanted=$(awk -F'\t' '$2 !~ /:$/ { print $3 }' <<<"$rows" | sort -u | while read -r mime; do uti "$mime"; done | sort)
+  [ "$declared" = "$wanted" ] || fail "$slug: macOS declares $(echo $declared), the table means $(echo $wanted)"
 done
 # Explorer's New makes docx, xlsx, pptx and md.
 fresh=0
@@ -43,4 +72,4 @@ for ext in docx xlsx pptx md; do
     fail "$slug: New misses .$ext"
   fresh=$((fresh + 1))
 done
-echo "ok: types ($count file types on three systems, $fresh in New)"
+echo "ok: types ($count file types and URL schemes on three systems, $fresh in New)"

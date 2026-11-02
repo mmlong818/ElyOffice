@@ -14,6 +14,7 @@ cuts=(
   "table table 16.0 23.6"
   "show show-play 2.6 9.6"
   "pdf pdf 8.8 16.3"
+  "mail mail 6.9 14.9"
   "tree tree 9.5 16.8"
   "mark mark 5.4 13.4"
 )

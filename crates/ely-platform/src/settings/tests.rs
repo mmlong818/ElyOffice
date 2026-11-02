@@ -104,11 +104,57 @@ fn shared_fields_type_strictly_and_default_when_absent() {
 }
 
 #[test]
+fn interface_text_takes_a_family_and_a_size_within_bounds() {
+    use super::{Shared, UI_TEXT_SIZES};
+    let fields = |text: &str| serde_json::from_str::<serde_json::Map<_, _>>(text).unwrap();
+    let default = Shared::default();
+    assert_eq!((default.ui_font.as_str(), default.ui_text_size), ("", UI_TEXT_SIZES.2));
+    let read = Shared::from_fields(&fields(r#"{"ui_font":" Noto Sans CJK SC ","ui_text_size":16}"#)).unwrap();
+    assert_eq!((read.ui_font.as_str(), read.ui_text_size), ("Noto Sans CJK SC", 16));
+    assert_eq!(Shared::from_fields(&fields(r#"{"ui_text_size":12}"#)).unwrap().ui_text_size, 12);
+    for bad in [r#"{"ui_font":1}"#, r#"{"ui_text_size":11}"#, r#"{"ui_text_size":17}"#, r#"{"ui_text_size":13.5}"#, r#"{"ui_text_size":"13"}"#] {
+        assert!(Shared::from_fields(&fields(bad)).is_err(), "{bad}");
+    }
+}
+
+#[test]
+fn the_document_zoom_is_automatic_or_a_listed_percent() {
+    use super::{DOC_ZOOMS, DocZoom, Shared};
+    let fields = |text: &str| serde_json::from_str::<serde_json::Map<_, _>>(text).unwrap();
+    assert_eq!(Shared::default().doc_zoom, DocZoom::Auto);
+    assert_eq!(Shared::from_fields(&fields(r#"{"doc_zoom":"auto"}"#)).unwrap().doc_zoom, DocZoom::Auto);
+    for percent in DOC_ZOOMS {
+        let read = Shared::from_fields(&fields(&format!(r#"{{"doc_zoom":{percent}}}"#))).unwrap();
+        assert_eq!(read.doc_zoom, DocZoom::Percent(percent));
+        assert_eq!(DocZoom::Percent(percent).value(), json!(percent));
+    }
+    assert_eq!(DocZoom::Auto.value(), json!("auto"));
+    for bad in [r#"{"doc_zoom":110}"#, r#"{"doc_zoom":"fit"}"#, r#"{"doc_zoom":true}"#, r#"{"doc_zoom":1.5}"#] {
+        assert!(Shared::from_fields(&fields(bad)).is_err(), "{bad}");
+    }
+}
+
+#[test]
+fn two_sided_printing_is_the_printers_unless_chosen() {
+    use super::{Shared, Sides, word};
+    let fields = |text: &str| serde_json::from_str::<serde_json::Map<_, _>>(text).unwrap();
+    assert_eq!(Shared::default().two_sided, Sides::Printer);
+    for (sides, stored) in Sides::ALL {
+        let read = Shared::from_fields(&fields(&format!(r#"{{"two_sided":"{stored}"}}"#))).unwrap();
+        assert_eq!(read.two_sided, sides);
+        assert_eq!(word(&Sides::ALL, &sides), stored);
+    }
+    assert_eq!(Sides::ALL.map(|(_, stored)| stored), ["printer", "one", "long", "short"]);
+    for bad in [r#"{"two_sided":"both"}"#, r#"{"two_sided":true}"#, r#"{"two_sided":2}"#] {
+        assert!(Shared::from_fields(&fields(bad)).is_err(), "{bad}");
+    }
+}
+
+#[test]
 fn a_write_overtaken_while_waiting_leaves_the_file() {
     let (_dir, store) = store();
     store.set("author", json!("Ana")).unwrap();
-    let held = crate::lock::FileLock::take(&store.path().parent().unwrap().join(".settings.lock"))
-        .unwrap();
+    let held = crate::lock::FileLock::take(&store.path().parent().unwrap().join(super::LOCK)).unwrap();
     let waiting = {
         let store = store.clone();
         std::thread::spawn(move || store.set_if("author", json!("Bob"), || false).unwrap())

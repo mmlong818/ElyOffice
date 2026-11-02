@@ -75,43 +75,43 @@ P0 次序：W-01、K-01、L-01、O-01、W-02、L-02、W-03、L-03、W-04、L-04�
 - [x] M-08 页面重载后悬着的渲染回调永不完成，导出既不成功也不报错 — 页面失败后挂起与新到的渲染都以错误结束，载入成功才恢复（审查 2 轮）
 - [x] M-09 导出的保存面板出错被当作取消 — 面板出错走 panel_failed，取消只记日志（审查 1 轮）
 - [x] M-10 关闭查找框只清当前标签的高亮 — 关闭查找框对每个标签的页面清除高亮（审查 1 轮）
-- [x] M-11 页面把搜索词写进应用日志 — 控制台的文字与来源都可由文档伪造，只记行号；页面自己的诊断经 elyQuery；R1 前缀可伪造、R2 data 来源、R3 sourceURL、R4 编码路径与目录、R5 缺回归测试：已补并经变异核对（五轮上限，未再审）
+- [~] M-11 页面把搜索词写进应用日志 — 控制台的文字与来源都可由文档伪造，只记行号；页面自己的诊断经 elyQuery；R1 前缀可伪造、R2 data 来源、R3 sourceURL、R4 编码路径与目录、R5 缺回归测试：已补并经变异核对（五轮上限，未再审）（末轮 r5 FAIL，修后未复审，R14.46 改标）
 - [x] M-12 浏览器创建完成前 `WebView` 已释放，浏览器泄漏 — 浏览器在泵里同步建好即登记，视图要么在建前已走、要么有浏览器可关；webprobe 加建前丢弃与 0–27 毫秒丢弃，35 页都在保持前释放（审查 4 轮）
 - [x] M-13 编辑器构建失败时页面空白且不上报 — 可视建不成退回源码并告知，两者都建不成即报失败、留下文字、模式请求重建、不留容器；新测 mark-broken.mjs（审查 2 轮）
 - [x] M-14 `render_pdf` 在界面线程内嵌图片并写文件 — 打印页的内嵌、读样式与写入经 paper::stage 在后台执行，GPUI 单测证明执行器运行前未写（审查 2 轮）
 - [x] M-15 打印与导出 PDF 的暂存页执行文档里的脚本 — 打印与导出 PDF 的暂存页以 WebView::open_inert 打开，脚本关；webprobe 以同页开脚本为对照（审查 2 轮）
 - [x] G-01 打开“文件历史”或“逐行追溯”后，中间区不再响应任何别的选择 — 每个新选择（文件、提交、侧栏、分支、位置）都清掉文件历史与逐行追溯；测试窗口先装菜单（审查 2 轮）
 - [x] G-02 进行中操作读取失败被吞掉；`git am` 冲突无提示条无错误 — 读不出进行中的操作即以 Git 原话的红色提示与日志说明；无 onto 的 rebase-apply 视为 git am，跳过、中止有文案（审查 2 轮）
-- [ ] G-03 新建的空仓库在“仓库”页显示两段 Git 致命错误（引用日志、LFS）
-- [ ] G-04 停止取回/拉取/推送失败的提示写成“克隆没有停下”
-- [ ] G-05 合并结果保存失败报成“Git 失败”，`tree.error.save` 是死文案
-- [ ] G-06 首次提交后紧接着取消暂存，按过期的“已有提交”判定跑成 `git rm --cached`
-- [ ] G-07 任一引用没有创建日期，整个分支页读不出
-- [ ] G-08 清理预览后文件被外部删除，对话框只给裸 OS 错误
-- [ ] G-09 后台读取回来的对话框覆盖用户同时打开的对话框
-- [ ] G-10 选中的分支、标签、位置是窗口级的，跨仓库标签串台
-- [ ] G-11 已选边的冲突块再选另一边，提示“结果已手改”
-- [ ] G-12 符号链接父目录下，当前打开的工作树被当成别的工作树而可“移除”
-- [ ] G-13 非 macOS 平台的死入口
-- [ ] G-14 `repo.rs` 的孤立文档注释
-- [ ] K-01 非 macOS 的 worker 不运行 VCL 主循环，内核的回调与异步输入永远不送达
-- [ ] K-02 图块的代际在画完之后才取，画到一半的作废被盖掉
-- [ ] K-03 `rect_of` 宽容解析把读不出的载荷悄悄吞掉
-- [ ] K-04 `Sheets.current` 用 `as u64` 转有符号的 part
+- [~] G-03 新建的空仓库在“仓库”页显示两段 Git 致命错误（引用日志、LFS）（d59159c、30801ad；R14.25 核实）（末轮 r3 FAIL，修后未复审，R14.46 改标）
+- [x] G-04 停止取回/拉取/推送失败的提示写成“克隆没有停下”（d59159c；R14.25 补测试）
+- [x] G-05 合并结果保存失败报成“Git 失败”，`tree.error.save` 是死文案（d59159c；R14.25 核实）
+- [x] G-06 首次提交后紧接着取消暂存，按过期的“已有提交”判定跑成 `git rm --cached`（d59159c；R14.25 核实）
+- [x] G-07 任一引用没有创建日期，整个分支页读不出（d59159c；R14.25 核实）
+- [x] G-08 清理预览后文件被外部删除，对话框只给裸 OS 错误（d59159c；R14.25 核实）
+- [x] G-09 后台读取回来的对话框覆盖用户同时打开的对话框（d59159c；R14.26 核实）
+- [x] G-10 选中的分支、标签、位置是窗口级的，跨仓库标签串台（d59159c；R14.26 补测试）
+- [x] G-11 已选边的冲突块再选另一边，提示“结果已手改”（d59159c；R14.26 核实）
+- [x] G-12 符号链接父目录下，当前打开的工作树被当成别的工作树而可“移除”（d59159c；R14.26 核实）
+- [x] G-13 非 macOS 平台的死入口（R14.27）
+- [x] G-14 `repo.rs` 的孤立文档注释（d59159c；R14.26 核实）
+- [x] K-01 非 macOS 的 worker 不运行 VCL 主循环，内核的回调与异步输入永远不送达 — c96d39a 已做（Windows `worker/messages.rs`、Linux `worker/unipoll.rs`）；R14.13 照实关闭
+- [x] K-02 图块的代际在画完之后才取，画到一半的作废被盖掉 — d59159c 已做（先读代际再画）；R14.13 核对
+- [x] K-03 `rect_of` 宽容解析把读不出的载荷悄悄吞掉 — d59159c 已做（`Unreadable` 记为故障）；R14.13 补测试 `an_unreadable_rectangle_is_reported_never_swallowed`
+- [x] K-04 `Sheets.current` 用 `as u64` 转有符号的 part — d59159c 已做（`u64::try_from`，-1 报错）；R14.13 核对
 - [x] X-01 设置窗口在前时 Cmd+Q 直接退出，跳过未保存询问并抹掉恢复点 — 退出一律经主窗口宿主的流程（route_quit），延后到动作结束、先把宿主窗口提到前面；R1 主窗口 Cmd+Q 不问；R2 询问被设置窗口挡住；R3 PASS
 - [x] X-02 共用 `settings.json` 读不出时 Doc、Table、Show 根本起不来 — 作者名取启动时读入的设置；R1 重启失败丢作者、脚本退出码、client.rs 超行；R2 作者更新的先后与停机期间的更新；R3 PASS
 - [x] X-03 第二个实例启动即清掉运行中实例的工作目录与恢复点 — 每个应用一个实例锁，第二份被拒并报出持锁进程（Unix fcntl F_GETLK）；R1–R3 进程号竞争、Windows 断言；R4 PASS
-- [ ] X-04 属性栏字号菜单的 `expect("sizes are numbers")` 是脆弱点，但当前不可达
-- [ ] X-05 恢复点写不成时每 10 秒弹一次提示
-- [ ] X-06 `session.lock` 空或损坏即永久关闭恢复功能
-- [ ] X-07 加密文档的恢复点每次写入都解密全部已有点，且持 worker 锁
-- [ ] X-08 另存为在等待关闭或退出时被拒绝，关闭链悬空，ElyMark 的会话清单冻结
-- [ ] X-09 保存期间落地的编辑可能让自动保存停摆
-- [ ] X-10 别的标签的文件所在卷消失时，本标签的另存为失败并被标为保存失败
-- [ ] X-11 worker 的 stderr 中继遇到第一行非 UTF-8 即永久停止
-- [ ] X-12 恢复路径在界面线程做文件 I/O
-- [ ] X-13 非 macOS 构建里仍提供只会报“未构建”的入口
-- [ ] X-14 `agents.md` 引用的 `docs/engineering-risks.md` 不存在
+- [x] X-04 属性栏字号菜单的 `expect("sizes are numbers")` 是脆弱点，但当前不可达 — d59159c 已做（`ely_office::panel::ordered`：读不成点数的排在最后，不 panic）；R14.16 核对
+- [x] X-05 恢复点写不成时每 10 秒弹一次提示 — d59159c 已做（每个标签每种原因只提示一次，下一拍照常重试）；R14.9 核对
+- [x] X-06 `session.lock` 空或损坏即永久关闭恢复功能 — d59159c 修空锁与乱码；R14.9 补非 UTF-8 的锁（`Crash::check` 读字节，照崩溃处理并重写）
+- [x] X-07 加密文档的恢复点每次写入都解密全部已有点，且持 worker 锁 — d59159c 修解密（修剪只读文件名）；R14.11 把加密与写盘移出 worker 锁（`write_point`），测试 `an_unsaved_tab_gets_a_point`
+- [x] X-08 另存为在等待关闭或退出时被拒绝，关闭链悬空，ElyMark 的会话清单冻结 — d59159c 已做（`refuse_save` 停下等着的关闭）；R14.10 补标签已关的一路与测试 `a_refused_save_as_stops_the_close_it_held`
+- [x] X-09 保存期间落地的编辑可能让自动保存停摆 — d59159c 已做（`watch` 按编辑计数前进再记编辑）；R14.10 核对，`an_edit_after_a_save_raced_it_counts_again`
+- [x] X-10 别的标签的文件所在卷消失时，本标签的另存为失败并被标为保存失败 — d59159c 已做（`holder` 跳过比不了的标签，目标错误照报）；R14.10 核对，`a_tab_on_a_vanished_folder_takes_no_other_file`
+- [x] X-11 worker 的 stderr 中继遇到第一行非 UTF-8 即永久停止 — d59159c 已做（按字节读、宽松转文字）；R14.11 核对，`a_line_in_another_encoding_stops_nothing`
+- [x] X-12 恢复路径在界面线程做文件 I/O — d59159c 修文档应用；R14.9 补 ElyMark（每 10 秒的扫点与写 session.json 改后台，退出当场写，`Turns` 防旧写盖新写）
+- [x] X-13 非 macOS 构建里仍提供只会报“未构建”的入口（R14.27）
+- [x] X-14 `agents.md` 引用的 `docs/engineering-risks.md`（已移除） 不存在（已关：agents.md 不再提本机笔记，docs 里引用的都已入库或标明已移除，`tests/scripts/records.py` 守着）
 
 ## 0.1.2 发布
 
@@ -121,41 +121,47 @@ P0 次序：W-01、K-01、L-01、O-01、W-02、L-02、W-03、L-03、W-04、L-04�
 
 ## 0.1.3 三端与发布
 
-- [ ] L-01 Linux 的 LibreOffice：钉住的源码加全部补丁在 Linux 构建，LOK 探测通过
-- [ ] L-02 Linux 全工作区零警告构建，`cargo test --workspace` 通过（引擎齐全，无 SKIP）
+- [x] L-01 Linux 的 LibreOffice：钉住的源码加全部补丁在 Linux 构建，LOK 探测通过（已关：0.1.12 的 Linux 包带内核发布；2026-10-30 WSL 的共享引擎在 AlmaLinux 容器里按全部补丁清空重建，严格全量测试（握手含 LOK 探测）通过（R14.42））
+- [x] L-02 Linux 全工作区零警告构建，`cargo test --workspace` 通过（引擎齐全，无 SKIP）（已关：2026-10-30 Linux 上 `cargo clippy --workspace --all-targets` 无告警，`ELY_REQUIRE_ENGINES=1` 全量测试无 SKIP 全过（R14.42））
 - [ ] N-01 打印：Windows、Linux 交系统打印（与 macOS 同一份 PDF、纸张与取消规则），不再禁用
-- [ ] N-02 ElyShow 媒体：Windows 以 Media Foundation、Linux 以 GStreamer 实现 `media::Player`（载入、可播、失败原因、帧、循环与播完）
-- [ ] N-03 自动更新的安装与重开：Windows 安装程序、Linux AppImage，照 macOS 的退出后替换、失败记录与重开
-- [ ] N-04 签名验证的证书信任：Windows 系统信任库、Linux 系统 CA，禁网，不核吊销
-- [ ] N-05 ElyTree 与系统：停止 Git（Windows 结束进程树）、打开终端、在文件管理器中显示，Windows、Linux
+- [x] N-02 ElyShow 媒体：Windows 以 Media Foundation、Linux 以 GStreamer 实现 `media::Player`（载入、可播、失败原因、帧、循环与播完） — Windows R14.17（`media/mf.rs`），Linux R14.18（`media/gst.rs`）
+- [x] N-03 自动更新的安装与重开：Windows 安装程序、Linux AppImage，照 macOS 的退出后替换、失败记录与重开 — 4a74360 已做（`install::after_quit`：Windows 等进程退出后静默运行安装程序并重开，AppImage 换文件后重开，失败写入 `updates/failed.txt`；`tests/install.rs` 核对）；R14.4 删去非 macOS 的 `install`、`reopen` 桩
+- [x] N-04 签名验证的证书信任：Windows 系统信任库、Linux 系统 CA，禁网，不核吊销 — b7334ff 已做（`ely_platform::trust`：Windows 的 CryptoAPI 链引擎只读缓存、不自动更新根、不核吊销；Linux 的系统 CA 加 webpki，无网络）；R14.21 核对，三端测试皆过，Windows 上“一律受信”被测试抓住
+- [x] N-05 ElyTree 与系统：停止 Git（Windows 结束进程树）、打开终端、在文件管理器中显示，Windows、Linux（R14.27）
 - [ ] N-06 应用之间：Windows、Linux 的同级应用查找与启动、系统默认程序打开、单实例与诊断的崩溃报告位置
 - [ ] L-03 Linux 真窗口：六个应用开样本、编辑、保存、打印禁用说明、设置、更新检查
 - [ ] O-01 Omarchy：外观为“系统”时随 Omarchy 主题，切换主题即刻跟随（Omarchy 虚拟机里实测）
-- [ ] L-04 Linux 打包：六个 AppImage，带引擎、许可与桌面项；更新清单含 linux-x86_64
-- [ ] W-01 Windows 的 LibreOffice：同一源码与补丁在 Windows 构建，LOK 探测通过
-- [ ] W-02 Windows 全工作区零警告构建，`cargo test --workspace` 通过（引擎齐全，无 SKIP）
+- [x] L-04 Linux 打包：六个 AppImage，带引擎、许可与桌面项；更新清单含 linux-x86_64（已关：0.1.12 发布含七个应用的 AppImage、deb、rpm 与 Arch 包，更新清单 `<应用>-linux-x86_64.json`；2026-10-30 Omarchy 上装好的七个应用经 `linux-installed.sh` 皆过（R14.45））
+- [x] W-01 Windows 的 LibreOffice：同一源码与补丁在 Windows 构建，LOK 探测通过（已关：0.1.12 的 Windows 安装程序带内核发布；2026-10-30 严格全量测试（握手含 LOK 探测）通过（R14.42））
+- [x] W-02 Windows 全工作区零警告构建，`cargo test --workspace` 通过（引擎齐全，无 SKIP）（已关：2026-10-30 Windows 上 clippy 无告警，严格全量测试 90 个套件全过、唯一的 SKIP 是只在 macOS 跑的像素核对（R14.42）；偶发的 BuildId 见 P3-15）
 - [ ] W-03 Windows 真窗口：六个应用开样本、编辑、保存、设置、更新检查
-- [ ] W-04 Windows 打包：六个安装程序，带引擎、许可、文件类型；更新清单含 windows-x86_64
-- [ ] CI-01 Gitea 工作流：打标签即在 macOS、Windows、Linux 运行器上构建、测试、打包并上传到发布
-- [ ] REL-3 版本号 0.1.3，打标签触发运行器，三端产物与清单上传，官网指向新发布
+- [x] W-04 Windows 打包：六个安装程序，带引擎、许可、文件类型；更新清单含 windows-x86_64（已关：0.1.12 发布含七个应用与合集的安装程序，更新清单 `<应用>-windows-x86_64.json`）
+- [x] CI-01 Gitea 工作流：打标签即在 macOS、Windows、Linux 运行器上构建、测试、打包并上传到发布（已关：已由 GitHub 的 `.github/workflows/release.yml` 取代（Gitea 工作流已移除））
+- [x] REL-3 版本号 0.1.3，打标签触发运行器，三端产物与清单上传，官网指向新发布（已关：过时：其后已发至 0.1.12）
 
 ## 0.1.3 之后（三端实测查出，非 P0）
 
-- [ ] P3-01 拼写建议：Windows 与 Linux 上右键不出拼写菜单（`tools::spelling_suggests_and_ignores`）
-- [ ] P3-02 Windows：Calc 深色主题的图块为全黑（`paint::the_page_follows_a_dark_theme_and_back`）
-- [ ] P3-03 Windows：放映图层大于一帧时分片缺行（`motion::a_layer_larger_than_one_frame_arrives_in_pieces`）
-- [ ] P3-04 Windows：放映的页脚字段文字不在占位处（`playlist::field_text_lands_where_its_placeholder_is`）
-- [ ] P3-05 Windows：辅助功能的段落选区不桥接（`commands::a11y_follows_the_focused_paragraph`）
-- [ ] P3-06 Windows：删不掉内核仍开着文件的标签工作目录（错误 32），写入失败无从模拟（`tests::more::a_kernel_write_failure_stays_visible`）
-- [ ] P3-07 Windows：测试以 `kill -9` 杀 worker，Git Bash 的 kill 不认 Windows 进程号，worker 不死（`view::tests::commands::a_dead_worker_reaches_apps_while_idle`）
-- [ ] P3-08 Windows（AMD）：多个 worker 同时启动时内核的 OpenCL 探测卡在驱动的 `clCreateCommandQueue` 里数分钟（`openclwrapper::switchOpenCLDevice`）；测试以 `SAL_DISABLE_OPENCL=1` 绕开；是否在 `ely.xcd` 关掉 `UseOpenCL` 待用户定
-- [ ] P3-09 Windows：内核给的选区文字与文本导出以 CRLF 换行，三个 ElyTable 单测按 LF 比对（`tests::data::sort_filter_duplicates_and_columns_run_from_their_dialogs`、`a_column_button_sorts_its_own_block_not_the_cursors`、`tests::output::exports_write_the_shown_sheet_as_text`）；导出该用哪种换行待定
+- [x] P3-01 拼写建议：Windows 与 Linux 上右键不出拼写菜单（`tools::spelling_suggests_and_ignores`）（已关：`tools::spelling_suggests_and_ignores` 2026-10-30 Windows 严格全量测试（`release-tests.sh`）中通过）
+- [x] P3-02 Windows：Calc 深色主题的图块为全黑（`paint::the_page_follows_a_dark_theme_and_back`）（已关：该测试已随决定改动移除：页面照文件原色，深色只改四周界面；现测 `view::tests::theme::a_dark_app_paints_the_page_white` 2026-10-30 Windows 严格全量测试（`release-tests.sh`）中通过）
+- [x] P3-03 Windows：放映图层大于一帧时分片缺行（`motion::a_layer_larger_than_one_frame_arrives_in_pieces`）（已关：`motion::a_layer_larger_than_one_frame_arrives_in_pieces` 2026-10-30 Windows 严格全量测试（`release-tests.sh`）中通过）
+- [x] P3-04 Windows：放映的页脚字段文字不在占位处（`playlist::field_text_lands_where_its_placeholder_is`）（已关：`playlist::field_text_lands_where_its_placeholder_is` 2026-10-30 Windows 严格全量测试（`release-tests.sh`）中通过）
+- [x] P3-05 Windows：辅助功能的段落选区不桥接（`commands::a11y_follows_the_focused_paragraph`）（已关：`commands::a11y_follows_the_focused_paragraph` 2026-10-30 Windows 严格全量测试（`release-tests.sh`）中通过）
+- [x] P3-06 Windows：删不掉内核仍开着文件的标签工作目录（错误 32），写入失败无从模拟（`tests::more::a_kernel_write_failure_stays_visible`）（已关：`tests::more::a_kernel_write_failure_stays_visible` 2026-10-30 Windows 严格全量测试（`release-tests.sh`）中通过）
+- [x] P3-07 Windows：测试以 `kill -9` 杀 worker，Git Bash 的 kill 不认 Windows 进程号，worker 不死（`view::tests::commands::a_dead_worker_reaches_apps_while_idle`）（已关：`view::tests::commands::a_dead_worker_reaches_apps_while_idle` 2026-10-30 Windows 严格全量测试（`release-tests.sh`）中通过）
+- [x] P3-08 Windows（AMD）：多个 worker 同时启动时内核的 OpenCL 探测卡在驱动的 `clCreateCommandQueue` 里数分钟（`openclwrapper::switchOpenCLDevice`）；测试以 `SAL_DISABLE_OPENCL=1` 绕开；是否在 `ely.xcd` 关掉 `UseOpenCL` 待用户定（已关：按常设决定，worker 启动即设 `SAL_DISABLE_OPENCL=1`（`crates/ely-lok/src/client.rs`），应用与测试同此，不再探测 OpenCL）
+- [x] P3-09 Windows：内核给的选区文字与文本导出以 CRLF 换行，三个 ElyTable 单测按 LF 比对（`tests::data::sort_filter_duplicates_and_columns_run_from_their_dialogs`、`a_column_button_sorts_its_own_block_not_the_cursors`、`tests::output::exports_write_the_shown_sheet_as_text`）；导出该用哪种换行待定。2026-10-20：导出照内核随系统的换行（同 LibreOffice），测试按平台比对；选区文字的测试按行比对
 - [ ] P3-10 Windows：`crates/ely-office/tests/restart.rs` 设 `HOME` 想用临时目录，但 Windows 上 `data_dir` 取已知文件夹（不看 `HOME`），测试在真实的 ElyDoc 配置里运行；中途被杀即留下挡路的 `lok-verify.fodt` 文件夹，真实 ElyDoc 的内核核对随之失败（2026-10-14 审查中出现，已手动删去）
 - [ ] P3-11 ElyShow：正编辑表格单元格时在幻灯片空白处右键，内核（Impress）只结束编辑、不发 `LOK_CALLBACK_CONTEXT_MENU`，再右键一次才有幻灯片菜单；Windows 实测，他端未核；修需内核补丁
-- [ ] P3-12 Windows：`output::tests::targets_skip_hidden_slides_and_pad_numbers` 以 `/` 拼的路径比对，Windows 的 `join` 用 `\`，单测恒失败（代码无误）
-- [ ] P3-13 Windows：ElyPDF 三个单测恒失败（2026-10-14 组件 6b033f3 下实测，与组件无关）：`reads::a_failed_read_is_not_asked_again` 用 `kill -9` 杀 worker（同 P3-07）；`sign::a_signed_file_lists_its_checks_and_saves_as_a_copy` 报 “self-signed”（证书信任在 Windows 未构建，未细查）；`organize::a_save_writes_the_edits_and_undo_after_it_is_unsaved_again` 报状态未落定（原因未查）
-- [ ] P3-14 Windows：ElyTree 九个单测恒失败：五个比对 Git 写出的文字，本机 Git 的 `core.autocrlf` 写成 CRLF（测试仓库未设 `core.autocrlf false`）；其余写 Windows 不许的文件名（os error 123）。代码行为未见错，未修
-- [ ] P3-15 Windows：全量并行单测中偶有一个 LOK worker 读到的 BuildId 为 `development`（`desktop/source/app/app.cxx` 读不到 bootstrap 的 buildid 时的默认值），握手照规则拒绝；同一时刻别的 worker 读到正确的 8221e31，内核与 worker 都未重建，单独重跑即过（2026-10-14 ElyDoc `review::tests::one_unreadable_time_spares_the_other_notes`，三次重跑皆过）。疑为并发时读 `version.ini` 偶发失败，原因未查
+- [x] P3-12 Windows：`output::tests::targets_skip_hidden_slides_and_pad_numbers` 以 `/` 拼的路径比对，Windows 的 `join` 用 `\`，单测恒失败（代码无误）（已关：`output::tests::targets_skip_hidden_slides_and_pad_numbers` 2026-10-30 Windows 严格全量测试（`release-tests.sh`）中通过）
+- [x] P3-13 Windows：ElyPDF 三个单测恒失败（2026-10-14 组件 6b033f3 下实测，与组件无关）：`reads::a_failed_read_is_not_asked_again` 用 `kill -9` 杀 worker（同 P3-07）；`sign::a_signed_file_lists_its_checks_and_saves_as_a_copy` 报 “self-signed”（证书信任在 Windows 未构建，未细查）；`organize::a_save_writes_the_edits_and_undo_after_it_is_unsaved_again` 报状态未落定（原因未查） — b7334ff 已修（见 R12.35：MuPDF 补丁 0006 令只读打开共享删除、`save_atomic` 以 `std::fs::rename` 替换、测试用 `Worker::kill`）；R14.21 核对，三个测试在 Windows 连过三次，放回 `persist` 即失败
+- [x] P3-14 Windows：ElyTree 九个单测恒失败：五个比对 Git 写出的文字，本机 Git 的 `core.autocrlf` 写成 CRLF（测试仓库未设 `core.autocrlf false`）；其余写 Windows 不许的文件名（os error 123）。代码行为未见错。b7334ff 修（测试设 `GIT_CONFIG_NOSYSTEM`，换掉不许的文件名），R14.28 核实
+- [x] P3-15 Windows：全量并行单测中偶有一个 LOK worker 读到的 BuildId 为 `development`（`desktop/source/app/app.cxx` 读不到 bootstrap 的 buildid 时的默认值），握手照规则拒绝；同一时刻别的 worker 读到正确的 8221e31，内核与 worker 都未重建，单独重跑即过（2026-10-14 ElyDoc `review::tests::one_unreadable_time_spares_the_other_notes`，三次重跑皆过）。疑为并发时读 `version.ini` 偶发失败，原因未查（已关：补丁 0062，BuildId 用时才读、读不到不存；Windows 的 `release-tests.sh` 修前三次皆现、修后两次皆过，见 decisions 2026-10-30 R14.43）
 - [ ] P3-16 发布：`ci.sh` 在三端各自调用 `packaging/source.sh` 并上传同名的源码包与上游源码包，发布里同名文件出现三份（Gitea 允许重名）；上游源码包打的是各机的 `engines/mupdf-src`，含构建留下的文件，三份大小不同（v0.1.5：Linux 108 MB，macOS 161 MB）。v0.1.5 手动删去后到的两份，留 Linux 的一份。应只出一份，且上游包只含源码
 - [ ] P3-17 ElyTable（Windows，0.1.5 安装版，2026-10-15 录视频时见）：A1 选中后按两次 Ctrl+= 缩放到 150%，网格停在半滚动处：第 5 行被表头截去一半，第 1–4 行看不见，Ctrl+Home 也回不到 A1。应保持首行与首列在视图内（同 R2.7 的按键缩放）
+- [x] P3-18 Windows：`tests::menu::right_clicks_open_excel_rows_on_cells_and_headers` 第二次右键 A2（先 `cell.goto D9`）等不到菜单；不带 R9.3、R9.4 的源码同样失败，原因未查（已关：`tests::menu::right_clicks_open_excel_rows_on_cells_and_headers` 2026-10-30 Windows 严格全量测试（`release-tests.sh`）中通过）
+- [ ] P3-19 Windows：ElyTable 全量单测并行跑（默认线程数或 6）时，`output` 的测试与 worker 一起停在零 CPU、不再前进；逐个跑（`--test-threads=1`）不停，原因未查
+- [x] P3-21 Windows：Calc 读鼠标的行位置随系统 DPI，不随视图报的比例（`view::tests::large::a_click_far_down…`、`a_drag_far_down…` 设 2×）。本机系统缩放 150%：设 1.5 即过，2.0 时 B4998 落到 B4953，1.0 时落到 B4820；HEAD 与 0.1.9 的内核同样，不是 R10 引起。单显示器时两者相同，不出错；窗口在缩放不同的另一块显示器上时，越往下点越偏。原因在内核按设备 DPI 截行高，未查。关闭（2026-10-30，R14.42）：系统缩放仍 150%，视图比例 1.0、1.25、1.5、2.0 皆点中所求单元格，不再复现；worker 实为 DPI 不感知；两个测试照旧以 2 倍比例守着
+- [x] P3-22 Windows：ElyShow、ElyTable、ElyDoc 的应用单测每个都留下一个 LOK worker（gpui 的 `TestAppContext` 从不释放应用，worker 随之不关），ElyShow 全量串行跑到约 50 个 worker（20 GB）后，新 worker 启动即堆损坏退出（0xc0000374），其后 11 个测试失败。已修（2026-10-21）：测试的 worker 经 `ely_office::lok::test_worker` 建，测试线程结束即关（`ely_ui::at_thread_end`）；修后同时只有一个 worker，ElyShow 只剩 P3-12
+- [ ] P3-23 macOS（2026-10-30，R14.42 全量严格测试，arm64 共享引擎）：ElyDoc 的 `merge::tests::records_fill_previews_and_files` 导出 PDF 时 worker 崩在 `PDFFilter::filter` +112（`SfxObjectShell::ExportTo` 经 `doc_saveAs`），测试即等不到第二个 PDF。单跑该组 6 个、整个 ElyDoc 套件连跑三次皆过，只在整个工作区并行跑时出过一次；未找到触发条件
 
+- [x] P3-20 发布（v0.1.9 实测）：macOS 任务在 `macos-signing` 运行器上读 `ELY_SHARE`（`~/Documents/GitHub/ElyOfficeSuite`）时，系统为“文稿”文件夹弹出访问许可，无人点按即一直等：`source.sh` 的 tar 卡在 `open()` 一小时不动。本次取消该任务，经 ssh 在同一 CI 克隆跑 `ci.sh macos v0.1.9`（ssh 有完全磁盘访问）。待用户在 Mac 上给运行器（`~/actions-runner-signing`）完全磁盘访问，或允许该提示；之后的标签才能由流程自建 macOS 包。已修（2026-10-20，用户定不授权）：Mac 的共享引擎（`engines`、`reference`）移到 `~/ely-share`，“文稿”里的开发克隆与 CI 克隆都以链接指向它，`release.yml` 的 macOS `ELY_SHARE` 随之改，运行器不再读“文稿”

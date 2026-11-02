@@ -6,6 +6,7 @@ mod autosave;
 mod blocks;
 mod clip;
 mod compare;
+mod count;
 mod desk;
 mod engine;
 mod export;
@@ -15,7 +16,9 @@ mod keys;
 mod look;
 mod output;
 mod outside;
+mod paths;
 mod places;
+mod remote;
 mod rename;
 mod restore;
 mod side;
@@ -27,5 +30,8 @@ mod view;
 use ely_platform::AppId;
 
 fn main() {
+    if let Some(code) = remote::command_line() {
+        std::process::exit(code);
+    }
     ely_ui::run(AppId::Mark, desk::open);
 }

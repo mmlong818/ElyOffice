@@ -1,0 +1,53 @@
+[package]
+name = "ely-mail-engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+base64.workspace = true
+form_urlencoded = "1"
+getrandom.workspace = true
+html5ever.workspace = true
+idna = "1"
+imap-proto.workspace = true
+jiff.workspace = true
+tempfile.workspace = true
+log.workspace = true
+mail-builder.workspace = true
+mail-parser.workspace = true
+mail-send.workspace = true
+markdown.workspace = true
+mime_guess = "2"
+nom.workspace = true
+percent-encoding = "2"
+rustls.workspace = true
+rustls-platform-verifier.workspace = true
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+smtp-proto = "0.2"
+tokio.workspace = true
+tokio-rustls.workspace = true
+ureq.workspace = true
+
+[dependencies.keyring]
+version = "3"
+features = ["apple-native", "windows-native"]
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.55"
+
+[target.'cfg(target_os = "linux")'.dependencies.keyring]
+version = "3"
+features = ["linux-native-sync-persistent"]
+
+[dev-dependencies]
+ely-platform.workspace = true
+fake = { package = "ely-mail-fake", path = "../ely-mail-fake" }
+
+[lints]
+workspace = true

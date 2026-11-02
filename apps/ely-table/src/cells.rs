@@ -4,7 +4,9 @@ use ely_gpui_component::{
     buttons::{Button, ButtonVariant},
     forms::TextInput,
     overlays::{Dialog as Card, PromptDialog},
+    primitives::Severity,
 };
+use ely_lok::sheet;
 use ely_office::prelude::*;
 use gpui::{
     App, AppContext as _, Context, Div, Entity, InteractiveElement as _, Menu, MenuItem, Window,
@@ -118,13 +120,17 @@ impl Book {
         let tab = tab.id;
         self.ask_in(
             tab,
-            |worker, doc| doc.selection_text(worker),
-            move |book, text, _, cx| match text {
-                Ok(text) if filled(&text) > 1 => {
+            |worker, doc| sheet::selected_range(&worker.values(doc, sheet::SELECTED)?),
+            move |book, read, _, cx| match read {
+                Ok(Some(selection)) if selection.filled > 1 => {
                     book.open_dialog(Dialog::Merge { tab });
                     cx.notify();
                 }
-                Ok(_) => book.run_in(id, "cells.merge", &["false"], cx),
+                Ok(Some(_)) => book.run_in(id, "cells.merge", &["false"], cx),
+                Ok(None) => {
+                    let text = Book::text(cx, "table.merge.several", &[]);
+                    book.toast(text, Severity::Warning, cx);
+                }
                 Err(error) => book.engine_failed(&error.to_string(), cx),
             },
             cx,
@@ -153,14 +159,6 @@ impl Book {
         self.open_dialog(Dialog::Size { tab, column, field });
         cx.notify();
     }
-}
-
-/// How many cells of a tab-joined selection hold something.
-fn filled(text: &str) -> usize {
-    text.lines()
-        .flat_map(|line| line.split('\t'))
-        .filter(|cell| !cell.is_empty())
-        .count()
 }
 
 /// Centimeters as 1/100 mm, within what the kernel takes.
@@ -243,9 +241,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn filled_cells_and_sizes() {
-        assert_eq!(filled("1\tb\n\t\n"), 2);
-        assert_eq!(filled("\t\n"), 0);
+    fn sizes() {
         assert_eq!(hundredths("2.54"), Some(2540));
         assert_eq!(hundredths("1,5"), Some(1500));
         assert_eq!(hundredths("0"), None);

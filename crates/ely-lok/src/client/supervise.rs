@@ -8,7 +8,7 @@ use std::{
     path::{Path, PathBuf},
     process::{Child, ExitStatus},
     sync::{
-        Arc, Condvar, Mutex, OnceLock,
+        Arc, Condvar, Mutex, OnceLock, Weak,
         atomic::{AtomicBool, AtomicPtr, AtomicU64, Ordering},
         mpsc,
     },
@@ -100,6 +100,21 @@ pub(super) struct Supervisor {
     state: Arc<State>,
     monitor: Option<JoinHandle<()>>,
     monitor_done: mpsc::Receiver<()>,
+}
+
+/// A weak cancellation handle: it can terminate the Job while the worker is
+/// live without extending the Job's handle or monitor lifetime.
+#[derive(Clone)]
+pub(super) struct StopHandle {
+    state: Weak<State>,
+}
+
+impl StopHandle {
+    pub(super) fn expire(&self) {
+        if let Some(state) = self.state.upgrade() {
+            expire_state(&state);
+        }
+    }
 }
 
 pub(super) struct Deadline {
@@ -252,6 +267,10 @@ impl Supervisor {
         })
     }
 
+    pub(super) fn stop_handle(&self) -> StopHandle {
+        StopHandle { state: Arc::downgrade(&self.state) }
+    }
+
     pub(super) fn assign_child(&self, child: &Child) -> io::Result<()> {
         self.check()?;
         #[cfg(feature = "supervisor-test")]
@@ -313,13 +332,7 @@ impl Supervisor {
     }
 
     pub(super) fn expire(&self) {
-        self.state.failed.store(true, Ordering::SeqCst);
-        self.state.stop.store(true, Ordering::SeqCst);
-        let handle = self.state.job.handle();
-        if !handle.is_null() {
-            let _ = unsafe { TerminateJobObject(handle, TERMINATION_CODE) };
-        }
-        self.state.wake.notify_all();
+        expire_state(&self.state);
     }
 
     pub(super) fn reap(&mut self, child: &mut Child, force: bool) -> io::Result<ExitStatus> {
@@ -474,6 +487,16 @@ impl Supervisor {
     pub(super) fn monitor_joined(&self) -> bool {
         self.monitor.is_none()
     }
+}
+
+fn expire_state(state: &State) {
+    state.failed.store(true, Ordering::SeqCst);
+    state.stop.store(true, Ordering::SeqCst);
+    let handle = state.job.handle();
+    if !handle.is_null() {
+        let _ = unsafe { TerminateJobObject(handle, TERMINATION_CODE) };
+    }
+    state.wake.notify_all();
 }
 
 impl Drop for Supervisor {

@@ -26,7 +26,7 @@ pub trait Autosaving: Host {
 
     /// Saves each eligible tab whose edits rested a whole beat.
     fn autosave(&mut self, window: &mut gpui::Window, cx: &mut Context<Self>) {
-        let on = ely_ui::settings::autosave::on(cx);
+        let on = ely_ui::settings::switches::on(ely_ui::settings::switches::AUTOSAVE, cx);
         let core = self.core();
         if !on || core.stopped.is_some() || core.dialog.is_some() {
             self.core_mut().quiet.clear();

@@ -143,17 +143,19 @@ fn the_cap_counts_the_cursor_too() {
 #[cfg(unix)]
 #[test]
 fn a_failed_write_keeps_last_ok_honest() {
-    use std::os::unix::fs::PermissionsExt;
     let dir = tempfile::tempdir().expect("a temp dir");
     let mut recovery = Recovery::new(dir.path().to_path_buf());
     recovery
         .write_once(b"0", None, at(100))
         .expect("the write lands");
     let points = dir.path().join("points");
-    std::fs::set_permissions(&points, std::fs::Permissions::from_mode(0o555))
-        .expect("the lockdown");
+    // A file in the folder's place stops root too.
+    let aside = dir.path().join("aside");
+    std::fs::rename(&points, &aside).expect("the points move aside");
+    std::fs::write(&points, "in the way").expect("the file");
     let failed = recovery.write_once(b"1", None, at(200));
-    std::fs::set_permissions(&points, std::fs::Permissions::from_mode(0o755)).expect("the restore");
+    std::fs::remove_file(&points).expect("the file goes");
+    std::fs::rename(&aside, &points).expect("the points return");
     assert!(failed.is_err());
     assert_eq!(recovery.last_ok(), Some(at(100)));
     let listed = recovery.points().expect("the points list");
@@ -275,7 +277,18 @@ fn a_discard_drops_points_and_records_it() {
 #[test]
 fn a_torn_lock_counts_as_a_crash() {
     let dir = tempfile::tempdir().expect("a temp dir");
-    for torn in ["", "op", "open x"] {
+    let torn: [&[u8]; 9] = [
+        b"",
+        b"op",
+        b"open x",
+        b"open 7\xff",
+        b"open 7 \xff",
+        b"open 7 8",
+        b"discarded \xff",
+        b"discarded",
+        b"\xff\xfe\x00",
+    ];
+    for torn in torn {
         std::fs::write(dir.path().join("session.lock"), torn).expect("writes");
         assert_eq!(Crash::check(dir.path(), |_| true).expect("reads"), Marker::Crashed, "{torn:?}");
     }

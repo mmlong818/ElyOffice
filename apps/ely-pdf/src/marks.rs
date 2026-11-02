@@ -3,6 +3,7 @@
 use ely_gpui_component::{
     feedback::EmptyState,
     forms::TextInput,
+    layout::ScrollArea,
     lists::Outline,
     menus::{ContextMenu, Menu as Popup, MenuItem as PopupItem},
     overlays::PromptDialog,
@@ -10,7 +11,7 @@ use ely_gpui_component::{
 };
 use ely_office::{Closing as _, Tabs as _};
 use ely_pdf_engine::{Bookmark, BookmarkChange};
-use gpui::{Action, AnyElement, App, AppContext as _, Context, Entity, IntoElement, ParentElement as _, Styled as _, Window, div};
+use gpui::{Action, AnyElement, App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _, Styled as _, Window, div};
 
 use crate::document::{DeleteBookmark, RenameBookmark};
 use crate::view::PdfView;
@@ -98,7 +99,9 @@ pub fn outline(view: &Entity<PdfView>, cx: &App) -> AnyElement {
         PopupItem::new(Viewer::text(cx, key, &[])).on_click(move |window, cx| window.dispatch_action(action.boxed_clone(), cx))
     };
     let popup = Popup::new().item(item("pdf.mark.rename", Box::new(RenameBookmark))).item(item("pdf.mark.delete", Box::new(DeleteBookmark)));
-    ContextMenu::new("pdf-marks-menu", popup).size_full().child(div().p_2().child(outline)).into_any_element()
+    let list = div().debug_selector(|| "pdf-marks".into()).p_2().child(outline);
+    let list = ScrollArea::new("pdf-marks-scroll").vertical().size_full().child(list);
+    ContextMenu::new("pdf-marks-menu", popup).size_full().child(list).into_any_element()
 }
 
 impl Viewer {

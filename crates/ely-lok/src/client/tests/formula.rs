@@ -50,8 +50,8 @@ fn typing_a_formula_offers_functions_usage_and_marks() {
         sum.is_some_and(|f| f.signature.contains(", ")),
         "the signature takes the Excel separator: {sum:?}"
     );
-    doc.complete_function(&mut worker, "SUMIF")
-        .expect("the completion");
+    let taken = doc.complete_function(&mut worker, Some("SUMIF"), None);
+    assert!(taken.expect("the completion"), "SUMIF is on offer");
     let done = poll_until(&mut worker, &doc, &offered, SETTLE, |seen| {
         seen.cell.formula == "=SUMIF()"
     });

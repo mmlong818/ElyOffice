@@ -99,18 +99,21 @@ fn inner(lines: &Lines) -> impl Iterator<Item = (u16, i32)> + '_ {
 fn clamp(table: &Table, side: Side, offset: i32) -> i32 {
     let axis = if side.upright() { &table.columns } else { &table.rows };
     let (first, last) = (axis.inner.first(), axis.inner.last());
+    // Past the twips range is unbounded, as LONG_MAX.
+    let twips = |bound: i64| bound.clamp(i32::MIN.into(), i32::MAX.into()) as i32;
     // Impress sends its outer bounds; Writer leaves a gap.
     let (at, low, high) = match (side, axis.ends) {
-        (Side::ColumnLeft, Some([(low, high), _])) => (axis.left, low, high),
-        (Side::ColumnRight | Side::RowBottom, Some([_, (low, high)])) => (axis.right, low, high),
+        (Side::ColumnLeft, Some([(low, high), _])) => (axis.left, twips(low), twips(high)),
+        (Side::ColumnRight | Side::RowBottom, Some([_, (low, high)])) => (axis.right, twips(low), twips(high)),
         (Side::ColumnLeft, None) => (axis.left, i32::MIN, first.map_or(axis.right, |line| line.position) - GAP),
         (Side::ColumnRight | Side::RowBottom, None) => {
             (axis.right, last.map_or(axis.left, |line| line.position) + GAP, i32::MAX)
         }
         (Side::Column(index) | Side::Row(index), ends) => {
             let line = axis.inner[usize::from(index)];
-            let high = if ends.is_some() { line.max } else { (line.max - GAP).max(line.min) };
-            (line.position, line.min, high)
+            let (min, max) = (twips(line.min), twips(line.max));
+            let high = if ends.is_some() { max } else { max.saturating_sub(GAP).max(min) };
+            (line.position, min, high)
         }
     };
     let moved = (at.saturating_add(offset)).clamp(low, high) - at;
@@ -280,6 +283,15 @@ mod tests {
         assert_eq!(clamp(&table, Side::ColumnRight, -8000), -2800, "to the last column's minimum");
         assert_eq!(clamp(&table, Side::RowBottom, -800), -83, "to the last row's minimum");
         assert_eq!(clamp(&table, Side::Column(0), 9000), 3000, "Impress's max needs no gap");
+    }
+
+    #[test]
+    fn a_long_max_bound_is_no_bound() {
+        let mut table = table();
+        table.rows.inner[0].max = i64::MAX;
+        assert_eq!(clamp(&table, Side::Row(0), 5000), 5000, "a row grows freely");
+        table.rows.inner[0].min = i64::MIN;
+        assert_eq!(clamp(&table, Side::Row(0), -5000), -5000, "and shrinks past zero");
     }
 
     #[test]

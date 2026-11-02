@@ -86,25 +86,13 @@ fn every_mapped_command_reaches_the_kernel_and_reports_state() {
     ] {
         seen = run_until(&mut worker, &doc, &seen, (id, &[]), (uno, "true"));
     }
-    let fonts = worker
-        .values(&doc, ".uno:CharFontName")
-        .expect("the font list");
-    let fonts: serde_json::Value = serde_json::from_str(&fonts).expect("json");
-    let family = fonts["commandValues"]
-        .as_object()
-        .and_then(|fonts| {
-            fonts
-                .keys()
-                .find(|name| name.as_str() != "Liberation Serif")
-        })
-        .expect("the kernel lists fonts")
-        .clone();
+    // A Western font on "Hello 世界": two fonts now.
     seen = run_until(
         &mut worker,
         &doc,
         &seen,
-        ("format.font", &[&family]),
-        (".uno:CharFontName", &family),
+        ("format.font", &["Liberation Mono"]),
+        (".uno:CharFontName", crate::MIXED),
     );
     seen = run_until(
         &mut worker,
@@ -143,7 +131,7 @@ fn every_mapped_command_reaches_the_kernel_and_reports_state() {
     assert!(text.contains("fo:font-weight=\"bold\""), "bold landed");
     assert_eq!(
         commands::all().count(),
-        248,
+        253,
         "the rows of text, layout, refs, tools, sheet, calc, data, analysis, page, show and draw"
     );
 }
@@ -257,10 +245,7 @@ fn a_kernel_dialog_is_closed_and_reported() {
     let outcome = wait.recv_timeout(std::time::Duration::from_secs(30));
     if outcome.is_err() {
         // A blocked worker would hold the test open.
-        std::process::Command::new("kill")
-            .args(["-9", &pid.to_string()])
-            .status()
-            .expect("kill runs");
+        kill(pid);
     }
     let blocked = outcome.expect("the dialog never blocked the worker");
     assert_eq!(blocked, ["Delete Contents"], "the dialog is reported");
@@ -344,17 +329,13 @@ fn undo_and_redo_follow_the_live_history() {
     worker
         .run(&doc, "edit.undo", &[])
         .expect("undo right after typing");
-    assert!(
-        worker.run(&doc, "edit.undo", &[]).is_err(),
-        "a second undo has nothing"
-    );
+    let error = worker.run(&doc, "edit.undo", &[]).expect_err("a second undo has nothing");
+    assert!(crate::is_nothing(&error), "{error}");
     worker
         .run(&doc, "edit.redo", &[])
         .expect("redo right after undo");
-    assert!(
-        worker.run(&doc, "edit.redo", &[]).is_err(),
-        "a second redo has nothing"
-    );
+    let error = worker.run(&doc, "edit.redo", &[]).expect_err("a second redo has nothing");
+    assert!(crate::is_nothing(&error), "{error}");
     let text = saved(&dir, &mut worker, &doc, "out.fodt");
     assert_eq!(paragraphs(&text), ["aHello 世界"]);
 }

@@ -10,6 +10,8 @@ publish.workspace = true
 dunce.workspace = true
 anyhow.workspace = true
 directories.workspace = true
+encoding_rs.workspace = true
+flate2.workspace = true
 ely-files.workspace = true
 ely-gpui-component.workspace = true
 ely-lok = { workspace = true, features = ["view"] }
@@ -22,8 +24,12 @@ serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 ely-ui.workspace = true
 
+[features]
+test-support = ["ely-ui/test-support", "ely-lok/test-support"]
+
 [dev-dependencies]
 tempfile.workspace = true
+ely-lok = { workspace = true, features = ["view", "test-support"] }
 
 [lints]
 workspace = true

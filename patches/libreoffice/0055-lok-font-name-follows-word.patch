@@ -1,0 +1,116 @@
+LOK: a font name sets Western text, and CJK text when it can
+
+Writer applies a chosen font name to the scripts of the selection, or
+with no selection to the input language's script. Under LOK the input
+language is the worker host's keyboard, not the user's: on Linux a
+font picked at the cursor set only the Western font and Chinese typed
+after kept the old one (GitHub ElyOffice #7), while on a host with a
+Chinese keyboard a Western font replaced the Chinese one. LOK now
+follows Word: the name always sets the Western font, and also the CJK
+font when the font is installed and has CJK glyphs. The font state at
+a bare cursor likewise follows the script there, not the keyboard.
+getCommandValues(".uno:CharFonts") reads the Western and Asian font
+at the cursor or over the selection, empty when mixed, so a client
+can confirm the font it set where the state shows another script;
+past Writer's attribute lookup limit it says "unread", not defaults.
+
+--- a/sw/source/uibase/shells/basesh.cxx
++++ b/sw/source/uibase/shells/basesh.cxx
+@@ -2446,6 +2446,17 @@
+                     if(nInputLang != LANGUAGE_DONTKNOW && nInputLang != LANGUAGE_SYSTEM)
+                         nScripts = SvtLanguageOptions::GetScriptTypeOfLanguage( nInputLang );
+                 }
++                // LOK as Word: Western always, CJK when it has glyphs.
++                if (comphelper::LibreOfficeKit::isActive())
++                {
++                    const OUString& rName
++                        = static_cast<const SvxFontItem&>(pArgs->Get(nWhich)).GetFamilyName();
++                    const OutputDevice* pDev = GetView().GetEditWin().GetOutDev();
++                    nScripts = (nScripts & SvtScriptType::COMPLEX) | SvtScriptType::LATIN;
++                    if (pDev->IsFontAvailable(rName)
++                        && pDev->HasGlyphs(vcl::Font(rName, Size(0, 12)), u"\u4E2D\u6587") == -1)
++                        nScripts |= SvtScriptType::ASIAN;
++                }
+                 [[fallthrough]];
+             }
+             case SID_ATTR_CHAR_POSTURE:
+@@ -2596,7 +2607,12 @@
+                 SfxItemPool& rPool = *rSet.GetPool();
+                 SvxScriptSetItem aSetItem( rPool.GetSlotId( nWhich ), rPool );
+                 aSetItem.GetItemSet().Put( *pFntCoreSet, false );
+-                const SfxPoolItem* pI = aSetItem.GetItemOfScript( nScriptType );
++                // LOK: the host keyboard is not the user's.
++                const SvtScriptType nScript
++                    = nWhich == RES_CHRATR_FONT && comphelper::LibreOfficeKit::isActive()
++                          ? rSh.GetScriptType()
++                          : nScriptType;
++                const SfxPoolItem* pI = aSetItem.GetItemOfScript( nScript );
+                 if( pI )
+                 {
+                     rSet.Put( pI->CloneSetWhich(nWhich) );
+--- a/sw/source/uibase/uno/loktxdoc.cxx
++++ b/sw/source/uibase/uno/loktxdoc.cxx
+@@ -40,6 +40,9 @@
+ #include <docstat.hxx>
+ #include <fmtrfmrk.hxx>
+ #include <wrtsh.hxx>
++#include <hintids.hxx>
++#include <editeng/fontitem.hxx>
++#include <svl/itemset.hxx>
+ #include <txtrfmrk.hxx>
+ #include <ndtxt.hxx>
+ #include <redline.hxx>
+@@ -1143,6 +1146,32 @@ void GetWordCount(tools::JsonWriter& rJsonWriter, SwDocShell* pDocShell)
+     }
+ }
+ 
++/// Implements getCommandValues(".uno:CharFonts"): empty when mixed.
++void GetCharFonts(tools::JsonWriter& rJsonWriter, SwDocShell* pDocShell)
++{
++    SwWrtShell* pWrtShell = pDocShell->GetWrtShell();
++    if (!pWrtShell)
++        return;
++    SfxItemSetFixed<RES_CHRATR_FONT, RES_CHRATR_FONT, RES_CHRATR_CJK_FONT, RES_CHRATR_CJK_FONT>
++        aSet(pWrtShell->GetAttrPool());
++    // Past Writer's lookup limit nothing is read.
++    if (!pWrtShell->GetCurAttr(aSet))
++    {
++        rJsonWriter.put("unread", true);
++        return;
++    }
++    for (const auto& [pName, nWhich] :
++         { std::pair<const char*, sal_uInt16>("western", RES_CHRATR_FONT),
++           std::pair<const char*, sal_uInt16>("asian", RES_CHRATR_CJK_FONT) })
++    {
++        if (aSet.GetItemState(nWhich) == SfxItemState::INVALID)
++            rJsonWriter.put(pName, u""_ustr);
++        else
++            rJsonWriter.put(pName,
++                            static_cast<const SvxFontItem&>(aSet.Get(nWhich)).GetFamilyName());
++    }
++}
++
+ /// Implements getCommandValues(".uno:Outline").
+ void GetOutline(tools::JsonWriter& rJsonWriter, SwDocShell* pDocShell)
+ {
+@@ -1206,7 +1235,8 @@ bool SwXTextDocument::supportsCommand(std::u16string_view rCommand)
+         = { u"TextFormFields", u"TextFormField", u"SetDocumentProperties",
+             u"Bookmarks",      u"Fields",        u"Sections",
+             u"Bookmark",       u"Field",         u"Layout",
+-            u"Formula",        u"WordCount",     u"Outline" };
++            u"Formula",        u"WordCount",     u"Outline",
++            u"CharFonts" };
+ 
+     return std::find(vForward.begin(), vForward.end(), rCommand) != vForward.end();
+ }
+@@ -1301,6 +1331,10 @@ void SwXTextDocument::getCommandValues(tools::JsonWriter& rJsonWriter, std::stri
+     {
+         GetWordCount(rJsonWriter, m_pDocShell);
+     }
++    else if (o3tl::starts_with(rCommand, ".uno:CharFonts"sv))
++    {
++        GetCharFonts(rJsonWriter, m_pDocShell);
++    }
+     else if (o3tl::starts_with(rCommand, ".uno:Formula"sv))
+     {
+         GetFormula(rJsonWriter, m_pDocShell);

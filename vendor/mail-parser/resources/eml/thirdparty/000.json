@@ -1,0 +1,120 @@
+{
+  "html_body": [
+    1,
+    2
+  ],
+  "text_body": [
+    1,
+    2
+  ],
+  "attachments": [],
+  "parts": [
+    {
+      "headers": [
+        {
+          "name": "mime_version",
+          "value": {
+            "Text": "1.0"
+          },
+          "offset_field": 0,
+          "offset_start": 13,
+          "offset_end": 18
+        },
+        {
+          "name": "content_type",
+          "value": {
+            "ContentType": {
+              "c_type": "multipart",
+              "c_subtype": "alternative",
+              "attributes": [
+                {
+                  "name": "boundary",
+                  "value": "bound"
+                }
+              ]
+            }
+          },
+          "offset_field": 18,
+          "offset_start": 31,
+          "offset_end": 73
+        }
+      ],
+      "is_encoding_problem": false,
+      "body": {
+        "Multipart": [
+          1,
+          2
+        ]
+      },
+      "offset_header": 0,
+      "offset_body": 74,
+      "offset_end": 461
+    },
+    {
+      "headers": [
+        {
+          "name": "content_transfer_encoding",
+          "value": {
+            "Text": "base64"
+          },
+          "offset_field": 95,
+          "offset_start": 121,
+          "offset_end": 129
+        },
+        {
+          "name": "content_type",
+          "value": {
+            "ContentType": {
+              "c_type": "text",
+              "c_subtype": "plain",
+              "attributes": null
+            }
+          },
+          "offset_field": 129,
+          "offset_start": 142,
+          "offset_end": 154
+        }
+      ],
+      "is_encoding_problem": false,
+      "body": {
+        "Text": "we have\ra lot \nof \u0000binary stuff in here\nb adjig sadjg jasidgjiaehga3wht8a3w8ghxjc dsgad hasdghsd gasd dsjdsoga sjdga0w3tjhawjgsertniq3n5oqerjqw2r89q23h awhrqh835r8a"
+      },
+      "offset_header": 95,
+      "offset_body": 155,
+      "offset_end": 377
+    },
+    {
+      "headers": [
+        {
+          "name": "content_type",
+          "value": {
+            "ContentType": {
+              "c_type": "text",
+              "c_subtype": "plain",
+              "attributes": null
+            }
+          },
+          "offset_field": 386,
+          "offset_start": 399,
+          "offset_end": 411
+        },
+        {
+          "name": "content_transfer_encoding",
+          "value": {
+            "Text": "base64"
+          },
+          "offset_field": 411,
+          "offset_start": 437,
+          "offset_end": 445
+        }
+      ],
+      "is_encoding_problem": false,
+      "body": {
+        "Text": "eh"
+      },
+      "offset_header": 386,
+      "offset_body": 446,
+      "offset_end": 450
+    }
+  ]
+}

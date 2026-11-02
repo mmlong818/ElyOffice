@@ -7,6 +7,7 @@ use std::{
 use crate::ffi::{Document, Lok};
 use crate::ipc::{self, Pack, Unpack, tag};
 
+mod complete;
 mod events;
 #[cfg(unix)]
 mod fatal;
@@ -292,13 +293,7 @@ fn answer(lok: &Lok, tag: u8, id: u64, payload: &[u8]) {
             .and_then(|id| with_doc(id, |doc| doc.selection_text()))
             .and_then(|text| text)
             .map(|text| Pack::new().str(&text).bytes()),
-        tag::COMPLETE_FUNCTION => unpack
-            .u64()
-            .and_then(|id| {
-                let name = unpack.str()?;
-                with_doc(id, |doc| doc.complete_function(&name)).and_then(|done| done)
-            })
-            .map(|()| Vec::new()),
+        tag::COMPLETE_FUNCTION => complete::complete(unpack),
         tag::SET_AUTHOR => unpack
             .str()
             .and_then(|name| lok.set_option("author", &name))
@@ -439,7 +434,7 @@ fn verify(lok: &Lok, url: &str) -> io::Result<u64> {
     #[cfg(windows)]
     doc.dispose_on_owner()?;
     drop(doc);
-    let red = tile.chunks_exact(4).filter(|px| px[2] > 200 && px[0] < 80 && px[1] < 80).count();
+    let red = tile.as_chunks::<4>().0.iter().filter(|px| px[2] > 200 && px[0] < 80 && px[1] < 80).count();
     log::info!("lok-worker: tile self-check found {red} red pixels");
     Ok(red as u64)
 }

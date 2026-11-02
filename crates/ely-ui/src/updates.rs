@@ -1,26 +1,24 @@
 //! A newer release: offered, downloaded, installed after quitting.
 
+mod view;
+
 use std::{
     io,
-    path::{Path, PathBuf},
-    process::{Command, Stdio},
+    path::PathBuf,
+    process::Stdio,
     sync::atomic::AtomicBool,
 };
 
-use ely_gpui_component::shell::{UpdateBanner, UpdateState};
 use ely_platform::{
     AppId,
+    install::Installed,
     update::{self, Check, Release},
 };
 use futures::{StreamExt as _, channel::mpsc};
-use gpui::{
-    App, AppContext as _, Context, Entity, EventEmitter, Global, IntoElement, Render, Window, div,
-};
+use gpui::{App, AppContext as _, Context, Entity, EventEmitter, Global};
 
-/// The release server's newest release, listed by its API.
-const LATEST: &str = "https://git.zacharyzhang.com/api/v1/repos/ZacharyZhang-NY/ElyOffice/releases/latest";
-/// The argument that runs this binary as the installer.
-const INSTALL: &str = "--ely-install-update";
+/// The newest release's files; GitHub redirects, no API.
+const LATEST: &str = "https://github.com/ELY-Open-Source/ElyOffice/releases/latest/download";
 
 #[derive(Clone, Debug, PartialEq)]
 enum Phase {
@@ -29,13 +27,24 @@ enum Phase {
     Fetched(PathBuf),
 }
 
+/// The last check, as the settings page shows it.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Checked {
+    Asking,
+    Latest,
+    Newer(semver::Version),
+    Failed(String),
+}
+
 pub struct Updates {
     app: AppId,
-    bundle: PathBuf,
+    installed: Installed,
     offer: Option<(Release, Phase)>,
     dismissed: bool,
     /// The download to install once the app has quit.
     pending: Option<PathBuf>,
+    /// The last check's outcome.
+    pub checked: Option<Checked>,
     /// Why the last install failed, for the window to say.
     pub note: Option<String>,
 }
@@ -53,12 +62,12 @@ struct Updater(Entity<Updates>);
 
 impl Global for Updater {}
 
-/// The app's updater, if it runs from an installed bundle.
+/// The app's updater, if it runs from an install.
 pub fn updater(cx: &App) -> Option<Entity<Updates>> {
     cx.try_global::<Updater>().map(|updater| updater.0.clone())
 }
 
-/// Checks now, as the user asked from the menu.
+/// Checks now, as the user asked.
 pub fn check_now(cx: &mut App) {
     if let Some(updates) = updater(cx) {
         updates.update(cx, |updates, cx| updates.check(true, cx));
@@ -76,13 +85,19 @@ pub fn quit_stopped(cx: &mut App) {
     }
 }
 
-/// Run as the installer: waits, installs, reopens; the exit code.
+/// Where a failed install leaves its reason.
+fn note_path(app: AppId) -> io::Result<PathBuf> {
+    Ok(ely_platform::data_dir(app).map_err(io::Error::other)?.join("updates/failed.txt"))
+}
+
+/// As the macOS installer: waits, installs, reopens; its exit code.
+#[cfg(target_os = "macos")]
 pub fn installer(app: AppId) -> Option<i32> {
     let args: Vec<String> = std::env::args().collect();
     let [_, flag, dmg, bundle, pid] = args.as_slice() else {
         return None;
     };
-    if flag != INSTALL {
+    if flag != ely_platform::install::INSTALL {
         return None;
     }
     let Ok(pid) = pid.parse() else {
@@ -90,22 +105,20 @@ pub fn installer(app: AppId) -> Option<i32> {
         return Some(2);
     };
     ely_platform::install::wait_for_exit(pid);
-    let installed = ely_platform::install::install(Path::new(dmg), Path::new(bundle));
+    let installed = ely_platform::install::install(std::path::Path::new(dmg), std::path::Path::new(bundle));
     if let Err(error) = &installed {
         // To the app's log; the reopened app shows it.
         eprintln!("update: the install failed: {error}");
-        let note = ely_platform::data_dir(app)
-            .map_err(io::Error::other)
-            .and_then(|dir| {
-                std::fs::create_dir_all(dir.join("updates"))?;
-                std::fs::write(dir.join("updates/failed.txt"), error.to_string())
-            });
+        let note = note_path(app).and_then(|path| {
+            std::fs::create_dir_all(path.parent().expect("the note's folder"))?;
+            std::fs::write(path, error.to_string())
+        });
         if let Err(lost) = note {
             eprintln!("update: the failure note was not written: {lost}");
         }
     }
     // Last: the note is written before the app reads it.
-    if let Err(error) = ely_platform::install::reopen(Path::new(bundle)) {
+    if let Err(error) = ely_platform::install::reopen(std::path::Path::new(bundle)) {
         eprintln!("update: the app did not reopen: {error}");
         return Some(1);
     }
@@ -114,22 +127,13 @@ pub fn installer(app: AppId) -> Option<i32> {
 
 /// An installed app's updater; checks at launch if chosen.
 pub(crate) fn install(app: AppId, cx: &mut App) {
-    let bundle = match ely_platform::install::running_bundle() {
-        Ok(Some(bundle)) => bundle,
-        Ok(None) => return log::info!("update: a dev build; no check"),
-        Err(error) => return log::warn!("update: the running app is not found: {error}"),
+    let installed = match ely_platform::install::running(app.slug()) {
+        Ok(Some(installed)) => installed,
+        Ok(None) => return log::info!("update: a dev build or a Nix install; no check"),
+        Err(error) => return log::warn!("update: how this app was installed is unknown: {error}"),
     };
-    match update::install_policy() {
-        Ok(update::InstallPolicy::SelfManaged) => {}
-        Ok(update::InstallPolicy::PackageManager) => {
-            return log::info!("update: the package manager updates this app");
-        }
-        Err(error) => return log::warn!("update: {error:#}"),
-    }
-    let note = ely_platform::data_dir(app)
-        .ok()
-        .map(|dir| dir.join("updates/failed.txt"));
-    let note = note.and_then(|path| {
+    log::info!("update: installed as {installed:?}");
+    let note = note_path(app).ok().and_then(|path| {
         std::fs::read_to_string(&path)
             .ok()
             .inspect(|_| drop(std::fs::remove_file(&path)))
@@ -142,10 +146,11 @@ pub(crate) fn install(app: AppId, cx: &mut App) {
         .detach();
         Updates {
             app,
-            bundle,
+            installed,
             offer: None,
             dismissed: false,
             pending: None,
+            checked: None,
             note,
         }
     });
@@ -158,15 +163,29 @@ pub(crate) fn install(app: AppId, cx: &mut App) {
     }
 }
 
-/// The app's manifest in the newest release, or the test's.
-fn manifest(app: AppId) -> anyhow::Result<String> {
-    match std::env::var("ELY_UPDATE_MANIFEST") {
-        Ok(url) => Ok(url),
-        Err(_) => ely_platform::release::asset_url(LATEST, &format!("{}.json", app.slug())),
-    }
+/// This build's manifest and key, or the test's pair.
+fn manifest(app: AppId) -> anyhow::Result<(String, String)> {
+    let Ok(url) = std::env::var("ELY_UPDATE_MANIFEST") else {
+        return Ok((latest(app), update::KEY.to_string()));
+    };
+    let key = std::env::var("ELY_UPDATE_PUBLIC_KEY").map_err(|_| anyhow::anyhow!("ELY_UPDATE_MANIFEST needs ELY_UPDATE_PUBLIC_KEY"))?;
+    Ok((url, key))
+}
+
+fn latest(app: AppId) -> String {
+    format!("{LATEST}/{}-{}.json", app.slug(), update::platform())
 }
 
 impl Updates {
+    /// A package manager's command for an offered release.
+    pub fn command(&self) -> Option<String> {
+        let Installed::Package(package) = self.installed else {
+            return None;
+        };
+        let (release, _) = self.offer.as_ref()?;
+        Some(package.command(self.app.slug(), &release.version))
+    }
+
     /// Asks for a newer release; `asked` reports every outcome.
     fn check(&mut self, asked: bool, cx: &mut Context<Self>) {
         // A download under way or done stays the offer.
@@ -181,32 +200,42 @@ impl Updates {
             }
             return;
         }
+        self.checked = Some(Checked::Asking);
+        cx.notify();
         let app = self.app;
         let current =
             semver::Version::parse(env!("CARGO_PKG_VERSION")).expect("the build's version");
         // The lookup is a request too: off the window's thread.
-        let checked = cx.background_spawn(async move { manifest(app).and_then(|url| update::check(&current, &url)) });
+        let checked = cx.background_spawn(async move { manifest(app).and_then(|(url, key)| update::check(&current, &url, &key)) });
         cx.spawn(async move |this, cx| {
             let checked = checked.await;
-            this.update(cx, |this, cx| match checked {
-                Ok(Check::Available(_))
-                    if matches!(
-                        this.offer,
-                        Some((_, Phase::Fetching(_) | Phase::Fetched(_)))
-                    ) => {}
-                Ok(Check::Available(release)) => {
-                    (this.offer, this.dismissed) = (Some((release, Phase::Offered)), false);
-                    cx.notify();
-                }
-                Ok(Check::Current) if asked => cx.emit(UpdateNews::Latest),
-                // At launch a failure only logs; offline is normal.
-                Err(error) if asked => cx.emit(UpdateNews::Failed(format!("{error:#}"))),
-                Err(error) => log::warn!("update: the launch check failed: {error:#}"),
-                Ok(Check::Current) => log::info!("update: nothing newer at launch"),
-            })
-            .ok();
+            this.update(cx, |this, cx| this.checked(checked, asked, cx)).ok();
         })
         .detach();
+    }
+
+    fn checked(&mut self, checked: anyhow::Result<Check>, asked: bool, cx: &mut Context<Self>) {
+        self.checked = Some(match &checked {
+            Ok(Check::Available(release)) => Checked::Newer(release.version.clone()),
+            Ok(Check::Current) => Checked::Latest,
+            Err(error) => Checked::Failed(format!("{error:#}")),
+        });
+        match checked {
+            Ok(Check::Available(_))
+                if matches!(
+                    self.offer,
+                    Some((_, Phase::Fetching(_) | Phase::Fetched(_)))
+                ) => {}
+            Ok(Check::Available(release)) => {
+                (self.offer, self.dismissed) = (Some((release, Phase::Offered)), false);
+            }
+            Ok(Check::Current) if asked => cx.emit(UpdateNews::Latest),
+            // At launch a failure only logs; offline is normal.
+            Err(error) if asked => cx.emit(UpdateNews::Failed(format!("{error:#}"))),
+            Err(error) => log::warn!("update: the launch check failed: {error:#}"),
+            Ok(Check::Current) => log::info!("update: nothing newer at launch"),
+        }
+        cx.notify();
     }
 
     fn later(&mut self, cx: &mut Context<Self>) {
@@ -215,6 +244,9 @@ impl Updates {
     }
 
     fn download(&mut self, cx: &mut Context<Self>) {
+        if matches!(self.installed, Installed::Package(_)) {
+            return;
+        }
         let Some((release, phase)) = self
             .offer
             .as_mut()
@@ -305,13 +337,7 @@ impl Updates {
         let Some(file) = self.pending.take() else {
             return;
         };
-        let started = std::env::current_exe().and_then(|exe| {
-            let mut command = Command::new(exe);
-            command
-                .arg(INSTALL)
-                .arg(&file)
-                .arg(&self.bundle)
-                .arg(std::process::id().to_string());
+        let started = note_path(self.app).and_then(|note| {
             // Its words go to the app's log.
             let log = ely_platform::logging::path()
                 .map(|path| std::fs::OpenOptions::new().append(true).open(path));
@@ -319,13 +345,7 @@ impl Updates {
                 Some(file) => Stdio::from(file?),
                 None => Stdio::null(),
             };
-            command
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(said);
-            #[cfg(unix)]
-            std::os::unix::process::CommandExt::process_group(&mut command, 0);
-            command.spawn()
+            ely_platform::install::after_quit(&file, &self.installed, std::process::id(), &note, said)
         });
         match started {
             Ok(_) => log::info!("update: installs after this quit"),
@@ -334,114 +354,8 @@ impl Updates {
     }
 }
 
-impl Render for Updates {
-    /// The bar under the title while a release is offered.
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let this = cx.entity();
-        let Some((release, phase)) = self.offer.as_ref().filter(|_| !self.dismissed) else {
-            return div().into_any_element();
-        };
-        let state = match phase {
-            Phase::Offered => UpdateState::Available,
-            Phase::Fetching(done) => UpdateState::Downloading(*done),
-            Phase::Fetched(_) => UpdateState::Ready,
-        };
-        let (download, restart, later) = (this.clone(), this.clone(), this);
-        let banner = UpdateBanner::new("update-banner", release.version.to_string(), state)
-            .on_download(move |_, cx| download.update(cx, |this, cx| this.download(cx)))
-            .on_later(move |_, cx| later.update(cx, |this, cx| this.later(cx)));
-        match phase {
-            Phase::Fetched(_) => banner
-                .on_restart(move |_, cx| restart.update(cx, |this, cx| this.restart(cx)))
-                .into_any_element(),
-            _ => banner.into_any_element(),
-        }
-    }
-}
-
-/// An offered release, for window tests.
 #[cfg(test)]
-pub(crate) fn offer_for_tests(cx: &mut App) {
-    let release = Release {
-        version: semver::Version::new(9, 0, 0),
-        url: "https://example.test/9.dmg".into(),
-        sha256: String::new(),
-    };
-    let updates = cx.new(|_| Updates {
-        app: AppId::Mark,
-        bundle: PathBuf::new(),
-        offer: Some((release, Phase::Offered)),
-        dismissed: false,
-        pending: None,
-        note: None,
-    });
-    cx.set_global(Updater(updates));
-}
+pub(crate) use view::offer_for_tests;
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn release(version: &str, url: &str) -> Release {
-        Release {
-            version: semver::Version::parse(version).expect("a version"),
-            url: url.into(),
-            sha256: String::new(),
-        }
-    }
-
-    #[gpui::test]
-    fn a_check_brings_back_a_dismissed_download(cx: &mut gpui::TestAppContext) {
-        let updates = cx.new(|_| Updates {
-            app: AppId::Tree,
-            bundle: PathBuf::from("/Applications/ElyTree.app"),
-            offer: Some((
-                release("9.0.0", "https://b"),
-                Phase::Fetched(PathBuf::from("B.dmg")),
-            )),
-            dismissed: true,
-            pending: None,
-            note: None,
-        });
-        updates.update(cx, |updates, cx| updates.check(true, cx));
-        updates.read_with(cx, |updates, _| {
-            assert!(!updates.dismissed, "the bar shows again");
-            assert_eq!(
-                updates.offer.as_ref().map(|(_, phase)| phase.clone()),
-                Some(Phase::Fetched(PathBuf::from("B.dmg")))
-            );
-        });
-    }
-
-    #[gpui::test]
-    fn a_download_for_an_older_offer_is_dropped(cx: &mut gpui::TestAppContext) {
-        let updates = cx.new(|_| Updates {
-            app: AppId::Tree,
-            bundle: PathBuf::from("/Applications/ElyTree.app"),
-            offer: Some((release("9.0.0", "https://b"), Phase::Fetching(0.5))),
-            dismissed: false,
-            pending: None,
-            note: None,
-        });
-        updates.update(cx, |updates, cx| {
-            updates.fetched(
-                &release("8.0.0", "https://a"),
-                Ok(PathBuf::from("A.dmg")),
-                cx,
-            );
-            assert_eq!(
-                updates.offer.as_ref().map(|(_, phase)| phase.clone()),
-                Some(Phase::Fetching(0.5))
-            );
-            updates.fetched(
-                &release("9.0.0", "https://b"),
-                Ok(PathBuf::from("B.dmg")),
-                cx,
-            );
-            assert_eq!(
-                updates.offer.as_ref().map(|(_, phase)| phase.clone()),
-                Some(Phase::Fetched(PathBuf::from("B.dmg")))
-            );
-        });
-    }
-}
+mod tests;

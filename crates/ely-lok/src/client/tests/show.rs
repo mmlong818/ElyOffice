@@ -103,6 +103,24 @@ fn size_layout_master_and_theme_change_in_one_step() {
     );
 }
 
+/// Issue #2: more masters than slides, a slide hidden.
+#[test]
+fn the_master_view_lists_its_masters() {
+    if install().is_none() {
+        eprintln!("SKIP: no pinned LOK build");
+        return;
+    }
+    let (_dir, mut worker, doc) = open_deck();
+    worker.run(&doc, "slide.hide", &[]).expect("hides One");
+    worker.run(&doc, "master.edit", &[]).expect("the master view");
+    worker.run(&doc, "master.insert", &[]).expect("a master");
+    worker.run(&doc, "master.insert", &[]).expect("another");
+    let masters = design(&mut worker, &doc).masters;
+    assert_eq!(masters.len(), 3, "more masters than slides");
+    let shown: Vec<(String, bool)> = masters.into_iter().map(|name| (name, true)).collect();
+    assert_eq!(slides(&mut worker, &doc), shown, "masters, all shown");
+}
+
 #[test]
 fn a_master_edit_shows_on_its_slides() {
     if install().is_none() {

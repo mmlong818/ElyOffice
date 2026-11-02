@@ -16,15 +16,27 @@ mod boxes;
 mod branching;
 mod diffs;
 mod flows;
+mod head;
 mod history;
 mod place_flows;
 mod places;
 mod cleaning;
+mod narrow;
 mod recovery;
 mod window;
 
 pub(crate) fn git() -> Git {
-    Git::find().expect("the bundled Git; run scripts/build-git.sh")
+    static ALONE: std::sync::Once = std::sync::Once::new();
+    // Tests read no machine Git settings.
+    ALONE.call_once(|| {
+        let none = std::env::temp_dir().join("ely-tree-tests-no-gitconfig");
+        // SAFETY: once, before any test runs Git.
+        unsafe {
+            std::env::set_var("GIT_CONFIG_NOSYSTEM", "1");
+            std::env::set_var("GIT_CONFIG_GLOBAL", none);
+        }
+    });
+    Git::find().expect("Ely's Git (scripts/build-git.sh) or ELY_GIT at a Git 2.40+")
 }
 
 /// Runs Git with a test identity and no signing.
@@ -43,10 +55,28 @@ pub(crate) fn sh(dir: &Path, args: &[&str]) -> String {
     String::from_utf8(git().run(dir, &all).expect("git runs")).expect("utf-8")
 }
 
+/// Git's connection; a Git that never starts fails.
+pub(crate) fn connected(silent: &std::net::TcpListener) -> std::net::TcpStream {
+    silent.set_nonblocking(true).expect("nonblocking");
+    let start = std::time::Instant::now();
+    loop {
+        match silent.accept() {
+            Ok((stream, _)) => return stream,
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                assert!(start.elapsed() < std::time::Duration::from_secs(30), "Git never connected");
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            Err(error) => panic!("accept: {error}"),
+        }
+    }
+}
+
 /// A repository with one commit of `a.txt`.
 pub(crate) fn committed(dir: &Path) -> PathBuf {
     let root = dir.join("work");
     repo::init(&git(), &root).expect("init");
+    sh(&root, &["config", "user.name", "Ely"]);
+    sh(&root, &["config", "user.email", "ely@example.com"]);
     std::fs::write(root.join("a.txt"), "one\ntwo\n").expect("writes");
     sh(&root, &["add", "a.txt"]);
     sh(&root, &["commit", "-q", "-m", "first"]);
@@ -104,7 +134,7 @@ fn the_work_tree_reads_into_five_sections() {
     );
     std::fs::write(root.join("a.txt"), "one\ntwo\nthree\n").expect("writes");
     sh(&root, &["mv", "b.txt", "c.txt"]);
-    std::fs::write(root.join("*.txt"), "\0binary").expect("writes");
+    std::fs::write(root.join("[x].txt"), "\0binary").expect("writes");
     std::fs::write(root.join(".gitignore"), "build/\n").expect("writes");
     std::fs::create_dir(root.join("build")).expect("a folder");
     std::fs::write(root.join("build/out"), "x").expect("writes");
@@ -126,8 +156,8 @@ fn the_work_tree_reads_into_five_sections() {
     assert_eq!(
         paths(&untracked),
         [
-            ("*.txt", GitStatus::Untracked, None),
-            (".gitignore", GitStatus::Untracked, None)
+            (".gitignore", GitStatus::Untracked, None),
+            ("[x].txt", GitStatus::Untracked, None)
         ]
     );
     assert_eq!(
@@ -169,9 +199,9 @@ pub(crate) fn entry(root: &Path, path: &str) -> status::Entry {
 fn writes_stage_unstage_and_discard_one_literal_path() {
     let dir = tempfile::tempdir().expect("a temp dir");
     let root = committed(dir.path());
-    std::fs::write(root.join("*.txt"), "star\n").expect("writes");
+    std::fs::write(root.join("[x].txt"), "star\n").expect("writes");
     std::fs::write(root.join("x.txt"), "x\n").expect("writes");
-    write(&root, Write::Stage(entry(&root, "*.txt")));
+    write(&root, Write::Stage(entry(&root, "[x].txt")));
     let staged = |root: &Path| {
         status::read(&git(), root)
             .expect("reads")
@@ -179,8 +209,8 @@ fn writes_stage_unstage_and_discard_one_literal_path() {
             .into_keys()
             .collect::<Vec<_>>()
     };
-    assert_eq!(staged(&root), ["*.txt"], "the star is no pattern");
-    write(&root, Write::Unstage(entry(&root, "*.txt")));
+    assert_eq!(staged(&root), ["[x].txt"], "the brackets are no pattern");
+    write(&root, Write::Unstage(entry(&root, "[x].txt")));
     assert!(staged(&root).is_empty());
     std::fs::write(root.join("a.txt"), "changed\n").expect("writes");
     write(&root, Write::Discard(entry(&root, "a.txt")));
@@ -188,9 +218,9 @@ fn writes_stage_unstage_and_discard_one_literal_path() {
         std::fs::read_to_string(root.join("a.txt")).expect("reads"),
         "one\ntwo\n"
     );
-    write(&root, Write::Discard(entry(&root, "*.txt")));
+    write(&root, Write::Discard(entry(&root, "[x].txt")));
     assert!(
-        !root.join("*.txt").exists() && root.join("x.txt").exists(),
+        !root.join("[x].txt").exists() && root.join("x.txt").exists(),
         "only that file goes"
     );
     std::fs::write(root.join("a.txt"), "again\n").expect("writes");
@@ -267,7 +297,7 @@ fn a_stopped_clone_ends_and_leaves_nothing() {
             let _ = said.send(line.to_string());
         })
     });
-    let _held = silent.accept().expect("Git connects");
+    let _held = connected(&silent);
     let first = heard
         .recv_timeout(std::time::Duration::from_secs(5))
         .expect("a line while waiting");

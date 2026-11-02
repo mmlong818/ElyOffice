@@ -4,7 +4,7 @@
 
 ## 自有代码
 
-Ely Office 的自有代码以 AGPL-3.0-or-later 发布，全文在仓库根的 `LICENSE`，并随每个应用包放在 `Resources/Licenses/LICENSE`。组件库 Ely-GPUI-Components 保留其 MIT/Apache-2.0。
+本 fork 保留 fork 基线的 AGPL-3.0-or-later 根目录 `LICENSE`，Cargo workspace/package 许可元数据也延续该声明。本次合并的上游 v0.1.13 MIT 来源代码及其 notice 保留原有来源；tag 携带的完整 MIT notice（含 `Copyright (c) 2026 Yang Zhang`）单独原样保留在根目录 `LICENSE-UPSTREAM-MIT`。两份 notice 分别保留其来源；这不表示整个合并仓库可任选 MIT 或 AGPL，也不改动源文件已有的许可头与第三方声明。`packaging/licenses.sh` 会将两份 notice 都放入各应用的许可目录：macOS 为 `Contents/Resources/Licenses/`，Windows/Linux stage 为 `licenses/`。本轮仅做脚本语法检查与源码调用路径审查，未打包发行物。随包的引擎不因这些 notice 改许可：ElyPDF 链接的 MuPDF 是 AGPL-3.0；ElyDoc、ElyTable、ElyShow 的 LibreOffice 仍为 MPL-2.0 等；ElyTree 带的 Git 仍为 GPL-2.0。组件库 Ely-GPUI-Components 保留其 MIT/Apache-2.0。
 
 ## 每个发行版附带
 
@@ -12,7 +12,7 @@ Ely Office 的自有代码以 AGPL-3.0-or-later 发布，全文在仓库根的 `
 | --- | --- | --- |
 | `ElyOffice-<版本>-source.tar.gz` | 自有源码、`Cargo.lock`、`rust-toolchain.toml`、上游补丁（`patches/libreoffice`、`patches/mupdf`）、构建与取上游的脚本（各上游钉在提交，脚本里写明地址与散列）、测试、文档 | `packaging/macos/release.sh` |
 | `ElyOffice-<版本>-upstream-source.tar.gz` | 实际编译的 MuPDF 源码（钉住的提交加我们的补丁，AGPL）与随包 Git 的源码（v2.56.0，GPLv2） | 同上；`tests/scripts/release-macos.sh` 核对其中是打过补丁的 MuPDF |
-| 各应用包 `Resources/Licenses/` | Ely 的 AGPL 全文；`rust-crates.txt`（链进该应用各二进制的全部 crate 与其许可文件，无许可文件的取标准文本并写明作者）；所带引擎的许可与通知（见下） | `packaging/licenses.sh`，缺任何一份即打包失败 |
+| 各应用许可目录（macOS: `Contents/Resources/Licenses/`; Windows/Linux stage: `licenses/`） | fork 根目录 AGPL notice 与上游 v0.1.13 MIT notice；`rust-crates.txt`（链进该应用各二进制的全部 crate 与其许可文件，无许可文件的取标准文本并写明作者）；所带引擎的许可与通知（见下） | `packaging/licenses.sh`，缺任何一份即打包失败 |
 
 ## 第三方，按应用
 
@@ -32,5 +32,5 @@ Ely Office 的自有代码以 AGPL-3.0-or-later 发布，全文在仓库根的 `
 ## 未尽之处
 
 - LibreOffice 的整份源码（数 GB）不随发行，只给钉住的上游提交与我们的补丁；内核构建时下载的外部库（`external/tarballs`）是否需随包提供源码，待法律审查。
-- 第二批的 MailCore 2 与 ElyAgent 依赖随第二批补上。
+- ElyAgent 的依赖随第二批补上；ElyMail 的 crate 由 `rust-crates.txt` 收集。
 - Windows 与 Linux 的打包脚本未在本机运行，其许可收集未验证。

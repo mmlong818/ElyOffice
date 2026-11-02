@@ -17,7 +17,10 @@ use crate::{Doc, Events, Rect, Worker};
 mod borders;
 mod clip;
 mod clock;
+mod edge;
 mod formula;
+mod geom;
+pub use geom::Geom;
 mod handles;
 mod ime;
 mod input;
@@ -30,6 +33,7 @@ mod zoom;
 pub use zoom::{ZOOM_STEPS, Zoomed};
 mod scroll;
 mod sheet;
+mod text;
 pub use input::{CONTEXT, Copy, Cut, Paste, init};
 pub use off::read_off;
 pub use render::{SCHEME, paper};
@@ -37,31 +41,6 @@ mod turn;
 pub use turn::notch;
 
 pub(crate) use crate::{TILE_TWIPS, TWIPS_PER_PIXEL};
-
-/// Document/view conversion under one zoom and DPI (LOK-04).
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Geom {
-    pub zoom: f32,
-    pub dpi: f32,
-}
-
-impl Geom {
-    /// Twips to logical pixels; GPUI scales to devices.
-    pub fn px_of(&self, twips: i32) -> f32 {
-        twips as f32 * self.zoom / TWIPS_PER_PIXEL
-    }
-
-    /// Logical pixels to twips.
-    pub fn twips_of(&self, pixels: f32) -> i32 {
-        (pixels * TWIPS_PER_PIXEL / self.zoom).round() as i32
-    }
-
-    /// Texture pixels for one tile edge at this DPI.
-    fn tile_pixels(&self) -> u32 {
-        (self.px_of(TILE_TWIPS) * self.dpi).round().max(1.0) as u32
-    }
-}
-
 /// An input request the engine refused; apps show it.
 #[derive(Clone, Debug)]
 pub struct LokError(pub String);
@@ -119,10 +98,12 @@ pub struct LokView {
     /// The event watch; it ends with the view.
     watching: Option<Task<()>>,
     cursor: Option<Rect>,
+    text: text::TextGeometry,
     cursor_visible: bool,
     pointer: gpui::CursorStyle,
     selection: Vec<Rect>,
     cell: crate::Cell,
+    completion: formula::Completion,
     /// Whether the kernel was told Ely's scheme.
     lit: bool,
     /// The zoom follows the viewport so a page fits.
@@ -134,6 +115,7 @@ pub struct LokView {
     picked: usize,
     marked: Option<ime::Marked>,
     dragging: bool,
+    edge: edge::Edge,
     grip: Option<handles::Grip>,
     borders: borders::Borders,
     handle_size: Pixels,
@@ -146,6 +128,8 @@ pub struct LokView {
     right_at: Option<Point<Pixels>>,
     fonts: Vec<String>,
     a11y: crate::A11y,
+    /// What readers call the view.
+    name: gpui::SharedString,
     tabs: Vec<i32>,
 }
 
@@ -214,10 +198,12 @@ impl LokView {
             on_screen: Vec::new(),
             copied: None,
             cursor: None,
+            text: text::TextGeometry::default(),
             cursor_visible: true,
             pointer: gpui::CursorStyle::Arrow,
             selection: Vec::new(),
             cell: crate::Cell::default(),
+            completion: formula::Completion::default(),
             lit: false,
             fit: false,
             turning: None,
@@ -225,6 +211,7 @@ impl LokView {
             picked: 0,
             marked: None,
             dragging: false,
+            edge: Default::default(),
             grip: None,
             borders: Default::default(),
             handle_size: px(6.0),
@@ -236,6 +223,7 @@ impl LokView {
             right_at: None,
             fonts: Vec::new(),
             a11y: crate::A11y::default(),
+            name: gpui::SharedString::default(),
             tabs: Vec::new(),
             watching: None,
         };
@@ -348,7 +336,8 @@ impl LokView {
     }
 
     /// Takes the cursor; drops the tiles a batch dirties (LOK-03).
-    fn apply_batch(&mut self, batch: Events, measured: Option<Measured>, cx: &mut Context<Self>) {
+    fn apply_batch(&mut self, mut batch: Events, measured: Option<Measured>, cx: &mut Context<Self>) {
+        let moved = self.read_text(&mut batch);
         // What the view shows is the document at this revision.
         self.seen_revision(batch.revision);
         match measured {
@@ -363,7 +352,7 @@ impl LokView {
             Some(Err(error)) => log::warn!("lok: document size lost: {error}"),
             None => {}
         }
-        if batch.cursor != self.cursor {
+        if moved {
             self.moves += 1;
             // A moved cursor stays in view, but not mid-drag.
             if self.viewport.1 > 0.0
@@ -392,6 +381,7 @@ impl LokView {
             self.picked = 0;
         }
         self.cell = batch.cell;
+        self.completion.reported(batch.revision);
         self.graphic = batch.graphic;
         self.read_borders(batch.table, batch.revision);
         self.review = batch.review;

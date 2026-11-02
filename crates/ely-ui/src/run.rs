@@ -4,7 +4,7 @@ use ely_gpui_component::Assets;
 use ely_gpui_component::theme::ActiveTheme;
 use ely_platform::{AppId, env, graphics, instance::Start, logging, startup};
 use gpui::{
-    App, Bounds, Entity, Render, TitlebarOptions, Window, WindowBounds, WindowDecorations,
+    AnyWindowHandle, App, Bounds, Entity, Render, TitlebarOptions, Window, WindowBounds, WindowDecorations,
     WindowOptions, px, size,
 };
 
@@ -16,19 +16,25 @@ pub fn run<V: Render>(
     root: impl FnOnce(AppId, &mut Window, &mut App) -> Entity<V> + 'static,
 ) {
     // As the installer after an update, nothing else runs.
+    #[cfg(target_os = "macos")]
     if let Some(code) = crate::updates::installer(app) {
         std::process::exit(code);
     }
     let files = crate::opening::launch_args().unwrap_or_else(|error| startup::fail(app, &format!("a launch argument has no place: {error}")));
+    // Before any lock is taken in the old folder.
+    let (moved, admitted) = ely_platform::folder::at_start().unwrap_or_else(|error| startup::fail(app, &format!("the data folder is not ready: {error}")));
     // Before the log: a second copy must not trim it.
     let door = match ely_platform::instance::hold(app, &files) {
         Ok(Start::First(door)) => door,
         Ok(Start::Handed) => std::process::exit(0),
         Err(error) => startup::fail(app, &format!("{error}")),
     };
+    // Later starts wait until this lock is held.
+    drop(admitted);
     if let Err(error) = logging::init(app) {
         startup::fail(app, &format!("logging did not start: {error:#}"));
     }
+    moved.log();
     if let Err(error) = graphics::check() {
         startup::fail(app, &format!("{error:#}"));
     }
@@ -37,6 +43,10 @@ pub fn run<V: Render>(
     let smoke = Smoke::from_env();
     let application = gpui_platform::application().with_assets(Assets);
     let handed = crate::opening::listen(&application, files, door).unwrap_or_else(|error| startup::fail(app, &format!("the door for other copies did not open: {error}")));
+    // The Dock icon brings back a window the tray kept.
+    application.on_reopen(|cx| {
+        crate::tray::show_main(cx);
+    });
     application.run(move |cx: &mut App| {
         let hands = crate::opening::keep(handed, cx);
         open(app, smoke, root, hands, cx)
@@ -44,7 +54,7 @@ pub fn run<V: Render>(
 }
 
 #[derive(Clone, Copy, PartialEq)]
-enum Smoke {
+pub(crate) enum Smoke {
     Off,
     Once,
     Hold,
@@ -75,6 +85,8 @@ fn open<V: Render>(
     hands: crate::opening::Hands,
     cx: &mut App,
 ) {
+    // Names the app's system notifications.
+    cx.set_app_identity(&format!("ElyOffice.{}", app.name()), app.name());
     if let Err(error) = ely_gpui_component::init(cx) {
         startup::fail(app, &format!("the components did not start: {error:#}"));
     }
@@ -90,6 +102,40 @@ fn open<V: Render>(
     crate::commands::bind_keys(cx);
     crate::commands::bind_quit(cx);
     cx.on_action(move |_: &crate::commands::OpenSettings, cx| crate::settings::open(app, cx));
+    let main = match main_window(app, smoke, root, cx) {
+        Ok(window) => window,
+        Err(error) => startup::fail(app, &format!("the window did not open: {error:#}")),
+    };
+    crate::tray::set_main(app, main, cx);
+    crate::opening::home(app, hands, cx);
+    // Settings alone would hold the lock yet open nothing.
+    cx.on_window_closed(move |cx, closed| {
+        log::info!("ui: a window closed, {} open", cx.windows().len());
+        if crate::tray::closed(closed, cx) {
+            cx.quit();
+        }
+    })
+    .detach();
+    if smoke == Smoke::Off {
+        cx.activate(true);
+    }
+    // Benchmarks only: idle apps do nothing (PERF-02).
+    if ely_platform::env::flag("ELY_STALLS") == Some(true) {
+        watch_stalls(cx);
+    }
+    if ely_platform::env::flag("ELY_FRAMES") == Some(true) {
+        crate::frames::watch(cx);
+    }
+    log::info!("{} window open", app.name());
+}
+
+/// Opens the main window where it last was.
+pub(crate) fn main_window<V: Render>(
+    app: AppId,
+    smoke: Smoke,
+    root: impl FnOnce(AppId, &mut Window, &mut App) -> Entity<V> + 'static,
+    cx: &mut App,
+) -> anyhow::Result<AnyWindowHandle> {
     let mut options = WindowOptions {
         focus: smoke == Smoke::Off,
         inactive_frame_interval: (smoke != Smoke::Hold).then_some(Duration::from_millis(250)),
@@ -109,27 +155,8 @@ fn open<V: Render>(
         theme::follow_system(window);
         crate::settings::follow_frame(app, window, cx);
         root(app, window, cx)
-    });
-    let main: gpui::AnyWindowHandle = match opened {
-        Ok(window) => window.into(),
-        Err(error) => startup::fail(app, &format!("the window did not open: {error:#}")),
-    };
-    crate::opening::home(hands, main, cx);
-    // Settings alone would hold the lock yet open nothing.
-    cx.on_window_closed(move |cx, closed| {
-        if closed == main.window_id() {
-            cx.quit();
-        }
-    })
-    .detach();
-    if smoke == Smoke::Off {
-        cx.activate(true);
-    }
-    // Benchmarks only: idle apps do nothing (PERF-02).
-    if ely_platform::env::flag("ELY_STALLS") == Some(true) {
-        watch_stalls(cx);
-    }
-    log::info!("{} window open", app.name());
+    })?;
+    Ok(opened.into())
 }
 
 /// Logs each main-thread stretch busy past 100 ms.
@@ -149,13 +176,14 @@ fn watch_stalls(cx: &mut App) {
 }
 
 /// A window of `app`, `size` large, with Ely's title bar.
-pub(crate) fn window_options(app: AppId, size: gpui::Size<gpui::Pixels>, cx: &App) -> WindowOptions {
+pub fn window_options(app: AppId, size: gpui::Size<gpui::Pixels>, cx: &App) -> WindowOptions {
     WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(Bounds::centered(None, size, cx))),
         titlebar: Some(TitlebarOptions {
             title: Some(app.name().into()),
             appears_transparent: true,
-            traffic_light_position: Some(cx.theme().traffic_light_origin()),
+            // AppKit answers on the main thread; tests run off it.
+            traffic_light_position: (!cx.is_test()).then(|| cx.theme().traffic_light_origin()),
         }),
         window_decorations: Some(WindowDecorations::Client),
         window_min_size: Some(gpui::size(px(640.0), px(420.0))),

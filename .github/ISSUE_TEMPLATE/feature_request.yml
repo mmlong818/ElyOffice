@@ -1,0 +1,43 @@
+name: Feature Request
+description: Something new, or something that should do more.
+title: "[FEATURE REQUEST] "
+labels: [enhancement]
+body:
+  - type: dropdown
+    id: subject
+    attributes:
+      label: App
+      options:
+        - ElyOffice
+        - ElyDoc
+        - ElyTable
+        - ElyShow
+        - ElyPDF
+        - ElyMail
+        - ElyMark
+        - ElyTree
+    validations:
+      required: false
+  - type: textarea
+    id: use
+    attributes:
+      label: What it is for
+      description: The problem, and the moment you need it in.
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: How it should work
+  - type: textarea
+    id: references
+    attributes:
+      label: References
+      description: Links or screenshots of it elsewhere.
+  - type: checkboxes
+    id: searched
+    attributes:
+      label: Checked
+      options:
+        - label: I searched the open issues for the same request.
+          required: true

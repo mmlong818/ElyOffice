@@ -1,0 +1,951 @@
+Calc: a formula naming what Calc lacks keeps the file's result
+
+- XLSX and ODS import mark a formula cell holding an unknown name
+  (ocBad) and a loaded result: its result stands, through the hard
+  recalc on load too, so its dependents use it and a save writes it
+  back (Ely #D-02; PRD §288). Numbers (whole text only), booleans,
+  strings including empty ones, and arrays whose every element is
+  there and sound: XLSX buffers each array cell's own value before it
+  becomes a plain cell, ODS fills the origin's matrix from its members.
+  A kept matrix types each element itself (ScMatRef), so a TRUE beside
+  a 41 stays TRUE. A changed input (Notify) or SetDirty (an edit, a reference
+  update) ends that; it then recalcs to #NAME?. The every-change
+  broadcast ends it only once loading is done: volatile cells hear
+  the load too.
+- The mark survives placing a cell, an undo of a reference update and
+  a copied sheet; the clipboard drops it.
+- ODS writes a kept empty string result, members of a kept matrix too,
+  and reads it back whatever the attribute order; an office:value that
+  is no whole number is no result.
+- An unknown function keeps its spelling instead of being lowercased,
+  so the formula written back names it as read.
+- .uno:KeptResults lists such cells with their sheet.
+
+diff --git a/sc/inc/formulacell.hxx b/sc/inc/formulacell.hxx
+--- a/sc/inc/formulacell.hxx
++++ b/sc/inc/formulacell.hxx
+@@ -137,6 +137,7 @@ private:
+     bool            mbIsExtRef       : 1; // has references in ScExternalRefManager; never cleared after set
+     bool            mbSeenInPath     : 1; // For detecting cycle involving formula groups and singleton formulacells
+     bool            mbFreeFlying     : 1; // Cell is out of sheets interpreted, like in conditional format
++    bool            mbKeptResult     : 1 = false; // File's result stands: unknown names, inputs unchanged
+     ScMatrixMode    cMatrixFlag      : 8;
+     sal_uInt16      nSeenInIteration : 16;   // Iteration cycle in which the cell was last encountered
+     SvNumFormatType nFormatType      : 16;
+@@ -246,6 +247,18 @@ public:
+ 
+     bool GetDirty() const { return bDirty; }
+     SC_DLLPUBLIC void ResetDirty();
++    /// Keep the loaded result: an unknown function, inputs unchanged.
++    void SetKeptResult( bool bLogical = false )
++    {
++        mbKeptResult = true;
++        if (bLogical)
++            nFormatType = SvNumFormatType::LOGICAL;
++    }
++    bool IsKeptResult() const { return mbKeptResult; }
++    /// Calc lacks a function here or in a name used.
++    SC_DLLPUBLIC static bool HasUnknownFunction( const ScDocument& rDoc, const ScTokenArray& rCode );
++    /// Takes over another cell's kept result.
++    void KeepResultOf( const ScFormulaCell& rCell );
+     bool NeedsListening() const { return bNeedListening; }
+     void SetNeedsListening( bool bVar );
+     void SetNeedsDirty( bool bVar );
+@@ -409,7 +422,7 @@ public:
+ 
+     OUString GetHybridFormula() const;
+ 
+-    void SetResultMatrix( SCCOL nCols, SCROW nRows, const ScConstMatrixRef& pMat, const formula::FormulaToken* pUL );
++    SC_DLLPUBLIC void SetResultMatrix( SCCOL nCols, SCROW nRows, const ScConstMatrixRef& pMat, const formula::FormulaToken* pUL );
+ 
+     /** For import only: set a double result.
+         Use this instead of SetHybridDouble() if there is no (temporary)
+diff --git a/sc/source/core/data/column.cxx b/sc/source/core/data/column.cxx
+--- a/sc/source/core/data/column.cxx
++++ b/sc/source/core/data/column.cxx
+@@ -2102,7 +2102,7 @@ class UpdateRefOnNonCopy
+ 
+             mbUpdated = true;
+ 
+-            fillUndoDoc(aOldPos, rGroup.mnLength, aOldCode);
++            fillUndoDoc(aOldPos, rGroup.mnLength, aOldCode, rGroup.mpCells);
+         }
+ 
+         if (aRes.mbValueChanged)
+@@ -2193,10 +2193,10 @@ class UpdateRefOnNonCopy
+         // Move from clipboard is Cut&Paste, then do not copy the original
+         // positions' formula cells to the Undo document.
+         if (!mbClipboardSource || !bCellMoved)
+-            fillUndoDoc(aOldPos, rGroup.mnLength, aOldCode);
++            fillUndoDoc(aOldPos, rGroup.mnLength, aOldCode, rGroup.mpCells);
+     }
+ 
+-    void fillUndoDoc( const ScAddress& rOldPos, SCROW nLength, const ScTokenArray& rOldCode )
++    void fillUndoDoc( const ScAddress& rOldPos, SCROW nLength, const ScTokenArray& rOldCode, ScFormulaCell* const* ppCells )
+     {
+         if (!mpUndoDoc || nLength <= 0)
+             return;
+@@ -2204,6 +2204,9 @@ class UpdateRefOnNonCopy
+         // Insert the old formula group into the undo document.
+         ScAddress aUndoPos = rOldPos;
+         ScFormulaCell* pFC = new ScFormulaCell(*mpUndoDoc, aUndoPos, rOldCode.Clone());
++        // Undo needs the kept result: nothing else holds it.
++        if (ppCells[0]->IsKeptResult())
++            pFC->KeepResultOf(*ppCells[0]);
+ 
+         if (nLength == 1)
+         {
+@@ -2219,6 +2222,8 @@ class UpdateRefOnNonCopy
+         for (SCROW i = 1; i < nLength; ++i, aUndoPos.IncRow())
+         {
+             pFC = new ScFormulaCell(*mpUndoDoc, aUndoPos, xGroup);
++            if (ppCells[i]->IsKeptResult())
++                pFC->KeepResultOf(*ppCells[i]);
+             aCells.push_back(pFC);
+         }
+ 
+diff --git a/sc/source/core/data/column3.cxx b/sc/source/core/data/column3.cxx
+--- a/sc/source/core/data/column3.cxx
++++ b/sc/source/core/data/column3.cxx
+@@ -752,7 +752,13 @@ void ScColumn::AttachNewFormulaCell(
+     }
+ 
+     if (!rDocument.IsCalcingAfterLoad())
++    {
++        // Placing a cell changes none of its inputs.
++        const bool bKept = rCell.IsKeptResult();
+         rCell.SetDirty();
++        if (bKept)
++            rCell.SetKeptResult();
++    }
+ }
+ 
+ void ScColumn::AttachNewFormulaCells( const sc::CellStoreType::position_type& aPos, size_t nLength,
+@@ -820,7 +826,13 @@ void ScColumn::AttachNewFormulaCells( const sc::CellStoreType::position_type& aP
+         if (!bShared)
+             (*pp)->StartListeningTo(aCxt);
+         if (!rDocument.IsCalcingAfterLoad())
++        {
++            // Placing a cell changes none of its inputs.
++            const bool bKept = (*pp)->IsKeptResult();
+             (*pp)->SetDirty();
++            if (bKept)
++                (*pp)->SetKeptResult();
++        }
+     }
+ }
+ 
+diff --git a/sc/source/core/data/documen2.cxx b/sc/source/core/data/documen2.cxx
+--- a/sc/source/core/data/documen2.cxx
++++ b/sc/source/core/data/documen2.cxx
+@@ -79,6 +79,7 @@
+ #include <clipparam.hxx>
+ #include <macromgr.hxx>
+ #include <formulacell.hxx>
++#include <dociter.hxx>
+ #include <clipcontext.hxx>
+ #include <refupdatecontext.hxx>
+ #include <refreshtimerprotector.hxx>
+@@ -924,6 +925,16 @@ bool ScDocument::CopyTab( SCTAB nOldPos, SCTAB nNewPos, const ScMarkData* pOnlyM
+                 (pOnlyMarked != nullptr), maTabs[nNewPos].get(), pOnlyMarked,
+                 false /*bAsLink*/, true /*bColRowFlags*/, bGlobalNamesToLocal, false /*bCopyCaptions*/ );
+         maTabs[nNewPos]->SetTabBgColor(maTabs[nOldPos]->GetTabBgColor());
++        // The copy's inputs are the copied cells: kept results stand.
++        ScCellIterator aKept(*this, ScRange(0, 0, nOldPos, MaxCol(), MaxRow(), nOldPos));
++        for (bool bHas = aKept.first(); bHas; bHas = aKept.next())
++        {
++            const ScFormulaCell* pOld = aKept.getType() == CELLTYPE_FORMULA ? aKept.getFormulaCell() : nullptr;
++            ScFormulaCell* pNew = pOld && pOld->IsKeptResult()
++                ? GetFormulaCell(ScAddress(aKept.GetPos().Col(), aKept.GetPos().Row(), nNewPos)) : nullptr;
++            if (pNew)
++                pNew->KeepResultOf(*pOld);
++        }
+ 
+         SCTAB nDz = nNewPos - nOldPos;
+         sc::RefUpdateContext aRefCxt(*this);
+diff --git a/sc/source/core/data/formulacell.cxx b/sc/source/core/data/formulacell.cxx
+--- a/sc/source/core/data/formulacell.cxx
++++ b/sc/source/core/data/formulacell.cxx
+@@ -42,6 +42,7 @@
+ #include <dbdata.hxx>
+ #include <progress.hxx>
+ #include <scmatrix.hxx>
++#include <docsh.hxx>
+ #include <rechead.hxx>
+ #include <scitems.hxx>
+ #include <validat.hxx>
+@@ -797,6 +798,8 @@ ScFormulaCell::ScFormulaCell(const ScFormulaCell& rCell, ScDocument& rDoc, const
+     mbIsExtRef(false),
+     mbSeenInPath(false),
+     mbFreeFlying(false),
++    // Undo copies land where the inputs still are.
++    mbKeptResult(rCell.mbKeptResult && rPos == rCell.aPos && !rDoc.IsClipboard() && !rCell.rDocument.IsClipboard()),
+     cMatrixFlag ( rCell.cMatrixFlag ),
+     nSeenInIteration(0),
+     nFormatType( rCell.nFormatType ),
+@@ -1246,12 +1249,38 @@ void ScFormulaCell::CompileTokenArray( sc::CompileFormulaContext& rCxt, bool bNo
+     }
+ }
+ 
++/// Whether the cell's format shows a boolean.
++static bool lcl_IsLogical( const ScDocument& rDoc, const ScAddress& rPos )
++{
++    const sal_uInt32 nFormat = rDoc.GetNumberFormat(rPos.Col(), rPos.Row(), rPos.Tab());
++    return rDoc.GetFormatTable()->GetType(nFormat) == SvNumFormatType::LOGICAL;
++}
++
+ void ScFormulaCell::CompileXML( sc::CompileFormulaContext& rCxt, ScProgress& rProgress )
+ {
+     if ( cMatrixFlag == ScMatrixMode::Reference )
+     {   // is already token code via ScDocFunc::EnterMatrix, ScDocument::InsertMatrixFormula
+         // just establish listeners
+         StartListeningTo( rDocument );
++        // A kept origin needs every loaded part of its matrix.
++        ScAddress aOrg;
++        ScFormulaCell* pOrg = GetMatrixOrigin(rDocument, aOrg) ? rDocument.GetFormulaCell(aOrg) : nullptr;
++        if (pOrg && pOrg->mbKeptResult)
++        {
++            const ScMatrixFormulaCellToken* pToken = pOrg->aResult.GetMatrixFormulaCellToken();
++            ScMatrix* pMat = pToken ? const_cast<ScMatrix*>(pToken->GetMatrix()) : nullptr;
++            const SCSIZE nCol = aPos.Col() - aOrg.Col(), nRow = aPos.Row() - aOrg.Row();
++            if (!pMat || aResult.GetType() == formula::svUnknown)
++                pOrg->mbKeptResult = false;
++            else if (aResult.IsValue())
++            {
++                pMat->PutDouble(aResult.GetDouble(), nCol, nRow);
++                if (lcl_IsLogical(rDocument, aPos))
++                    nFormatType = SvNumFormatType::LOGICAL;
++            }
++            else
++                pMat->PutString(aResult.GetString(), nCol, nRow);
++        }
+         return ;
+     }
+ 
+@@ -1353,6 +1382,16 @@ void ScFormulaCell::CompileXML( sc::CompileFormulaContext& rCxt, ScProgress& rPr
+     //  (for external links warning, CompileXML is called at the end of loading XML file)
+     rDocument.CheckLinkFormulaNeedingCheck(*pCode);
+ 
++    // Unknown functions' loaded results stand; origins hold their matrix.
++    const ScMatrixFormulaCellToken* pMatrix = aResult.GetMatrixFormulaCellToken();
++    const formula::StackVar eLoaded = pMatrix ? pMatrix->GetUpperLeftType() : aResult.GetType();
++    if (eLoaded != formula::svUnknown && HasUnknownFunction(rDocument, *pCode))
++    {
++        mbKeptResult = true;
++        if (lcl_IsLogical(rDocument, aPos))
++            nFormatType = SvNumFormatType::LOGICAL;
++    }
++
+     //volatile cells must be added here for import
+     if( !pCode->IsRecalcModeNormal() || pCode->IsRecalcModeForced())
+     {
+@@ -1890,6 +1929,15 @@ bool ScFormulaCell::Interpret(SCROW nStartOffset, SCROW nEndOffset)
+ 
+ void ScFormulaCell::InterpretTail( ScInterpreterContext& rContext, ScInterpretTailParameter eTailParam )
+ {
++    if (mbKeptResult)
++    {
++        // The file's result is the only one: keep it.
++        if (eTailParam == SCITP_NORMAL)
++            ResetDirty();
++        if (!rDocument.IsThreadedGroupCalcInProgress() && !pCode->IsRecalcModeAlways())
++            rDocument.RemoveFromFormulaTree(this);
++        return;
++    }
+     RecursionCounter aRecursionCounter( rDocument.GetRecursionHelper(), this);
+     // TODO If this cell is not an iteration cell, add it to the list of iteration cells?
+     if(bIsIterCell)
+@@ -2482,6 +2530,12 @@ void ScFormulaCell::Notify( const SfxHint& rHint )
+     if (!(nHint == SfxHintId::ScDataChanged || nHint == SfxHintId::ScTableOpDirty || (bSubTotal && nHint == SfxHintId::ScHiddenRowsChanged)))
+         return;
+ 
++    // An input changed; volatile cells also hear the load.
++    const ScDocShell* pShell = rDocument.GetDocumentShell();
++    if (nHint != SfxHintId::ScDataChanged
++        || static_cast<const ScHint&>(rHint).GetStartAddress() != BCA_BRDCST_ALWAYS
++        || !pShell || pShell->IsLoadingFinished())
++        mbKeptResult = false;
+     bool bForceTrack = false;
+     if ( nHint == SfxHintId::ScTableOpDirty )
+     {
+@@ -2528,11 +2582,21 @@ void ScFormulaCell::Query( SvtListener::QueryBase& rQuery ) const
+     }
+ }
+ 
++void ScFormulaCell::KeepResultOf( const ScFormulaCell& rCell )
++{
++    aResult = rCell.aResult;
++    nFormatType = rCell.nFormatType;
++    mbKeptResult = true;
++}
++
+ void ScFormulaCell::SetDirty( bool bDirtyFlag )
+ {
+     if (IsInChangeTrack())
+         return;
+ 
++    // Set dirty by an edit, not by a full recalc.
++    mbKeptResult = false;
++
+     if ( rDocument.GetHardRecalcState() != ScDocument::HardRecalcState::OFF )
+     {
+         SetDirtyVar();
+@@ -3229,7 +3293,8 @@ bool checkCompileColRowName(
+ }
+ 
+ void setOldCodeToUndo(
+-    ScDocument& rUndoDoc, const ScAddress& aUndoPos, const ScTokenArray* pOldCode, FormulaGrammar::Grammar eTempGrammar, ScMatrixMode cMatrixFlag)
++    ScDocument& rUndoDoc, const ScAddress& aUndoPos, const ScTokenArray* pOldCode, FormulaGrammar::Grammar eTempGrammar, ScMatrixMode cMatrixFlag,
++    const ScFormulaCell& rCell)
+ {
+     // Copy the cell to aUndoPos, which is its current position in the document,
+     // so this works when UpdateReference is called before moving the cells
+@@ -3245,7 +3310,11 @@ void setOldCodeToUndo(
+         new ScFormulaCell(
+             rUndoDoc, aUndoPos, pOldCode ? *pOldCode : ScTokenArray(rUndoDoc), eTempGrammar, cMatrixFlag);
+ 
+-    pFCell->SetResultToken(nullptr);  // to recognize it as changed later (Cut/Paste!)
++    // Undo needs the kept result: nothing else holds it.
++    if (rCell.IsKeptResult())
++        pFCell->KeepResultOf(rCell);
++    else
++        pFCell->SetResultToken(nullptr);  // to recognize it as changed later (Cut/Paste!)
+     rUndoDoc.SetFormulaCell(aUndoPos, pFCell);
+ }
+ 
+@@ -3338,7 +3407,7 @@ bool ScFormulaCell::UpdateReferenceOnShift(
+     bool bNeedDirty = (bValChanged || bRecompile || bOnRefMove);
+ 
+     if (pUndoDoc && (bValChanged || bOnRefMove))
+-        setOldCodeToUndo(*pUndoDoc, aUndoPos, pOldCode.get(), eTempGrammar, cMatrixFlag);
++        setOldCodeToUndo(*pUndoDoc, aUndoPos, pOldCode.get(), eTempGrammar, cMatrixFlag, *this);
+ 
+     bCompile |= bRecompile;
+     if (bCompile)
+@@ -3472,7 +3541,7 @@ bool ScFormulaCell::UpdateReferenceOnMove(
+         bNeedDirty = true;
+ 
+     if (pUndoDoc && !bCellInMoveTarget && (bValChanged || bRefModified || bOnRefMove))
+-        setOldCodeToUndo(*pUndoDoc, aUndoPos, pOldCode.get(), eTempGrammar, cMatrixFlag);
++        setOldCodeToUndo(*pUndoDoc, aUndoPos, pOldCode.get(), eTempGrammar, cMatrixFlag, *this);
+ 
+     bValChanged = false;
+ 
+@@ -3543,7 +3612,7 @@ bool ScFormulaCell::UpdateReferenceOnCopy(
+     bool bNeedDirty = bOnRefMove;
+ 
+     if (pUndoDoc && bOnRefMove)
+-        setOldCodeToUndo(*pUndoDoc, aUndoPos, pOldCode.get(), eTempGrammar, cMatrixFlag);
++        setOldCodeToUndo(*pUndoDoc, aUndoPos, pOldCode.get(), eTempGrammar, cMatrixFlag, *this);
+ 
+     if (bCompile)
+     {
+@@ -3917,6 +3986,27 @@ void ScFormulaCell::UpdateGrow( const ScRange& rArea, SCCOL nGrowX, SCROW nGrowY
+         StartListeningTo( rDocument ); // Listener as previous
+ }
+ 
++static bool lcl_HasUnknownFunction( const ScDocument& rDoc, const ScTokenArray& rCode, int nRecursion )
++{
++    if (rCode.HasOpCode(ocBad))
++        return true;
++    FormulaTokenArrayPlainIterator aIter(rCode);
++    for (const FormulaToken* p = aIter.First(); p; p = aIter.Next())
++    {
++        if (p->GetOpCode() != ocName || nRecursion >= 126)
++            continue;
++        const ScRangeData* pName = rDoc.FindRangeNameBySheetAndIndex(p->GetSheet(), p->GetIndex());
++        if (pName && pName->GetCode() && lcl_HasUnknownFunction(rDoc, *pName->GetCode(), nRecursion + 1))
++            return true;
++    }
++    return false;
++}
++
++bool ScFormulaCell::HasUnknownFunction( const ScDocument& rDoc, const ScTokenArray& rCode )
++{
++    return lcl_HasUnknownFunction(rDoc, rCode, 0);
++}
++
+ // See also ScDocument::FindRangeNamesReferencingSheet()
+ static void lcl_FindRangeNamesInUse(sc::UpdatedRangeNames& rIndexes, const ScTokenArray* pCode, const ScDocument& rDoc,
+         int nRecursion)
+diff --git a/sc/source/core/tool/interpr5.cxx b/sc/source/core/tool/interpr5.cxx
+--- a/sc/source/core/tool/interpr5.cxx
++++ b/sc/source/core/tool/interpr5.cxx
+@@ -3305,6 +3305,12 @@ void ScInterpreter::ScMatRef()
+                 mrDoc.GetNumberFormatInfo(mrContext, nCurFmtType, nCurFmtIndex, aAdr);
+                 nFuncFmtType = nCurFmtType;
+                 nFuncFmtIndex = nCurFmtIndex;
++                // A kept file result types each element itself.
++                if (aCell.getFormula()->IsKeptResult())
++                {
++                    nFuncFmtType = ScMatrix::IsBooleanType(nMatValType) ? SvNumFormatType::LOGICAL : SvNumFormatType::NUMBER;
++                    nFuncFmtIndex = 0;
++                }
+                 PushDouble(nMatVal.fVal);  // handles DoubleError
+             }
+         }
+diff --git a/sc/source/core/tool/compiler.cxx b/sc/source/core/tool/compiler.cxx
+--- a/sc/source/core/tool/compiler.cxx
++++ b/sc/source/core/tool/compiler.cxx
+@@ -4839,7 +4839,14 @@ Label_Rewind:
+     // would prematurely end compilation. Simple unknown names are handled by
+     // the interpreter.
+     // Use the same CharClass that was used for uppercase.
+-    aUpper = ((bAsciiUpper || mbCharClassesDiffer) ? ScGlobal::getCharClass() : *pCharClass).lowercase( aUpper );
++    // An unknown function keeps its spelling as written.
++    const sal_Unicode* pNext = aFormula.getStr() + nSrcPos;
++    while (*pNext == ' ')
++        pNext++;
++    if (*pNext == '(')
++        aUpper = OUString(cSymbol);
++    else
++        aUpper = ((bAsciiUpper || mbCharClassesDiffer) ? ScGlobal::getCharClass() : *pCharClass).lowercase( aUpper );
+     svl::SharedString aSS = rDoc.GetSharedStringPool().intern(aUpper);
+     maRawToken.SetString(aSS.getData(), aSS.getDataIgnoreCase());
+     maRawToken.NewOpCode( ocBad );
+diff --git a/sc/source/filter/inc/sheetdatacontext.hxx b/sc/source/filter/inc/sheetdatacontext.hxx
+--- a/sc/source/filter/inc/sheetdatacontext.hxx
++++ b/sc/source/filter/inc/sheetdatacontext.hxx
+@@ -20,6 +20,7 @@
+ #pragma once
+ 
+ #include <memory>
++#include <vector>
+ #include "addressconverter.hxx"
+ #include "excelhandlers.hxx"
+ #include "richstring.hxx"
+@@ -114,6 +115,8 @@ private:
+     BinAddress          maCurrPos;          /// Current cell position (BIFF12 only).
+     bool                mbHasFormula;       /// True = current cell has formula data (OOXML only).
+     bool                mbValidRange;       /// True = maFmlaData.maFormulaRef is valid (OOXML only).
++    bool                mbHasValue;         /// True = the cell has a value element (OOXML only).
++    std::vector<ScRange> maArrays;          /// Multi-cell arrays not yet passed (OOXML only).
+ 
+     sal_Int32 mnRow; /// row index (0-based)
+     sal_Int32 mnCol; /// column index (0-based)
+diff --git a/sc/source/filter/oox/formulabuffer.cxx b/sc/source/filter/oox/formulabuffer.cxx
+--- a/sc/source/filter/oox/formulabuffer.cxx
++++ b/sc/source/filter/oox/formulabuffer.cxx
+@@ -24,7 +24,12 @@
+ #include <svl/sharedstringpool.hxx>
+ #include <svl/numformat.hxx>
+ #include <sal/log.hxx>
++#include <rtl/math.hxx>
++#include <cellvalue.hxx>
++#include <scmatrix.hxx>
++#include <algorithm>
+ #include <memory>
++#include <unordered_map>
+ #include <utility>
+ 
+ using namespace ::com::sun::star::uno;
+@@ -34,6 +39,79 @@ namespace oox::xls {
+ 
+ namespace {
+ 
++/// A formula naming what Calc lacks keeps the file's result.
++void keepIfUnknown(ScFormulaCell& rCell, bool bLogical = false)
++{
++    if (ScFormulaCell::HasUnknownFunction(rCell.GetDocument(), *rCell.GetCode()))
++        rCell.SetKeptResult(bLogical);
++}
++
++/// Whether the whole text is one number.
++bool isNumber(std::u16string_view aText)
++{
++    rtl_math_ConversionStatus eStatus = rtl_math_ConversionStatus_Ok;
++    sal_Int32 nEnd = 0;
++    rtl::math::stringToDouble(aText, '.', 0, &eStatus, &nEnd);
++    return !aText.empty() && eStatus == rtl_math_ConversionStatus_Ok && nEnd == sal_Int32(aText.size());
++}
++
++/// Booleans show as such unless the cell has a format.
++void setLogical(ScDocument& rDoc, const ScAddress& rPos)
++{
++    if (rDoc.GetNumberFormat(rPos.Col(), rPos.Row(), rPos.Tab()) % SV_COUNTRY_LANGUAGE_OFFSET == 0)
++        rDoc.SetNumberFormat(rPos, rDoc.GetFormatTable()->GetStandardFormat(SvNumFormatType::LOGICAL));
++}
++
++using KeptValues = std::unordered_map<ScAddress, const FormulaBuffer::FormulaValue*>;
++
++/// One file result into the matrix; false if unsound.
++bool putKept(ScDocument& rDoc, ScMatrix& rMat, SCSIZE nCol, SCSIZE nRow,
++    const FormulaBuffer::FormulaValue& rValue, bool bStrings)
++{
++    const OUString& rText = rValue.maValueStr;
++    switch (rValue.mnCellType)
++    {
++        case XML_n:
++            if (!isNumber(rText))
++                return false;
++            rMat.PutDouble(rText.toDouble(), nCol, nRow);
++            return true;
++        case XML_b:
++            if (rText != "1" && rText != "0")
++                return false;
++            rMat.PutBoolean(rText == "1", nCol, nRow);
++            return true;
++        case XML_str:
++            if (!bStrings)
++                return false;
++            rMat.PutString(rDoc.GetSharedStringPool().intern(rText), nCol, nRow);
++            return true;
++        case XML_s:
++        case XML_inlineStr:
++            // Plain cells' text, resolved on import.
++            rMat.PutString(rDoc.GetSharedStringPool().intern(rText), nCol, nRow);
++            return true;
++    }
++    return false;
++}
++
++/// The file's array results, each present and sound.
++ScMatrixRef keptMatrix(ScDocument& rDoc, const ScRange& rRange, const KeptValues& rValues, bool bStrings)
++{
++    const SCSIZE nCols = rRange.aEnd.Col() - rRange.aStart.Col() + 1;
++    const SCSIZE nRows = rRange.aEnd.Row() - rRange.aStart.Row() + 1;
++    ScMatrixRef pMat(new ScMatrix(nCols, nRows));
++    for (SCSIZE nRow = 0; nRow < nRows; ++nRow)
++        for (SCSIZE nCol = 0; nCol < nCols; ++nCol)
++        {
++            const ScAddress aPos(rRange.aStart.Col() + nCol, rRange.aStart.Row() + nRow, rRange.aStart.Tab());
++            auto pValue = rValues.find(aPos);
++            if (pValue == rValues.end() || !putKept(rDoc, *pMat, nCol, nRow, *pValue->second, bStrings))
++                return nullptr;
++        }
++    return pMat;
++}
++
+ /**
+  * Cache the token array for the last cell position in each column. We use
+  * one cache per sheet.
+@@ -159,7 +237,7 @@ void applySharedFormulas(
+             if (bNeedNumberFormat)
+                 pCell->SetNeedNumberFormat(true);
+ 
+-            if (rDesc.maCellValue.isEmpty())
++            if (rDesc.maCellValue.isEmpty() && rDesc.mnValueType != XML_str)
+             {
+                 // No cached cell value. Mark it for re-calculation.
+                 pCell->SetDirty();
+@@ -182,7 +260,10 @@ void applySharedFormulas(
+                                 rDoc.getDoc().GetFormatTable()->GetStandardFormat( SvNumFormatType::LOGICAL));
+                     }
+                     if (rDesc.maCellValue == "1" || rDesc.maCellValue == "0")
++                    {
+                         pCell->SetResultDouble(rDesc.maCellValue == "1" ? 1.0 : 0.0);
++                        keepIfUnknown(*pCell, true);
++                    }
+                     else
+                     {
+                         // Recalc even if AutoCalc is disabled.
+@@ -199,6 +280,8 @@ void applySharedFormulas(
+                             bHasCalculatedFormulaCells = true;
+                         }
+                         pCell->SetResultDouble(fVal);
++                        if (isNumber(rDesc.maCellValue))
++                            keepIfUnknown(*pCell);
+                         /* TODO: is it on purpose that we never reset dirty here
+                          * and thus recalculate anyway if cell was dirty? Or is it
+                          * never dirty and therefore set dirty below otherwise? This
+@@ -216,6 +299,7 @@ void applySharedFormulas(
+                         // that use macro functions to show #VALUE!
+                         pCell->ResetDirty();
+                         pCell->SetChanged(false);
++                        keepIfUnknown(*pCell);
+                         break;
+                     }
+                     [[fallthrough]];
+@@ -291,8 +375,11 @@ void applyCellFormulas(
+ void applyArrayFormulas(
+     ScDocumentImport& rDoc,
+     const Sequence<ExternalLinkInfo>& rExternalLinks,
+-    const std::vector<FormulaBuffer::TokenRangeAddressItem>& rArrays )
++    const std::vector<FormulaBuffer::TokenRangeAddressItem>& rArrays,
++    const std::vector<FormulaBuffer::FormulaValue>* pValues, bool bStrings )
+ {
++    // Results by cell, once an array names what Calc lacks.
++    KeptValues aValues;
+     for (const FormulaBuffer::TokenRangeAddressItem& rAddressItem : rArrays)
+     {
+         const ScAddress& aPos = rAddressItem.maTokenAndAddress.maAddress;
+@@ -300,8 +387,46 @@ void applyArrayFormulas(
+         ScCompiler aComp(rDoc.getDoc(), aPos, formula::FormulaGrammar::GRAM_OOXML);
+         aComp.SetExternalLinks(rExternalLinks);
+         std::unique_ptr<ScTokenArray> pArray(aComp.CompileString(rAddressItem.maTokenAndAddress.maTokenStr));
+-        if (pArray)
+-            rDoc.setMatrixCells(rAddressItem.maRange, *pArray, formula::FormulaGrammar::GRAM_OOXML);
++        if (!pArray)
++            continue;
++        // Read before the matrix cells replace the loaded values.
++        const ScRange& rRange = rAddressItem.maRange;
++        ScMatrixRef pMat;
++        if (pValues && ScFormulaCell::HasUnknownFunction(rDoc.getDoc(), *pArray))
++        {
++            if (aValues.empty())
++                for (const FormulaBuffer::FormulaValue& rValue : *pValues)
++                    aValues.emplace(rValue.maAddress, &rValue);
++            pMat = keptMatrix(rDoc.getDoc(), rRange, aValues, bStrings);
++        }
++        rDoc.setMatrixCells(rRange, *pArray, formula::FormulaGrammar::GRAM_OOXML);
++        ScFormulaCell* pCell = pMat ? rDoc.getDoc().GetFormulaCell(rRange.aStart) : nullptr;
++        if (!pCell)
++            continue;
++        ScDocument& rScDoc = rDoc.getDoc();
++        const FormulaBuffer::FormulaValue& rFirst = *aValues.at(rRange.aStart);
++        formula::FormulaConstTokenRef pFirst;
++        if (rFirst.mnCellType == XML_str)
++            pFirst = new formula::FormulaStringToken(rScDoc.GetSharedStringPool().intern(rFirst.maValueStr));
++        else
++            pFirst = new formula::FormulaDoubleToken(rFirst.maValueStr.toDouble());
++        pCell->SetResultMatrix(rRange.aEnd.Col() - rRange.aStart.Col() + 1,
++                               rRange.aEnd.Row() - rRange.aStart.Row() + 1, pMat, pFirst.get());
++        pCell->ResetDirty();
++        pCell->SetChanged(false);
++        pCell->SetKeptResult(rFirst.mnCellType == XML_b);
++        for (SCROW nRow = rRange.aStart.Row(); nRow <= rRange.aEnd.Row(); ++nRow)
++            for (SCCOL nCol = rRange.aStart.Col(); nCol <= rRange.aEnd.Col(); ++nCol)
++            {
++                const ScAddress aPos(nCol, nRow, rRange.aStart.Tab());
++                if (aValues.at(aPos)->mnCellType != XML_b)
++                    continue;
++                // Other members take the boolean type when computed.
++                if (aPos == rRange.aStart)
++                    setLogical(rScDoc, aPos);
++                else if (ScFormulaCell* pMember = rScDoc.GetFormulaCell(aPos))
++                    pMember->SetNeedNumberFormat(true);
++            }
+     }
+ }
+ 
+@@ -317,7 +442,8 @@ void applyCellFormulaValues(
+         const ScAddress& aCellPos = rValue.maAddress;
+         ScFormulaCell* pCell = rDoc.getDoc().GetFormulaCell(aCellPos);
+         const OUString& rValueStr = rValue.maValueStr;
+-        if (!pCell)
++        // Array results were set with their range.
++        if (!pCell || pCell->GetMatrixFlag() != ScMatrixMode::NONE)
+             continue;
+ 
+         switch (rValue.mnCellType)
+@@ -333,8 +459,21 @@ void applyCellFormulaValues(
+                 pCell->SetResultDouble(fVal);
+                 pCell->ResetDirty();
+                 pCell->SetChanged(false);
++                if (isNumber(rValueStr))
++                    keepIfUnknown(*pCell);
+             }
+             break;
++            case XML_b:
++                // As shared formulas take a boolean result.
++                if (rValueStr == "1" || rValueStr == "0")
++                {
++                    setLogical(rDoc.getDoc(), aCellPos);
++                    pCell->SetResultDouble(rValueStr == "1" ? 1.0 : 0.0);
++                    pCell->ResetDirty();
++                    pCell->SetChanged(false);
++                    keepIfUnknown(*pCell, true);
++                }
++            break;
+             case XML_str:
+                 // Excel uses t="str" for string results (per definition
+                 // ECMA-376 18.18.11 ST_CellType (Cell Type) "Cell containing a
+@@ -352,6 +491,7 @@ void applyCellFormulaValues(
+                     pCell->SetResultToken(new formula::FormulaStringToken(std::move(aSS)));
+                     pCell->ResetDirty();
+                     pCell->SetChanged(false);
++                    keepIfUnknown(*pCell);
+                 }
+             break;
+             default:
+@@ -375,7 +515,8 @@ void processSheetFormulaCells(
+     }
+ 
+     if (rItem.mpArrayFormulas)
+-        applyArrayFormulas(rDoc, rExternalLinks, *rItem.mpArrayFormulas);
++        applyArrayFormulas(rDoc, rExternalLinks, *rItem.mpArrayFormulas, rItem.mpCellFormulaValues,
++                           rWorkbookHelper.isGeneratorKnownGood());
+ 
+     if (rItem.mpCellFormulaValues)
+         applyCellFormulaValues(rDoc, *rItem.mpCellFormulaValues, rWorkbookHelper);
+diff --git a/sc/source/filter/oox/sheetdatacontext.cxx b/sc/source/filter/oox/sheetdatacontext.cxx
+--- a/sc/source/filter/oox/sheetdatacontext.cxx
++++ b/sc/source/filter/oox/sheetdatacontext.cxx
+@@ -19,6 +19,12 @@
+ 
+ #include <sheetdatacontext.hxx>
+ 
++#include <algorithm>
++#include <optional>
++
++#include <rtl/character.hxx>
++#include <sharedstringsbuffer.hxx>
++
+ #include <oox/core/xmlfilterbase.hxx>
+ #include <oox/helper/attributelist.hxx>
+ #include <oox/helper/binaryinputstream.hxx>
+@@ -54,6 +60,18 @@ const sal_uInt16 BIFF12_ROW_CUSTOMHEIGHT    = 0x2000;
+ const sal_uInt16 BIFF12_ROW_CUSTOMFORMAT    = 0x4000;
+ const sal_uInt8 BIFF12_ROW_SHOWPHONETIC     = 0x01;
+ 
++/// A shared string's text; none for an unsound index.
++std::optional<OUString> sharedText( const SharedStringsBuffer& rStrings, std::u16string_view aIndex )
++{
++    if (aIndex.empty() || aIndex.size() > 9
++        || !std::all_of(aIndex.begin(), aIndex.end(), [](sal_Unicode c) { return rtl::isAsciiDigit(c); }))
++        return std::nullopt;
++    RichStringRef xString = rStrings.getString(o3tl::toInt32(aIndex));
++    if (!xString)
++        return std::nullopt;
++    return xString->getStringContent();
++}
++
+ } // namespace
+ 
+ SheetDataContext::SheetDataContext( WorksheetFragmentBase& rFragment ) :
+@@ -63,6 +81,7 @@ SheetDataContext::SheetDataContext( WorksheetFragmentBase& rFragment ) :
+     mnSheet( rFragment.getSheetIndex() ),
+     mbHasFormula( false ),
+     mbValidRange( false ),
++    mbHasValue( false ),
+     mnRow( -1 ),
+     mnCol( -1 )
+ {
+@@ -96,6 +115,7 @@ ContextHandlerRef SheetDataContext::onCreateContext( sal_Int32 nElement, const A
+                     mxInlineStr = std::make_shared<RichString>();
+                     return new RichStringContext( *this, mxInlineStr );
+                 case XLS_TOKEN( v ):
++                    mbHasValue = true;
+                     return this;    // characters contain cell value
+                 case XLS_TOKEN( f ):
+                     importFormula( rAttribs );
+@@ -139,7 +159,8 @@ void SheetDataContext::onEndElement()
+ 
+             // If a number cell has some preloaded value, stick it into the buffer
+             // but do this only for real cell formulas (not array, shared etc.)
+-            if (!maCellValue.isEmpty())
++            // An empty string is a result too.
++            if (!maCellValue.isEmpty() || (mbHasValue && maCellData.mnCellType == XML_str))
+                 setCellFormulaValue(maCellData.maCellAddr, maCellValue, maCellData.mnCellType);
+             break;
+ 
+@@ -149,7 +170,8 @@ void SheetDataContext::onEndElement()
+                 if( mbValidRange && maFmlaData.isValidSharedRef( maCellData.maCellAddr ) )
+                     createSharedFormulaMapEntry(maCellData.maCellAddr, maFmlaData.mnSharedId, maFormulaStr);
+ 
+-                setCellFormula(maCellData.maCellAddr, maFmlaData.mnSharedId, maCellValue, maCellData.mnCellType);
++                setCellFormula(maCellData.maCellAddr, maFmlaData.mnSharedId, maCellValue,
++                               mbHasValue ? maCellData.mnCellType : XML_TOKEN_INVALID);
+                 mrSheetData.setCellFormat( maCellData );
+             }
+             else
+@@ -160,6 +182,11 @@ void SheetDataContext::onEndElement()
+             if( mbValidRange && maFmlaData.isValidArrayRef( maCellData.maCellAddr ) )
+             {
+                 setCellArrayFormula( maFmlaData.maFormulaRef, maCellData.maCellAddr, maFormulaStr );
++                // Its result, for an unknown function to keep.
++                if (mbHasValue)
++                    setCellFormulaValue(maCellData.maCellAddr, maCellValue, maCellData.mnCellType);
++                if (maFmlaData.maFormulaRef.aStart != maFmlaData.maFormulaRef.aEnd)
++                    maArrays.push_back(maFmlaData.maFormulaRef);
+             }
+             // set cell formatting, but do not set result as cell value
+             mrSheetData.setBlankCell( maCellData );
+@@ -178,6 +205,29 @@ void SheetDataContext::onEndElement()
+     if( mbHasFormula )
+         return;
+ 
++    // An array's other cells: results as the file has them.
++    const ScAddress& rAddr = maCellData.maCellAddr;
++    std::erase_if(maArrays, [&rAddr](const ScRange& rArray) { return rArray.aEnd.Row() < rAddr.Row(); });
++    if (std::any_of(maArrays.begin(), maArrays.end(), [&rAddr](const ScRange& rArray) { return rArray.Contains(rAddr); }))
++    {
++        // Strings resolve here: the index checked, rich text flattened.
++        OUString aText = maCellValue;
++        sal_Int32 nType = mbHasValue ? maCellData.mnCellType : XML_TOKEN_INVALID;
++        if (nType == XML_s)
++        {
++            std::optional<OUString> oText = sharedText(getSharedStrings(), maCellValue);
++            aText = oText.value_or(OUString());
++            if (!oText)
++                nType = XML_TOKEN_INVALID;
++        }
++        else if (maCellData.mnCellType == XML_inlineStr && mxInlineStr)
++        {
++            aText = mxInlineStr->getStringContent();
++            nType = XML_inlineStr;
++        }
++        setCellFormulaValue(rAddr, aText, nType);
++    }
++
+     // no formula created: try to set the cell value
+     if( !maCellValue.isEmpty() ) switch( maCellData.mnCellType )
+     {
+@@ -349,6 +399,7 @@ bool SheetDataContext::importCell( const AttributeList& rAttribs )
+ 
+         // reset cell value, formula settings, and inline string
+         maCellValue.clear();
++        mbHasValue = false;
+         mxInlineStr.reset();
+         mbHasFormula = false;
+ 
+diff --git a/sc/source/filter/xml/xmlcelli.cxx b/sc/source/filter/xml/xmlcelli.cxx
+--- a/sc/source/filter/xml/xmlcelli.cxx
++++ b/sc/source/filter/xml/xmlcelli.cxx
+@@ -19,6 +19,7 @@
+ 
+ #include <limits>
+ #include <memory>
++#include <rtl/math.hxx>
+ #include "xmlcelli.hxx"
+ #include "xmlimprt.hxx"
+ #include "xmlannoi.hxx"
+@@ -207,6 +208,12 @@ ScXMLTableRowCellContext::ScXMLTableRowCellContext( ScXMLImport& rImport,
+                     {
+                         fValue = it.toDouble();
+                         bIsEmpty = false;
++                        // A value that is no number is no result.
++                        rtl_math_ConversionStatus eStatus = rtl_math_ConversionStatus_Ok;
++                        sal_Int32 nEnd = 0;
++                        const std::string_view aText = it.toView();
++                        rtl::math::stringToDouble(aText, '.', 0, &eStatus, &nEnd);
++                        mbBadValue = eStatus != rtl_math_ConversionStatus_Ok || nEnd != sal_Int32(aText.size());
+ 
+                         //if office:value="0", let's get the text:p in case this is
+                         //a special case in HasSpecialCaseFormulaText(). If it
+@@ -242,6 +249,8 @@ ScXMLTableRowCellContext::ScXMLTableRowCellContext( ScXMLImport& rImport,
+                         maStringValue = it.toString();
+                         bIsEmpty = false;
+                     }
++                    else
++                        mbEmptyStringValue = true;
+                 }
+                 break;
+                 case XML_ELEMENT( OFFICE , XML_BOOLEAN_VALUE ):
+@@ -278,6 +287,12 @@ ScXMLTableRowCellContext::ScXMLTableRowCellContext( ScXMLImport& rImport,
+         }
+     }
+ 
++    // A formula's empty string is a result.
++    if (maFormula && mbEmptyStringValue && !maStringValue)
++    {
++        maStringValue = OUString();
++        bIsEmpty = false;
++    }
+     if (maFormula)
+     {
+         if (nCellType == util::NumberFormat::TEXT)
+@@ -1038,7 +1053,7 @@ void ScXMLTableRowCellContext::SetFormulaCell(ScFormulaCell* pFCell) const
+             bMayForceNumberformat = false;
+         }
+     }
+-    else if (std::isfinite(fValue))
++    else if (std::isfinite(fValue) && !mbBadValue)
+     {
+         pFCell->SetHybridDouble(fValue);
+         if (mbPossibleEmptyDisplay && fValue == 0.0)
+@@ -1083,7 +1098,8 @@ void ScXMLTableRowCellContext::PutTextCell( const ScAddress& rCurrentPos,
+             if(mbErrorValue)
+                 bDoIncrement = false;
+ 
+-            if(!aCellString.isEmpty())
++            // A member's empty string is a result too.
++            if(!aCellString.isEmpty() || (bDoIncrement && mbEmptyStringValue))
+             {
+                 if (bDoIncrement && !IsPossibleErrorString() && pFCell)
+                 {
+@@ -1343,6 +1359,12 @@ void ScXMLTableRowCellContext::AddNonFormulaCell( const ScAddress& rCellPos )
+     ::std::optional< OUString > pOUText;
+ 
+     ScDocument* pDoc = rXMLImport.GetDocument();
++    // Matrix members keep an empty string value.
++    if (mbEmptyStringValue && !maStringValue && rXMLImport.GetTables().IsPartOfMatrix(rCellPos))
++    {
++        maStringValue = OUString();
++        bIsEmpty = false;
++    }
+     if( nCellType == util::NumberFormat::TEXT )
+     {
+         if( !bIsEmpty && !maStringValue && !mbEditEngineHasText && cellExists(*pDoc, rCellPos) && CellsAreRepeated() )
+@@ -1464,7 +1486,7 @@ void ScXMLTableRowCellContext::AddFormulaCell( const ScAddress& rCellPos )
+                             pFCell->ResetDirty();
+                         }
+                     }
+-                    else if (std::isfinite(fValue))
++                    else if (std::isfinite(fValue) && !mbBadValue)
+                     {
+                         pFCell->SetResultMatrix(
+                             nMatrixCols, nMatrixRows, pMat, new formula::FormulaDoubleToken(fValue));
+diff --git a/sc/source/filter/xml/xmlcelli.hxx b/sc/source/filter/xml/xmlcelli.hxx
+--- a/sc/source/filter/xml/xmlcelli.hxx
++++ b/sc/source/filter/xml/xmlcelli.hxx
+@@ -95,6 +95,8 @@ class ScXMLTableRowCellContext : public ScXMLImportContext
+     bool mbHasFormatRuns;
+     bool mbHasStyle;
+     bool mbPossibleEmptyDisplay;
++    bool mbEmptyStringValue = false; // office:string-value=""
++    bool mbBadValue = false;         // office:value is no number
+ 
+     void DoMerge(const ScAddress& rScCellPos, const SCCOL nCols, const SCROW nRows);
+ 
+diff --git a/sc/source/filter/xml/xmlexprt.cxx b/sc/source/filter/xml/xmlexprt.cxx
+--- a/sc/source/filter/xml/xmlexprt.cxx
++++ b/sc/source/filter/xml/xmlexprt.cxx
+@@ -3273,7 +3273,11 @@ void ScXMLExport::WriteCell(ScDocument& rDoc, const ScMyCell& aCell, sal_Int32 n
+                     }
+                     else
+                     {
+-                        if (!aCell.maBaseCell.getString(rDoc).isEmpty())
++                        // A kept empty result is the file's.
++                        ScAddress aOrigin;
++                        const ScFormulaCell* pOrigin = aCell.bIsMatrixCovered && pFormulaCell->GetMatrixOrigin(rDoc, aOrigin)
++                            ? rDoc.GetFormulaCell(aOrigin) : pFormulaCell;
++                        if (!aCell.maBaseCell.getString(rDoc).isEmpty() || (pOrigin && pOrigin->IsKeptResult()))
+                         {
+                             AddAttribute(sAttrValueType, XML_STRING);
+                             AddAttribute(sAttrStringValue, aCell.maBaseCell.getString(rDoc));
+diff --git a/sc/source/ui/unoobj/docuno.cxx b/sc/source/ui/unoobj/docuno.cxx
+--- a/sc/source/ui/unoobj/docuno.cxx
++++ b/sc/source/ui/unoobj/docuno.cxx
+@@ -1042,6 +1042,23 @@ void lcl_ExternalLinks(tools::JsonWriter& rJson, ScDocument& rDoc)
+         rJson.putSimpleValue(rSource);
+ }
+ 
++/// Cells showing the file's result: Calc cannot compute their formula.
++void lcl_KeptResults(tools::JsonWriter& rJson, ScDocument& rDoc)
++{
++    rJson.put("commandName", ".uno:KeptResults");
++    const ScAddress::Details aDetails(rDoc.GetAddressConvention(), 0, 0);
++    auto aArray = rJson.startArray("cells");
++    for (SCTAB nTab = 0; nTab < rDoc.GetTableCount(); ++nTab)
++    {
++        ScCellIterator aIter(rDoc, ScRange(0, 0, nTab, rDoc.MaxCol(), rDoc.MaxRow(), nTab));
++        for (bool bHas = aIter.first(); bHas; bHas = aIter.next())
++        {
++            if (aIter.getType() == CELLTYPE_FORMULA && aIter.getFormulaCell()->IsKeptResult())
++                rJson.putSimpleValue(aIter.GetPos().Format(ScRefFlags::VALID | ScRefFlags::TAB_3D, &rDoc, aDetails));
++        }
++    }
++}
++
+ /// The sheet's protection and its allowed actions.
+ void lcl_SheetProtection(tools::JsonWriter& rJson, ScDocument& rDoc, SCTAB nTab)
+ {
+@@ -1114,7 +1131,7 @@ bool ScModelObj::supportsCommand(std::u16string_view rCommand)
+             u"AutoFilterValues", u"DataSelectValues",   u"Validation",
+             u"NumberFormatCode", u"ConditionalFormats", u"Chart",
+             u"PivotTable",       u"PrintLayout",        u"SheetProtection",
+-            u"ExternalLinks",    u"CellAt" };
++            u"ExternalLinks",    u"CellAt",             u"KeptResults" };
+     return std::find(std::begin(aCommands), std::end(aCommands), rCommand) != std::end(aCommands);
+ }
+ 
+@@ -1124,6 +1141,8 @@ void ScModelObj::getCommandValues(tools::JsonWriter& rJsonWriter, std::string_vi
+         return lcl_DefinedNames(rJsonWriter, pDocShell->GetDocument());
+     if (pDocShell && rCommand == ".uno:ExternalLinks")
+         return lcl_ExternalLinks(rJsonWriter, pDocShell->GetDocument());
++    if (pDocShell && rCommand == ".uno:KeptResults")
++        return lcl_KeptResults(rJsonWriter, pDocShell->GetDocument());
+     if (pDocShell && o3tl::starts_with(rCommand, ".uno:CellAt?"))
+         return lcl_CellAt(rJsonWriter, pDocShell->GetDocument(), rCommand);
+     ScViewData* pCurrent = ScDocShell::GetViewData();

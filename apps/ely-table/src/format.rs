@@ -11,22 +11,24 @@ use ely_gpui_component::{
     primitives::{IconName, Severity},
     theme::ControlSize,
 };
-use ely_lok::{Doc, LokView, Reported, Worker, sheet};
+use ely_lok::{Doc, LokView, Reported, Worker, sheet, show::Paint};
 use ely_office::prelude::*;
 use gpui::{
     AnyElement, App, AppContext as _, Context, Entity, Hsla, IntoElement, Menu, MenuItem,
     ParentElement as _, Render, SharedString, Styled as _, Subscription, WeakEntity, Window,
-    actions, div, rgb,
+    div, rgb,
 };
 
 use crate::book::{Book, Spot};
 
-actions!(table, [FormatPanel]);
+mod colors;
+pub(crate) use colors::paint;
+use colors::{FILL, Pick, TEXT};
 
 pub fn menu(cx: &App) -> Menu {
     let label = |key: &str| Book::text(cx, key, &[]);
     Menu::new(label("menu.format")).items([
-        MenuItem::action(label("table.format.panel"), FormatPanel),
+        MenuItem::action(label("table.format.panel"), ely_ui::commands::ToggleRightPanel),
         MenuItem::separator(),
         MenuItem::action(label("table.rules.conditional"), crate::rules::Conditional),
         MenuItem::action(
@@ -39,19 +41,15 @@ pub fn menu(cx: &App) -> Menu {
     ])
 }
 
-/// Number kinds the panel sets, and their commands.
-const KINDS: [(&str, &str, &str); 5] = [
-    ("general", "number.general", "table.format.general"),
-    ("number", "number.decimal", "table.format.decimal"),
-    ("currency", "number.currency", "table.format.currency"),
-    ("percent", "number.percent", "table.format.percent"),
-    ("date", "number.date", "table.format.date"),
-];
-
-/// Fill colors, 0xRRGGBB.
-const FILLS: [u32; 10] = [
-    0xFFFFFF, 0xD9D9D9, 0xFFC7CE, 0xFFEB9C, 0xC6EFCE, 0xBDD7EE, 0xF8CBAD, 0xE4DFEC, 0x808080,
-    0x000000,
+/// Number kinds the panel sets, their commands and values.
+const KINDS: [(&str, &str, &str, &[&str]); 6] = [
+    ("general", "number.general", "table.format.general", &[]),
+    ("number", "number.decimal", "table.format.decimal", &[]),
+    ("currency", "number.currency", "table.format.currency", &[]),
+    ("percent", "number.percent", "table.format.percent", &[]),
+    ("date", "number.date", "table.format.date", &[]),
+    // Digits stay as typed: IDs, codes, leading zeros (#15).
+    ("text", "number.code", "table.format.text", &["@"]),
 ];
 
 /// The workbook the panel formats.
@@ -276,7 +274,7 @@ impl Panel {
         let listed = KINDS.iter().any(|(value, ..)| *value == kind);
         let mut choices: Vec<Choice> = KINDS
             .iter()
-            .map(|(value, _, key)| Choice::new(*value, label(key)))
+            .map(|(value, _, key, _)| Choice::new(*value, label(key)))
             .collect();
         if !listed {
             choices.push(Choice::new(kind.to_string(), label("table.format.custom")));
@@ -287,10 +285,10 @@ impl Panel {
             .selected(kind.to_string())
             .size(ControlSize::Sm)
             .on_change(move |value, _, cx| {
-                if let Some((_, command, _)) =
+                if let Some((_, command, _, values)) =
                     KINDS.iter().find(|(kind, ..)| *kind == value.as_ref())
                 {
-                    run(&book, command, &[], cx);
+                    run(&book, command, values, cx);
                 }
             });
         PropertyGroup::new(label("table.format.number"))
@@ -367,37 +365,36 @@ impl Panel {
         ]);
         PropertyGroup::new(label("table.format.cell"))
             .row(label("table.format.borders"), borders)
-            .row(label("table.format.fill"), self.fill(cx))
+            .row(label("table.format.fill"), self.colors(&FILL, cx))
+            .row(label("table.format.text_color"), self.colors(&TEXT, cx))
     }
 
-    /// The cell's fill as a swatch; it opens the palette.
-    fn fill(&self, cx: &Context<Self>) -> AnyElement {
-        let current = self
-            .state(".uno:BackgroundColor", cx)
-            .and_then(|color| color.parse::<i64>().ok())
-            .and_then(|color| u32::try_from(color).ok());
-        let (shown, tip) = match current {
-            Some(color) => (Hsla::from(rgb(color)), format!("#{color:06X}").into()),
-            None => (
-                gpui::transparent_black(),
-                Book::text(cx, "table.format.no_fill", &[]),
-            ),
+    /// A cell color as a swatch; it opens the palette.
+    fn colors(&self, pick: &'static Pick, cx: &Context<Self>) -> AnyElement {
+        let paint = paint(self.state(pick.state, cx).as_deref());
+        let current = match paint {
+            Paint::Color(color) => Some(color),
+            _ => None,
         };
-        let (book, none) = (
-            self.book.clone(),
-            Book::text(cx, "table.format.no_fill", &[]),
-        );
-        Popover::with_opener(
-            "table-fill-popover",
+        let none = Book::text(cx, pick.none, &[]);
+        let (shown, tip) = match paint {
+            Paint::Color(color) => (Hsla::from(rgb(color)), format!("#{color:06X}").into()),
+            Paint::Mixed => (gpui::transparent_black(), Book::text(cx, "office.props.mixed", &[])),
+            Paint::None => (gpui::transparent_black(), none.clone()),
+        };
+        let label = (paint == Paint::Mixed).then(|| ely_office::panel::muted(tip.clone(), cx));
+        let book = self.book.clone();
+        let popover = Popover::with_opener(
+            SharedString::from(format!("{}-popover", pick.id)),
             move |toggle| {
-                ColorSwatch::new("table-fill-swatch", shown)
+                ColorSwatch::new(SharedString::from(format!("{}-swatch", pick.id)), shown)
                     .tooltip(tip)
                     .on_click(move |window, cx| toggle(window, cx))
             },
             move |close, _, _| {
-                let swatches = FILLS.map(|color| (format!("#{color:06X}"), Hsla::from(rgb(color))));
+                let swatches = pick.colors.map(|color| (format!("#{color:06X}"), Hsla::from(rgb(color))));
                 let picked = book.clone();
-                let mut palette = ColorPalette::new("table-fill", swatches.clone())
+                let mut palette = ColorPalette::new(pick.id, swatches.clone())
                     .columns(5)
                     .on_change({
                         let close = close.clone();
@@ -407,18 +404,18 @@ impl Panel {
                                 .position(|(_, swatch)| *swatch == color)
                                 .expect("the palette hands back its own colors");
                             close(window, cx);
-                            run(&picked, "cells.fill", &[&FILLS[at].to_string()], cx);
+                            run(&picked, pick.command, &[&pick.colors[at].to_string()], cx);
                         }
                     });
-                if let Some(color) = current.filter(|color| FILLS.contains(color)) {
+                if let Some(color) = current.filter(|color| pick.colors.contains(color)) {
                     palette = palette.selected(rgb(color));
                 }
                 let book = book.clone();
-                let clear = Button::new("table-fill-none", none.clone())
+                let clear = Button::new(SharedString::from(format!("{}-none", pick.id)), none.clone())
                     .size(ControlSize::Sm)
                     .on_click(move |_, window, cx| {
                         close(window, cx);
-                        run(&book, "cells.fill", &["-1"], cx);
+                        run(&book, pick.command, &["-1"], cx);
                     });
                 div()
                     .flex()
@@ -428,8 +425,8 @@ impl Panel {
                     .child(palette)
                     .child(clear)
             },
-        )
-        .into_any_element()
+        );
+        row([popover.into_any_element()].into_iter().chain(label))
     }
 }
 

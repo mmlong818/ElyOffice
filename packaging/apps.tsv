@@ -1,8 +1,8 @@
-ely-doc	ElyDoc	Office;WordProcessor;	1
-ely-table	ElyTable	Office;Spreadsheet;	1
-ely-show	ElyShow	Office;Presentation;	1
-ely-pdf	ElyPDF	Office;Viewer;	1
-ely-mail	ElyMail	Network;Email;	2
-ely-tree	ElyTree	Development;RevisionControl;	1
-ely-mark	ElyMark	Utility;TextEditor;	1
-ely-agent	ElyAgent	Development;	2
+ely-doc	ElyDoc	Office;WordProcessor;	1	MIT AND MPL-2.0
+ely-table	ElyTable	Office;Spreadsheet;	1	MIT AND MPL-2.0
+ely-show	ElyShow	Office;Presentation;	1	MIT AND MPL-2.0
+ely-pdf	ElyPDF	Office;Viewer;	1	MIT AND AGPL-3.0-or-later
+ely-mail	ElyMail	Network;Email;	1	MIT
+ely-tree	ElyTree	Development;RevisionControl;	1	MIT AND GPL-2.0-only
+ely-mark	ElyMark	Utility;TextEditor;	1	MIT AND AGPL-3.0-or-later AND GPL-2.0-only
+ely-agent	ElyAgent	Development;	2	MIT

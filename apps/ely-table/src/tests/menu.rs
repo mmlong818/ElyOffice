@@ -9,7 +9,7 @@ use crate::menu::{Kind, Pick, What, held};
 type Shows = fn(&What) -> bool;
 
 /// The grid with the menu's host over it.
-struct Host(Entity<Book>);
+pub(super) struct Host(pub(super) Entity<Book>);
 
 impl gpui::Render for Host {
     fn render(&mut self, window: &mut gpui::Window, cx: &mut gpui::Context<Self>) -> impl gpui::IntoElement {
@@ -20,19 +20,19 @@ impl gpui::Render for Host {
     }
 }
 
-fn frames(cx: &mut VisualTestContext) {
+pub(super) fn frames(cx: &mut VisualTestContext) {
     for _ in 0..3 {
         cx.update(|window, _| window.refresh());
         cx.run_until_parked();
     }
 }
 
-fn view(cx: &mut VisualTestContext, book: &Entity<Book>) -> Entity<LokView> {
+pub(super) fn view(cx: &mut VisualTestContext, book: &Entity<Book>) -> Entity<LokView> {
     cx.update(|_, app| book.read(app).active_tab().expect("a tab").view.clone())
 }
 
 /// A cell's middle or its header's, in window pixels.
-fn spot(cx: &mut VisualTestContext, book: &Entity<Book>, column: u32, row: u32, header: Option<bool>) -> Point<Pixels> {
+pub(super) fn spot(cx: &mut VisualTestContext, book: &Entity<Book>, column: u32, row: u32, header: Option<bool>) -> Point<Pixels> {
     frames(cx);
     let view = view(cx, book);
     cx.update(|_, app| {
@@ -52,6 +52,8 @@ fn spot(cx: &mut VisualTestContext, book: &Entity<Book>, column: u32, row: u32, 
 /// Right-clicks and waits until `shown` holds for the menu.
 fn right_click(cx: &mut VisualTestContext, book: &Entity<Book>, at: Point<Pixels>, shown: Shows) {
     cx.update(|_, app| book.update(app, |book, _| book.menu = None));
+    // Clicks hit the last frame, old popup included.
+    frames(cx);
     cx.simulate_mouse_move(at, None, Modifiers::none());
     cx.simulate_mouse_down(at, MouseButton::Right, Modifiers::none());
     cx.simulate_mouse_up(at, MouseButton::Right, Modifiers::none());
@@ -95,8 +97,11 @@ fn corner_rectangle(cx: &mut TestAppContext, book: &Entity<Book>) {
     run(cx, book, "draw.shape", &["rectangle", "true"]);
     run(cx, book, "object.x", &["0"]);
     run(cx, book, "object.y", &["0"]);
-    let selected = cx.update(|app| book.read(app).active_tab().expect("a tab").view.read(app).graphic());
-    assert!(selected.is_some_and(|(x, y, ..)| x < 100 && y < 100), "selected at A1: {selected:?}");
+    // The move is reported after the answer.
+    settle(cx, |app| {
+        let selected = book.read(app).active_tab().expect("a tab").view.read(app).graphic();
+        selected.is_some_and(|(x, y, ..)| x < 100 && y < 100)
+    });
 }
 
 /// Protects the sheet, allowing selection and `more`.
@@ -257,4 +262,20 @@ fn a_header_ends_shape_text_editing() {
     });
     let xml = std::fs::read_to_string(&path).expect("the save");
     assert_eq!(xml.matches(">z</text:p>").count(), 2, "each shape keeps its typed text");
+}
+
+#[test]
+fn format_cells_opens_a_folded_right_panel() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let mut cx = TestAppContext::single();
+    let Some((window, book)) = super::book(&mut cx, dir.path()) else {
+        eprintln!("SKIP: no LOK build");
+        return;
+    };
+    super::blank(&mut cx, &book);
+    let shown = |cx: &mut TestAppContext| cx.update(|app| ely_ui::settings::panels::shown(false, app));
+    cx.update(|app| ely_ui::settings::panels::show(false, false, app));
+    assert!(!shown(&mut cx), "folded");
+    window.update(&mut cx, |_, window, app| book.update(app, |book, cx| book.choose(Pick::Format, window, cx))).expect("the window lives");
+    assert!(shown(&mut cx), "Format Cells opens it");
 }

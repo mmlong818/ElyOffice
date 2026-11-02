@@ -25,6 +25,7 @@ ely-ui.workspace = true
 
 [dev-dependencies]
 ely-ui = { workspace = true, features = ["test-support"] }
+ely-office = { workspace = true, features = ["test-support"] }
 ely-gpui-component = { workspace = true, features = ["test-support"] }
 tempfile.workspace = true
 gpui = { workspace = true, features = ["test-support"] }

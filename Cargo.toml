@@ -5,9 +5,9 @@ members = ["apps/*", "crates/*"]
 exclude = ["engines", "reference"]
 
 [workspace.package]
-version = "0.1.8"
+version = "0.1.13"
 edition = "2024"
-rust-version = "1.95"
+rust-version = "1.98"
 license = "AGPL-3.0-or-later"
 publish = false
 
@@ -15,17 +15,19 @@ publish = false
 embed-resource = "=3.0.11"
 csv = "1"
 encoding_rs = "0.8"
+flate2 = "1"
 jiff = "0.2"
 anyhow = "1"
 directories = "6"
 dunce = "1"
-ely-gpui-component = { git = "https://git.zacharyzhang.com/ZacharyZhang-NY/Ely-GPUI-Components", rev = "de961eb164c1c88797ea35f0860aba9d18c95e4f" }
+ely-gpui-component = { git = "https://github.com/ELY-Open-Source/Ely-GPUI-Components", rev = "63543a046a06e0a1aba4ff6a91bdc1c3c9ae8580" }
 env_logger = "0.11"
-gpui = { package = "gpui-pre", version = "=0.3.8", default-features = false, features = ["stacker"] }
-gpui_platform = { package = "gpui-pre-platform", version = "=0.3.8", features = ["font-kit", "wayland", "x11"] }
+gpui = { package = "gpui-pre", version = "=0.3.10", default-features = false, features = ["stacker"] }
+gpui_platform = { package = "gpui-pre-platform", version = "=0.3.10", features = ["font-kit", "wayland", "x11"] }
 futures = "0.3"
 libc = "0.2"
 log = "0.4"
+markdown = "=1.0.0"
 metal = "0.33"
 notify = "8"
 quick-xml = "0.41"
@@ -33,33 +35,52 @@ objc2-app-kit = { version = "0.3", default-features = false, features = ["NSWork
 rfd = { version = "0.17", default-features = false }
 aes-gcm = "0.11"
 base64 = "0.23"
-arboard = { version = "3.6", default-features = false, features = ["image-data"] }
+arboard = { version = "3.6", default-features = false, features = ["image-data", "wayland-data-control"] }
 getrandom = "0.4"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "bmp", "webp"] }
 semver = { version = "1", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+rusqlite = { version = "0.40", features = ["bundled"] }
+html5ever = "0.39"
 sha2 = "0.10"
+ring = "0.17"
 tempfile = "3"
-ureq = "3"
-windows-sys = { version = "0.60", features = ["Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi", "Win32_Globalization", "Win32_Storage_FileSystem", "Win32_Security", "Win32_System_Threading", "Win32_System_IO", "Win32_System_JobObjects", "Win32_System_LibraryLoader", "Win32_System_Com", "Win32_UI_Shell", "Win32_Security_Authentication_Identity"] }
-windows = { version = "0.62", features = ["Data_Pdf", "Graphics_Imaging", "Storage_Streams", "Win32_Graphics_Gdi", "Win32_Graphics_Printing", "Win32_Storage_Xps", "Win32_System_Memory", "Win32_System_WinRT", "Win32_UI_Controls_Dialogs", "Win32_UI_Input_KeyboardAndMouse"] }
+unicase = "2.10"
+ureq = { version = "3", features = ["socks-proxy"] }
+unicode-segmentation = "1"
+windows-sys = { version = "0.60", features = ["Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi", "Win32_Globalization", "Win32_Storage_FileSystem", "Win32_Security", "Win32_System_Threading", "Win32_System_IO", "Win32_System_JobObjects", "Win32_System_LibraryLoader", "Win32_System_Com", "Win32_UI_Shell", "Win32_System_Registry", "Win32_Security_Authentication_Identity", "Win32_Security_Cryptography", "Win32_System_Console", "Win32_System_Diagnostics_ToolHelp"] }
+windows = { version = "0.62", features = ["Data_Pdf", "Graphics_Imaging", "Storage_Streams", "Win32_Foundation", "Win32_Graphics_Dxgi_Common", "Win32_Graphics_Gdi", "Win32_Graphics_Imaging", "Win32_Media_MediaFoundation", "Win32_System_Com", "Win32_Graphics_Printing", "Win32_Storage_Xps", "Win32_System_Memory", "Win32_System_WinRT", "Win32_UI_Controls_Dialogs", "Win32_UI_Input_KeyboardAndMouse"] }
+windows-core = "0.62"
 lopdf = { version = "0.45", default-features = false }
 zbus = { version = "5", default-features = false, features = ["async-io"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["NSLocale", "NSPathUtilities", "NSString", "NSURL", "NSDictionary", "NSValue", "NSError", "NSRunLoop", "NSDate", "NSUserDefaults"] }
-objc2-av-foundation = { version = "0.3", default-features = false, features = ["std", "AVPlayer", "AVPlayerItem", "AVPlayerItemOutput", "AVAsset", "objc2-core-media", "objc2-core-video", "objc2-core-foundation"] }
+objc2-av-foundation = { version = "0.3", default-features = false, features = ["std", "AVPlayer", "AVPlayerItem", "AVPlayerItemOutput", "AVAsset", "AVAssetTrack", "AVMediaFormat", "objc2-core-media", "objc2-core-video", "objc2-core-foundation"] }
 objc2-core-media = { version = "0.3", default-features = false, features = ["std", "CMTime"] }
 objc2-core-video = { version = "0.3", default-features = false, features = ["std", "CVBuffer", "CVImageBuffer", "CVPixelBuffer"] }
 objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFString", "CFCGTypes"] }
-core-video = "0.5"
-core-foundation = "0.10"
 objc2 = "0.6"
 security-framework = "3.7"
 objc2-pdf-kit = { version = "0.3", default-features = false, features = ["PDFDocument", "PDFPage", "objc2-app-kit"] }
+imap-proto = "0.17"
+nom = "8"
+mail-builder = { version = "1.0", default-features = false }
+mail-parser = { version = "0.11", features = ["full_encoding"] }
+mail-send = { version = "0.6", default-features = false, features = ["ring", "tls12"] }
+rcgen = "0.14"
+rustls = { version = "0.23", default-features = false, features = ["ring", "tls12", "std"] }
+rustls-platform-verifier = "0.7"
+rustls-native-certs = "0.8"
+rustls-pki-types = "1"
+rustls-webpki = { version = "0.103", default-features = false, features = ["ring", "alloc"] }
+x509-parser = { version = "0.18", features = ["verify"] }
+tokio = { version = "1", features = ["net", "time", "io-util", "rt", "macros"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
 
 ely-files = { path = "crates/ely-files" }
 ely-ipc = { path = "crates/ely-ipc" }
 ely-lok = { path = "crates/ely-lok" }
+ely-mail-engine = { path = "crates/ely-mail-engine" }
 ely-office = { path = "crates/ely-office" }
 ely-pdf-engine = { path = "crates/ely-pdf-engine" }
 ely-platform = { path = "crates/ely-platform" }
@@ -69,5 +90,11 @@ ely-ui = { path = "crates/ely-ui" }
 all = { level = "warn", priority = -1 }
 
 [patch.crates-io]
+accesskit_atspi_common = { path = "vendor/accesskit_atspi_common" }
+accesskit_unix = { path = "vendor/accesskit_unix" }
 gpui-pre = { path = "vendor/gpui-pre" }
+gpui-pre-linux = { path = "vendor/gpui-pre-linux" }
+gpui-pre-macos = { path = "vendor/gpui-pre-macos" }
 gpui-pre-windows = { path = "vendor/gpui-pre-windows" }
+mail-parser = { path = "vendor/mail-parser" }
+zbus = { path = "vendor/zbus" }

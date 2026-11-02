@@ -152,3 +152,30 @@ fn one_cell_in_another_block_filters_that_block() {
     let entries: Vec<String> = sheet::filter_values(&json).expect("parses").entries.into_iter().map(|e| e.text).collect();
     assert_eq!(entries, ["9", "10"], "an AutoFilter from D1 is D's");
 }
+
+/// A text-only column: no cell looks like a header.
+const WORDS: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<office:document xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+ xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"
+ xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" office:version="1.3" office:mimetype="application/vnd.oasis.opendocument.spreadsheet">
+ <office:body><office:spreadsheet><table:table table:name="S">
+ <table:table-row><table:table-cell><text:p>Name</text:p></table:table-cell></table:table-row>
+ <table:table-row><table:table-cell><text:p>a</text:p></table:table-cell></table:table-row>
+ <table:table-row><table:table-cell><text:p>b</text:p></table:table-cell></table:table-row>
+ </table:table></office:spreadsheet></office:body>
+</office:document>"#;
+
+#[test]
+fn a_whole_column_without_a_clear_header_filters_from_its_first_row() {
+    if install().is_none() {
+        eprintln!("SKIP: no pinned LOK build");
+        return;
+    }
+    let (_dir, mut worker, doc) = open_book(WORDS);
+    worker.run(&doc, "cell.goto", &["A:A"]).expect("marks the column");
+    worker.run(&doc, "data.autofilter", &[]).expect("filters without asking");
+    doc.paint_tile(&mut worker, (0, 0, 3840, 3840), (256, 256))
+        .expect("the buttons paint");
+    // The whole column holds blanks too.
+    assert_eq!(entries(&mut worker, &doc), ["", "a", "b"], "the first row heads");
+}

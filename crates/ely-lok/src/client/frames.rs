@@ -49,6 +49,7 @@ fn unpack_pushed(body: &[u8]) -> io::Result<(u64, Events)> {
     };
     let cell = crate::events::Cell::unpack(&mut unpack)?;
     let table = crate::table::Table::unpack(&mut unpack)?;
+    let text = crate::events::TextAnchors::unpack(&mut unpack)?;
     let events = Events {
         seq,
         revision,
@@ -59,6 +60,7 @@ fn unpack_pushed(body: &[u8]) -> io::Result<(u64, Events)> {
         cursor_visible,
         pointer,
         selection,
+        text,
         graphic,
         cropping,
         review,

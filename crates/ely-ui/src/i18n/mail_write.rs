@@ -1,0 +1,111 @@
+//! ElyMail's writing: the compose window and the sender's identity.
+
+pub(super) const EN: &[(&str, &str)] = &[
+    ("mail.write.title", "New Message"),
+    ("mail.write.from", "From"),
+    ("mail.write.plain", "Plain text"),
+    ("mail.write.markdown", "Markdown"),
+    ("mail.write.wrote", "On {date}, {sender} wrote:"),
+    ("mail.write.wrote_undated", "{sender} wrote:"),
+    (
+        "mail.write.forwarded",
+        "---------- Forwarded message ----------",
+    ),
+    ("mail.write.lead.from", "From: {value}"),
+    ("mail.write.lead.date", "Date: {value}"),
+    ("mail.write.lead.subject", "Subject: {value}"),
+    ("mail.write.lead.to", "To: {value}"),
+    ("mail.write.lead.cc", "Cc: {value}"),
+    (
+        "mail.write.missing",
+        "{n} attachments are not downloaded, so they are not forwarded",
+    ),
+    (
+        "mail.write.headers_only",
+        "Only this message's headers are kept, so its words are not quoted",
+    ),
+    (
+        "mail.write.sent_later",
+        "In the Outbox. Changes made after that are not in it; they are still here",
+    ),
+    ("mail.write.wait", "Wait until the message is in the Outbox"),
+    ("mail.write.unnamed", "Unnamed file"),
+    (
+        "mail.write.reading",
+        "Reading {n} files; Send waits for them",
+    ),
+    ("mail.write.no_account", "Add an account before writing"),
+    ("mail.write.link", "This mail link does not open: {error}"),
+    (
+        "mail.write.unread",
+        "The message could not be started: {error}",
+    ),
+    (
+        "mail.write.unopened",
+        "The message window did not open: {error}",
+    ),
+    (
+        "mail.write.attach_failed",
+        "A file was not attached: {error}",
+    ),
+    ("mail.write.discard.title", "Delete this draft?"),
+    (
+        "mail.write.discard.message",
+        "What you wrote goes, here and in the server's Drafts.",
+    ),
+    ("mail.write.discard.go", "Delete"),
+    ("mail.identity.name", "Sender name"),
+    ("mail.identity.save", "Save name and signature"),
+    ("mail.identity.saved", "Name and signature saved"),
+    (
+        "mail.identity.unsaved",
+        "The name and signature were not saved: {error}",
+    ),
+    (
+        "mail.identity.unread",
+        "The name and signature could not be read: {error}",
+    ),
+];
+
+pub(super) const ZH_CN: &[(&str, &str)] = &[
+    ("mail.write.title", "新邮件"),
+    ("mail.write.from", "发件人"),
+    ("mail.write.plain", "纯文本"),
+    ("mail.write.markdown", "Markdown"),
+    ("mail.write.wrote", "{sender} 于 {date} 写道："),
+    ("mail.write.wrote_undated", "{sender} 写道："),
+    ("mail.write.forwarded", "---------- 转发的邮件 ----------"),
+    ("mail.write.lead.from", "发件人：{value}"),
+    ("mail.write.lead.date", "日期：{value}"),
+    ("mail.write.lead.subject", "主题：{value}"),
+    ("mail.write.lead.to", "收件人：{value}"),
+    ("mail.write.lead.cc", "抄送：{value}"),
+    ("mail.write.missing", "{n} 个附件未下载，不会转发"),
+    (
+        "mail.write.headers_only",
+        "这封邮件只存了邮件头，正文不会引用",
+    ),
+    (
+        "mail.write.sent_later",
+        "已放进发件箱。此后的改动不在其中，仍在此处",
+    ),
+    ("mail.write.wait", "请等邮件放进发件箱"),
+    ("mail.write.unnamed", "未命名的文件"),
+    ("mail.write.reading", "正在读取 {n} 个文件，读完才能发送"),
+    ("mail.write.no_account", "先添加账号再写邮件"),
+    ("mail.write.link", "无法打开这个邮件链接：{error}"),
+    ("mail.write.unread", "无法开始写这封邮件：{error}"),
+    ("mail.write.unopened", "写邮件的窗口没有打开：{error}"),
+    ("mail.write.attach_failed", "有文件未能附加：{error}"),
+    ("mail.write.discard.title", "删除这份草稿？"),
+    (
+        "mail.write.discard.message",
+        "写下的内容不再保留，本机与服务器的草稿箱里都删去。",
+    ),
+    ("mail.write.discard.go", "删除"),
+    ("mail.identity.name", "发件人名称"),
+    ("mail.identity.save", "保存名称与签名"),
+    ("mail.identity.saved", "名称与签名已保存"),
+    ("mail.identity.unsaved", "名称与签名未保存：{error}"),
+    ("mail.identity.unread", "无法读出名称与签名：{error}"),
+];

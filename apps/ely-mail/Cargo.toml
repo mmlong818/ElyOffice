@@ -11,8 +11,27 @@ build = "../../packaging/windows/icon.rs"
 embed-resource.workspace = true
 
 [dependencies]
+directories.workspace = true
+ely-files.workspace = true
+ely-gpui-component.workspace = true
+ely-mail-engine.workspace = true
 ely-platform.workspace = true
 ely-ui.workspace = true
+gpui.workspace = true
+jiff.workspace = true
+log.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "sync"] }
+
+[features]
+frames = ["ely-ui/frames"]
+
+[dev-dependencies]
+ely-ui = { workspace = true, features = ["test-support"] }
+ely-gpui-component = { workspace = true, features = ["test-support"] }
+gpui = { workspace = true, features = ["test-support"] }
+fake = { package = "ely-mail-fake", path = "../../crates/ely-mail-fake" }
+tempfile.workspace = true
 
 [lints]
 workspace = true

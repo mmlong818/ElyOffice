@@ -85,6 +85,8 @@ impl Lok {
     pub const NO_TILED_ANNOTATIONS: u64 = 1 << 3;
     /// LOK_FEATURE_DOCUMENT_PASSWORD: the client answers.
     pub const DOCUMENT_PASSWORD: u64 = 1 << 0;
+    /// LOK_FEATURE_VIEWID_IN_VISCURSOR_INVALIDATION_CALLBACK.
+    pub const CURSOR_WITH_VIEW: u64 = 1 << 5;
 
     fn invoke_kit<T: Any + Send>(
         &self,
@@ -192,8 +194,10 @@ impl Lok {
         };
         #[cfg(not(windows))]
         let mut lok = Self { kit, _lib: lib };
-        let features =
-            Self::PART_IN_INVALIDATION | Self::NO_TILED_ANNOTATIONS | Self::DOCUMENT_PASSWORD;
+        let features = Self::PART_IN_INVALIDATION
+            | Self::NO_TILED_ANNOTATIONS
+            | Self::DOCUMENT_PASSWORD
+            | Self::CURSOR_WITH_VIEW;
         lok.invoke_kit(move |kit| {
             type F = unsafe extern "C" fn(*mut Kit, u64);
             call!((*kit).class, 7, F, kit, features);

@@ -20,15 +20,22 @@ notify.workspace = true
 serde_json.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
-gpui_windows = { package = "gpui-pre-windows", version = "=0.3.8" }
+gpui_windows = { package = "gpui-pre-windows", version = "=0.3.10" }
 
 [features]
+frames = ["gpui/profiler"]
 test-support = []
 
 [dev-dependencies]
 ely-gpui-component = { workspace = true, features = ["test-support"] }
 gpui = { workspace = true, features = ["test-support"] }
 tempfile.workspace = true
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+zbus.workspace = true
+
+[target.'cfg(windows)'.dev-dependencies]
+windows-sys.workspace = true
 
 [lints]
 workspace = true

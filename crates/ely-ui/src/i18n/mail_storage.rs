@@ -1,0 +1,68 @@
+//! ElyMail's rows on the settings storage page.
+
+pub(super) const EN: &[(&str, &str)] = &[
+    ("mail.storage.unread", "Mail's storage could not be read: {error}"),
+    ("mail.storage.index", "Mail index"),
+    ("mail.storage.index_hint", "Accounts, folders, headers, drafts and the Outbox: {size}; search: {search}"),
+    ("mail.storage.originals", "Downloaded mail"),
+    (
+        "mail.storage.originals_hint",
+        "{size}. Cleaning up lets go of mail a server still holds; it downloads again when synced or opened. Offline folders, POP3 and imported mail stay.",
+    ),
+    ("mail.storage.forget", "Clean Up…"),
+    ("mail.storage.forget_title", "Clean up downloaded mail?"),
+    (
+        "mail.storage.forget_message",
+        "Bodies and files of mail on IMAP servers are deleted from this computer; headers stay. Recent mail downloads again at the next sync, older mail when opened.",
+    ),
+    ("mail.storage.forget_go", "Clean Up"),
+    ("mail.storage.forgot", "{n} messages let go"),
+    ("mail.storage.forgot.one", "1 message let go"),
+    ("mail.storage.unforgotten", "The mail was not cleaned up: {error}"),
+    ("mail.storage.cap", "Downloaded mail limit"),
+    ("mail.storage.cap_none", "No limit"),
+    (
+        "mail.storage.cap_hint",
+        "Past the limit, the oldest downloads go back to their headers. Offline folders and imported mail are kept.",
+    ),
+    ("mail.storage.cap_unread", "The saved limit is unreadable, so none applies: {error}"),
+    ("mail.storage.cap_unsaved", "The limit was not saved: {error}"),
+    ("mail.storage.untrimmed", "Downloads were not trimmed to the limit: {error}"),
+    ("mail.storage.all", "Export all mail"),
+    ("mail.storage.all_hint", "Each folder becomes an mbox file, in a folder per account."),
+    ("mail.storage.export", "Export…"),
+    ("mail.storage.exported", "{n} folders exported; {left} messages left out (not here whole, or raw binary)"),
+    ("mail.storage.exported.one", "1 folder exported; {left} messages left out (not here whole, or raw binary)"),
+];
+
+pub(super) const ZH_CN: &[(&str, &str)] = &[
+    ("mail.storage.unread", "邮件的存储读不出：{error}"),
+    ("mail.storage.index", "邮件索引"),
+    ("mail.storage.index_hint", "账号、文件夹、邮件头、草稿与发件箱：{size}；搜索：{search}"),
+    ("mail.storage.originals", "下载的邮件"),
+    (
+        "mail.storage.originals_hint",
+        "{size}。清理只放下服务器上仍有的邮件，同步或打开时重新下载；离线文件夹、POP3 与导入的邮件不动。",
+    ),
+    ("mail.storage.forget", "清理…"),
+    ("mail.storage.forget_title", "清理下载的邮件？"),
+    (
+        "mail.storage.forget_message",
+        "IMAP 服务器上邮件的正文与附件从本机删去，邮件头留着。近期的邮件下次同步时重新下载，较早的在打开时下载。",
+    ),
+    ("mail.storage.forget_go", "清理"),
+    ("mail.storage.forgot", "放下了 {n} 封邮件"),
+    ("mail.storage.forgot.one", "放下了 1 封邮件"),
+    ("mail.storage.unforgotten", "邮件没能清理：{error}"),
+    ("mail.storage.cap", "下载邮件的上限"),
+    ("mail.storage.cap_none", "不限"),
+    ("mail.storage.cap_hint", "超过上限时，最早下载的邮件放回只剩邮件头。离线文件夹与导入的邮件不动。"),
+    ("mail.storage.cap_unread", "存下的上限读不出，现不设上限：{error}"),
+    ("mail.storage.cap_unsaved", "上限没能存下：{error}"),
+    ("mail.storage.untrimmed", "下载的邮件没能按上限清理：{error}"),
+    ("mail.storage.all", "导出全部邮件"),
+    ("mail.storage.all_hint", "每个文件夹写成一个 MBOX 文件，每个账号一个文件夹。"),
+    ("mail.storage.export", "导出…"),
+    ("mail.storage.exported", "导出了 {n} 个文件夹；{left} 封邮件未导出（没有完整下载，或含原始二进制内容）"),
+    ("mail.storage.exported.one", "导出了 1 个文件夹；{left} 封邮件未导出（没有完整下载，或含原始二进制内容）"),
+];

@@ -1,7 +1,7 @@
 //! Tabs, page, status line and side panel.
 
 use ely_gpui_component::{
-    feedback::{Banner, EmptyState},
+    feedback::Banner,
     primitives::{IconName, Severity},
     shell::{StatusBar, StatusBarItem},
 };
@@ -24,20 +24,9 @@ impl Docs {
         let Some(counts) = self.active_tab().and_then(|tab| tab.extra.counts) else {
             return status.when_some(zoom, |status, zoom| status.right(zoom));
         };
-        let count = |key, n: u64| ely_ui::i18n::counted(cx, key, n, &[("n", &n.to_string())]);
-        let label = match counts.selected_words {
-            0 => {
-                let words = count("doc.count.word", counts.words);
-                let characters = count("doc.count.character", counts.characters);
-                Self::text(cx, "doc.count.words", &[("words", &words), ("characters", &characters)])
-            }
-            selected => ely_ui::i18n::counted(
-                cx,
-                "doc.count.selected",
-                counts.words,
-                &[("selected", &selected.to_string()), ("words", &counts.words.to_string())],
-            ),
-        };
+        // The kernel counts selected words only; none reads as none.
+        let selected = (counts.selected_words > 0).then_some(counts.selected_words);
+        let label = ely_ui::i18n::word_count(cx, counts.words, counts.characters, selected);
         status.right(StatusBarItem::new("doc-count").label(label)).when_some(zoom, |status, zoom| status.right(zoom))
     }
 
@@ -68,11 +57,7 @@ impl Docs {
                 .child(div().flex_1().min_h_0().child(view))
                 .into_any_element();
         }
-        let title = match self.core.loading.first() {
-            Some((_, name)) => Self::text(cx, "office.loading", &[("name", name)]),
-            None => Self::text(cx, "command.blocked.no_document", &[]),
-        };
-        EmptyState::new("doc-empty", IconName::FileText, title).into_any_element()
+        self.empty_body("doc-empty", IconName::FileText, cx)
     }
 
     /// The navigator column, while shown.
@@ -81,10 +66,11 @@ impl Docs {
             .active_tab()
             .map(|tab| (tab.view.clone(), tab.doc.clone()));
         // Hidden, it follows nothing: no reads on every move.
-        let tab = shown.as_ref().filter(|_| self.navigating).map(|(view, doc)| (view, doc));
+        let open = ely_ui::settings::panels::shown(true, cx);
+        let tab = shown.as_ref().filter(|_| open).map(|(view, doc)| (view, doc));
         self.navigator
             .update(cx, |navigator, cx| navigator.show(tab, cx));
-        shown.filter(|_| self.navigating)?;
+        shown?;
         Some(self.navigator.clone().into())
     }
 

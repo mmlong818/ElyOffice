@@ -1,0 +1,384 @@
+Return-Path: <jsterr@proxforge.de>
+Authentication-Results:  gmx.net; dkim=pass header.i=@proxforge.de
+Authentication-Results:  gmx.net; dkim=pass header.i=@proxforge.de
+Received: from mail.proxdocs.de ([159.195.48.175]) by mx-ha.gmx.net (mxgmx107
+ [212.227.17.5]) with ESMTPS (Nemesis) id 1MydKX-1va9PN213l-00zyre for
+ <jonas.sterr@gmx.net>; Fri, 13 Feb 2026 22:40:20 +0100
+DKIM-Signature: v=1; a=rsa-sha256; s=202512r; d=proxforge.de; c=relaxed/relaxed;
+	h=Message-ID:Subject:To:From:Date; t=1771018820; bh=3DVQev0rnzsjiS18K0C6ooW
+	RAOJw4r7pXxCK8W5rko0=; b=JrERzRo7EhsilmRGVgzSSu2t0YJ4Z+sT9qTgzHMoSqHmLDiE9I
+	NbKRrleVsnCD8Al/EBGQGOQElAaEMEA24cajD7HdeLqXfh8KLGZEEgjZNFNYlagnCuOdDmCt8Mw
+	/hvvtAnMw312DaRfHmtbIsJYo14Qp2lPryzZDMxfpfkbVRZd/aY5MjJKSxaQg1/Vfr+ZNPpMazc
+	IbiEVPwM7+1mDZ4KiBKAsoqFmHB/2rWUJHRCMO8NGtkzu3WxQNUgvcb9cKbkVL933N9jA34iI/W
+	s2S2EJsYHTj94N+yu/UYxP77BO3YB6NE8leSv2PH/HXigTxVSSXsnDAfVU1ZhOQkZyg==;
+DKIM-Signature: v=1; a=ed25519-sha256; s=202512e; d=proxforge.de; c=relaxed/relaxed;
+	h=Message-ID:Subject:To:From:Date; t=1771018820; bh=3DVQev0rnzsjiS18K0C6ooW
+	RAOJw4r7pXxCK8W5rko0=; b=eCgn1xsJ+/rANY9vSBsSCEJz6YdNERmeE4iP7VhkKQFfVftEKD
+	5wyLyA2tHh0f00ik7TOjbSZ7bo4oQa03aOCA==;
+MIME-Version: 1.0
+Date: Fri, 13 Feb 2026 22:38:16 +0100
+From: Jonas Sterr - ProxForge <jsterr@proxforge.de>
+To: Jonas Sterr <jonas.sterr@gmx.net>
+Subject: Re: (#5290765) Proxmox Shop E-Mails
+Message-ID: <7da78721a8a234894af702fe25fc64a5@proxforge.de>
+X-Sender: jsterr@proxforge.de
+Organization: ProxForge
+Content-Type: multipart/mixed;
+ boundary="=_2d98f6c3ddf4b54299ae2604b2717254"
+Envelope-To: <jonas.sterr@gmx.net>
+UI-InboundReport: unknown:2;M01:P0:KBHYSPmQwK8=;oojtM0FZyAHR7/Y3mgLFUSQnTi9t
+ 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
+ xx5r0uEYUyjCGaKcQxEEAiyCQR4jw==
+
+--=_2d98f6c3ddf4b54299ae2604b2717254
+Content-Transfer-Encoding: 8bit
+Content-Type: text/plain; charset=UTF-8;
+ format=flowed
+
+Hallo Stoiko,
+
+alles klar, deine Reply Mail war jetzt nicht im Spam - office-reply.txt
+und eine E-Mail von Daniela vor ein paar Tagen war es auch nicht: 
+training-mail.txt
+und die Ursprungs-Mail ausm Shop die im Spam landete - shop-mail.txt
+
+Vergleicht man die Spam-Scores:
+
+X-Spam-Result: SPF_ALLOW (-0.20),
+URI_COUNT_ODD (0.50),
+DMARC_NA (1.00),
+FORGED_RCVD_TRAIL (1.00),
+MID_RHS_MATCH_FROM (1.00)
+X-Spam-Score: ham, score=3.30
+
+X-Spam-Result: SPF_ALLOW (-0.20),
+DMARC_NA (1.00),
+FORGED_RCVD_TRAIL (1.00),
+MID_RHS_MATCH_FROM (1.00)
+X-Spam-Score: ham, score=2.80
+
+X-Spam-Result: SPF_ALLOW (-0.20),
+XM_UA_NO_VERSION (0.01),
+DMARC_NA (1.00),
+PARTS_DIFFER (1.00),
+SUBJ_EXCESS_QP (1.20),
+HTML_SHORT_LINK_IMG_1 (2.00)
+X-Spam-Score: spam, score=5.01
+
+dann liegt der Unterschied primär im "HTML_SHORT_LINK_IMG_1" und 
+"PARTS_DIFFER" und "SUBJ_EXCESS_QP". Hab da mals recherchiert klingt 
+nach komischen "Einschätzugen" - Encoding Sachen aus den Titeln, kurze 
+Image-Links mit kurzer Domain und Unterschiede zwischen HTML und 
+Text-Version. Kann ich schwer beurteilen, auffällig ist aber, dass die 
+nicht Shop-E-Mail diese Scores NICHT haben.
+
+Das ganze Spam-Filtering usw. passiert komplett über Stalwart. Auf den 
+habe ich vor 3 Monaten gewechselt. Stalwart selbst verwendet selbst 
+sicherlich im Unterbau einige dieser Technologien - habe selbst nichts 
+aber ergänzt oder modifiziert an den Defaults.
+
+Beste Grüße
+
+--
+Jonas Sterr
+Inhaber | ProxForge
+
+📧 E-Mail: jsterr@proxforge.de
+📧 Training: training@proxforge.de
+
+--=_2d98f6c3ddf4b54299ae2604b2717254
+Content-Transfer-Encoding: 8bit
+Content-Type: message/rfc822;
+ name=training-mail.txt
+Content-Disposition: attachment;
+ filename=training-mail.txt;
+ size=2231
+
+Delivered-To: user@mailserver.de
+X-Spam-Status: No
+Received: from proxmox-new.maurer-it.com (proxmox-new.maurer-it.com [94.136.29.106] (AS48943 KAPPER NETWORK-COMMUNICATIONS GmbH, AT))
+    (using TLSv1.3 with cipher TLS13_AES_256_GCM_SHA384)
+    by mail.mailserver.de (Stalwart SMTP) with ESMTPS id 4084ACAF0E46C13;
+    Wed, 11 Feb 2026 17:45:08 +0000
+Authentication-Results: mail.mailserver.de;
+    spf=none (mail.mailserver.de: no SPF records found for postmaster@proxmox-new.maurer-it.com) smtp.helo=proxmox-new.maurer-it.com;
+    spf=pass (mail.mailserver.de: domain of training@proxmox.com designates 94.136.29.106 as permitted sender) smtp.mailfrom=training@proxmox.com;
+    iprev=pass policy.iprev=94.136.29.106;
+    dmarc=none header.from=proxmox.com policy.dmarc=none
+Received-SPF: pass (mail.mailserver.de: domain of training@proxmox.com designates 94.136.29.106 as permitted sender)
+    receiver=mail.mailserver.de; client-ip=94.136.29.106; envelope-from="training@proxmox.com"; helo=proxmox-new.maurer-it.com;
+X-Spam-Result: SPF_ALLOW (-0.20),
+    ARC_NA (0.00),
+    DKIM_NA (0.00),
+    DNSWL_BLOCKED (0.00),
+    FROM_EQ_ENV_FROM (0.00),
+    FROM_HAS_DN (0.00),
+    HTML_SHORT_2 (0.00),
+    MID_RHS_MATCH_ENV_FROM (0.00),
+    PREVIOUSLY_DELIVERED (0.00),
+    RBL_SENDERSCORE_REPUT_BLOCKED (0.00),
+    RBL_SPAMHAUS_BLOCKED_OPENRESOLVER (0.00),
+    RCPT_COUNT_ONE (0.00),
+    RCVD_COUNT_ONE (0.00),
+    RCVD_TLS_LAST (0.00),
+    SOURCE_ASN_48943 (0.00),
+    TO_DN_NONE (0.00),
+    TO_MATCH_ENVRCPT_ALL (0.00),
+    DMARC_NA (1.00),
+    FORGED_RCVD_TRAIL (1.00),
+    MID_RHS_MATCH_FROM (1.00)
+X-Spam-Score: ham, score=2.80
+Return-Path: <training@proxmox.com>
+Received: from proxmox-new.maurer-it.com (localhost.localdomain [127.0.0.1])
+    by proxmox-new.maurer-it.com (Proxmox) with ESMTP id 611CB551DD
+    for <user@mailserver.de>; Wed, 11 Feb 2026 18:45:07 +0100 (CET)
+From: Proxmox Server Solutions GmbH <training@proxmox.com>
+To: user@mailserver.de
+Subject: Exciting updates for our training partnership
+Message-ID: <1d31155548f0f6ff18a140490261872d@proxmox.com>
+MIME-Version: 1.0
+Date: Wed, 11 Feb 2026 17:45:03 +0000
+Content-Type: multipart/alternative; boundary=1N0DHcvl 
+--=_2d98f6c3ddf4b54299ae2604b2717254
+Content-Transfer-Encoding: 8bit
+Content-Type: message/rfc822;
+ name=office-reply.txt
+Content-Disposition: attachment;
+ filename=office-reply.txt;
+ size=2429
+
+Delivered-To: user@mailserver.de
+X-Spam-Status: No
+Received: from proxmox-new.maurer-it.com (proxmox-new.maurer-it.com [94.136.29.106] (AS48943 KAPPER NETWORK-COMMUNICATIONS GmbH, AT))
+    (using TLSv1.3 with cipher TLS13_AES_256_GCM_SHA384)
+    by mail.mailserver.de (Stalwart SMTP) with ESMTPS id 4096222BDC73C13;
+    Fri, 13 Feb 2026 10:26:04 +0000
+Authentication-Results: mail.mailserver.de;
+    spf=none (mail.mailserver.de: no SPF records found for postmaster@proxmox-new.maurer-it.com) smtp.helo=proxmox-new.maurer-it.com;
+    spf=pass (mail.mailserver.de: domain of office@proxmox.com designates 94.136.29.106 as permitted sender) smtp.mailfrom=office@proxmox.com;
+    iprev=pass policy.iprev=94.136.29.106;
+    dmarc=none header.from=proxmox.com policy.dmarc=none
+Received-SPF: pass (mail.mailserver.de: domain of office@proxmox.com designates 94.136.29.106 as permitted sender)
+    receiver=mail.mailserver.de; client-ip=94.136.29.106; envelope-from="office@proxmox.com"; helo=proxmox-new.maurer-it.com;
+X-Spam-Result: SPF_ALLOW (-0.20),
+    ARC_NA (0.00),
+    DKIM_NA (0.00),
+    DNSWL_BLOCKED (0.00),
+    FROM_EQ_ENV_FROM (0.00),
+    FROM_HAS_DN (0.00),
+    MID_RHS_MATCH_ENV_FROM (0.00),
+    PREVIOUSLY_DELIVERED (0.00),
+    RBL_SENDERSCORE_REPUT_BLOCKED (0.00),
+    RCPT_COUNT_ONE (0.00),
+    RCPT_IN_BODY (0.00),
+    RCVD_COUNT_ONE (0.00),
+    RCVD_TLS_LAST (0.00),
+    SOURCE_ASN_48943 (0.00),
+    TO_DN_NONE (0.00),
+    TO_MATCH_ENVRCPT_ALL (0.00),
+    URI_COUNT_ODD (0.50),
+    DMARC_NA (1.00),
+    FORGED_RCVD_TRAIL (1.00),
+    MID_RHS_MATCH_FROM (1.00)
+X-Spam-Score: ham, score=3.30
+Return-Path: <office@proxmox.com>
+Received: from proxmox-new.maurer-it.com (localhost.localdomain [127.0.0.1])
+    by proxmox-new.maurer-it.com (Proxmox) with ESMTP id 1C36444F59
+    for <user@mailserver.de>; Fri, 13 Feb 2026 11:26:04 +0100 (CET)
+From: Proxmox Server Solutions GmbH <office@proxmox.com>
+To: user@mailserver.de
+Subject: RE: (#5290765) Proxmox Shop E-Mails
+Auto-Submitted: auto-generated
+X-Auto-Response-Suppress: All
+References: <tickets/35323930373635@pobo.intra.proxmox.com>
+    <f5ce60407059d7e4a1a287650059aa36@mailserver.de>
+In-Reply-To: <tickets/35323930373635@pobo.intra.proxmox.com>
+Message-ID: <214c803d66ce9428e8e68ada78c9b308@proxmox.com>
+MIME-Version: 1.0
+Date: Fri, 13 Feb 2026 10:26:02 +0000
+Content-Type: multipart/alternative; boundary=qOqVarFP 
+--=_2d98f6c3ddf4b54299ae2604b2717254
+Content-Transfer-Encoding: 8bit
+Content-Type: message/rfc822;
+ name=shop-mail.txt
+Content-Disposition: attachment;
+ filename=shop-mail.txt;
+ size=2577
+
+Delivered-To: user@mailserver.de
+X-Spam-Status: Yes
+Received: from firstgate.proxmox.com (firstgate.proxmox.com [212.224.123.68] (AS44066 firstcolo GmbH, DE))
+(using TLSv1.3 with cipher TLS13_AES_256_GCM_SHA384)
+by mail.mailserver.de (Stalwart SMTP) with ESMTPS id 408CA8053E56813;
+Thu, 12 Feb 2026 12:21:04 +0000
+Authentication-Results: mail.mailserver.de;
+spf=none (mail.mailserver.de: no SPF records found for postmaster@firstgate.proxmox.com) smtp.helo=firstgate.proxmox.com;
+spf=pass (mail.mailserver.de: domain of sales@proxmox.com designates 212.224.123.68 as permitted sender) smtp.mailfrom=sales@proxmox.com;
+iprev=pass policy.iprev=212.224.123.68;
+dmarc=none header.from=proxmox.com policy.dmarc=none
+Received-SPF: pass (mail.mailserver.de: domain of sales@proxmox.com designates 212.224.123.68 as permitted sender)
+receiver=mail.mailserver.de; client-ip=212.224.123.68; envelope-from="sales@proxmox.com"; helo=firstgate.proxmox.com;
+X-Spam-Result: SPF_ALLOW (-0.20),
+ARC_NA (0.00),
+DBL_BLOCKED_OPENRESOLVER (0.00),
+DKIM_NA (0.00),
+DNSWL_BLOCKED (0.00),
+FROM_EQ_ENV_FROM (0.00),
+FROM_HAS_DN (0.00),
+HAS_EXTERNAL_IMG (0.00),
+HAS_LINK_TO_LARGE_IMG (0.00),
+HAS_REPLYTO (0.00),
+HTML_SHORT_1 (0.00),
+MID_RHS_MATCH_ENV_FROMTLD (0.00),
+MID_RHS_MATCH_FROMTLD (0.00),
+RBL_SENDERSCORE_REPUT_BLOCKED (0.00),
+RCPT_COUNT_ONE (0.00),
+RCVD_COUNT_ONE (0.00),
+RCVD_TLS_LAST (0.00),
+REPLYTO_ADDR_EQ_FROM (0.00),
+REPLYTO_EQ_FROM (0.00),
+SOURCE_ASN_44066 (0.00),
+TO_DN_ALL (0.00),
+TO_MATCH_ENVRCPT_ALL (0.00),
+XM_UA_NO_VERSION (0.01),
+DMARC_NA (1.00),
+PARTS_DIFFER (1.00),
+SUBJ_EXCESS_QP (1.20),
+HTML_SHORT_LINK_IMG_1 (2.00)
+X-Spam-Score: spam, score=5.01
+Return-Path: <sales@proxmox.com>
+Received: from firstgate.proxmox.com (localhost [127.0.0.1])
+by firstgate.proxmox.com (Proxmox) with ESMTP id C16BFE2A4;
+Thu, 12 Feb 2026 13:21:03 +0100 (CET)
+
+To: Vorname Nachname <user@mailserver.de>
+Subject: =?us-ascii?Q?[Ticket_ID:_255909]_Bestellung:_Proxmox_VE_inkl?=
+=?us-ascii?Q?._Trainings-Plus_Rabatt_(?=
+Date: Thu, 12 Feb 2026 13:21:03 +0100
+From: Proxmox Server Solutions GmbH Sales and General Requests <sales@proxmox.com>
+Reply-To: Proxmox Server Solutions GmbH Sales and General Requests <sales@proxmox.com>
+Message-ID: <BUedpiSJ22k9KJibNOeWYnUU0lAAdQj81VXUNhh4Q@shop.proxmox.com>
+X-Mailer: Proxmox Server Solutions GmbH
+Auto-Submitted: auto-generated
+X-Auto-Response-Suppress: All
+MIME-Version: 1.0
+Content-Type: multipart/alternative;
+boundary="b1_BUedpiSJ22k9KJibNOeWYnUU0lAAdQj81VXUNhh4Q"
+Content-Transfer-Encoding: 8bit
+--=_2d98f6c3ddf4b54299ae2604b2717254--

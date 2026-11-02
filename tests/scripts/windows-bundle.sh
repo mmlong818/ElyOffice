@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The bundle runs each setup; a refusal stops it.
+# A refusal stops the setups; new apps go where asked.
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/../.." && pwd)
@@ -16,8 +16,19 @@ clean() {
     reg delete "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Ely Office $name" /f >/dev/null 2>&1 || true
     rm -f "$APPDATA/Microsoft/Windows/Start Menu/Programs/$name.lnk"
   done
+  # Where a misread /D= would put the new app.
+  rm -rf "$LOCALAPPDATA/Programs/Ely Office/ElyProbeThree"
 }
-trap 'kill $(jobs -p) 2>/dev/null || true; clean' EXIT
+# The user's own remembered folder comes back afterwards.
+kept=$(reg query "HKCU\Software\Ely Office" /v Root 2>/dev/null | awk '/Root/ { sub(/.*REG_SZ +/, ""); print }' || true)
+restore() {
+  if [ -n "$kept" ]; then
+    reg add "HKCU\Software\Ely Office" /v Root /d "$kept" /f >/dev/null
+  else
+    reg delete "HKCU\Software\Ely Office" /v Root /f >/dev/null 2>&1 || true
+  fi
+}
+trap 'kill $(jobs -p) 2>/dev/null || true; clean; restore' EXIT
 clean
 rm -rf "$work"
 mkdir -p "$work"
@@ -42,20 +53,42 @@ done
 "$makensis" -V1 -INPUTCHARSET UTF8 -DVERSION=1 -DAPPS="$(cygpath -w "$work/apps.nsh")" \
   -DOUTFILE="$(cygpath -w "$work/bundle.exe")" "$(cygpath -w "$root/packaging/windows/bundle.nsi")"
 
-run() { "$work/bundle.exe" /S && echo 0 || echo $?; }
+# NSIS wants /D= last and unquoted, spaces and all.
+chosen="$work/O'Neil chosen dir"
+run() {
+  # Paths go through the environment: no quoting to escape.
+  ELY_SETUP=$(cygpath -w "$work/bundle.exe") ELY_CHOSEN=$(cygpath -w "$chosen") powershell -NoProfile -Command \
+    'exit (Start-Process -FilePath $env:ELY_SETUP -ArgumentList "/S /D=$env:ELY_CHOSEN" -Wait -PassThru).ExitCode' &&
+    echo 0 || echo $?
+}
+# New: no key, so it goes in the chosen folder.
+reg delete "HKCU\Software\Ely Office\ElyProbeThree" /f >/dev/null
 [ "$(run)" = 0 ] || fail "the bundle failed"
+for name in ElyProbe ElyProbeTwo; do
+  [ -f "$work/app-$name/.ely-installed" ] || fail "$name did not update in place"
+done
+[ -f "$chosen/ElyProbeThree/.ely-installed" ] || fail "the new app is not in the chosen folder"
+[ ! -e "$work/app-ElyProbeThree" ] || fail "the new app went elsewhere"
 for name in $names; do
-  [ -f "$work/app-$name/.ely-installed" ] || fail "$name has no install list"
-  reg query "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Ely Office $name" >/dev/null 2>&1 ||
+  reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\Ely Office $name" >/dev/null 2>&1 ||
     fail "$name has no uninstall entry"
 done
+reg query "HKCU\Software\Ely Office" /v Root | grep -qF "$(cygpath -w "$chosen")" ||
+  fail "the chosen folder is not remembered"
+# Back to its own key, for the refusal below.
+rm -rf "$chosen"
+reg add "HKCU\Software\Ely Office\ElyProbeThree" /v InstallDir /d "$(cygpath -w "$work/app-ElyProbeThree")" /f >/dev/null
 
 # The second app is refused; the third never runs.
 rm -rf "$work/app-ElyProbeThree" "$work/held"
-held=$(cygpath -w "$work/app-ElyProbeTwo/ely-probe-two.exe")
-powershell -NoProfile -Command "\$f=[IO.File]::Open('$held','Open','Read','Read'); \
-  New-Item '$(cygpath -w "$work/held")' | Out-Null; Start-Sleep 60" &
-until [ -e "$work/held" ]; do sleep 0.2; done
+ELY_HELD=$(cygpath -w "$work/app-ElyProbeTwo/ely-probe-two.exe") ELY_MARK=$(cygpath -w "$work/held") \
+  powershell -NoProfile -Command \
+  '$f=[IO.File]::Open($env:ELY_HELD,"Open","Read","Read"); New-Item $env:ELY_MARK | Out-Null; Start-Sleep 60' &
+holder=$!
+until [ -e "$work/held" ]; do
+  kill -0 "$holder" 2>/dev/null || fail "the file lock did not take"
+  sleep 0.2
+done
 result=$(run)
 kill %% 2>/dev/null; wait 2>/dev/null || true
 [ "$result" = 2 ] || fail "the bundle exited $result over a refused app"

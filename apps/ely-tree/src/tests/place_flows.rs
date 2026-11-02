@@ -4,10 +4,10 @@ use ely_gpui_component::git::StashAction;
 use gpui::{App, Entity, TestAppContext};
 
 use super::{
-    committed,
+    committed, connected,
     places::me,
     sh,
-    window::{branch, settle, window},
+    window::{branch, settle, settle_within, window},
 };
 use crate::{
     asks::Ask,
@@ -133,7 +133,6 @@ fn fetch_runs_with_progress_and_lands() {
     assert!(cx.update(|_, app| tree.read(app).ask.is_none()));
 }
 
-#[cfg(unix)]
 #[test]
 fn a_stopped_fetch_ends_quietly() {
     let dir = tempfile::tempdir().expect("a temp dir");
@@ -147,13 +146,90 @@ fn a_stopped_fetch_ends_quietly() {
     settle(cx, |app| branch(tree.read(app)).is_some());
     cx.update(|_, app| tree.update(app, |tree, cx| tree.fetch_one("origin", cx)));
     settle(cx, |app| running(&tree, app));
-    let _held = silent.accept().expect("Git connects");
+    let _held = connected(&silent);
     let id = cx.update(|_, app| tree.read(app).active.expect("open"));
     cx.update(|_, app| tree.update(app, |tree, cx| tree.stop_remote(id, cx)));
-    settle(cx, |app| !running(&tree, app));
+    settle_within(cx, GRACE, |app| !running(&tree, app));
     assert!(
         cx.update(|_, app| tree.read(app).ask.is_none()),
         "a stop is no failure"
+    );
+}
+
+#[test]
+fn a_stopped_clone_leaves_no_folder() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let silent = std::net::TcpListener::bind("127.0.0.1:0").expect("a port");
+    let url = format!("git://{}/nothing", silent.local_addr().expect("an address"));
+    let into = dir.path().join("into");
+    let mut cx = TestAppContext::single();
+    let (tree, cx) = window(&mut cx, dir.path());
+    cx.update(|_, app| tree.update(app, |tree, cx| tree.start_clone(url, into.clone(), cx)));
+    let _held = connected(&silent);
+    settle(cx, |_| into.exists());
+    cx.update(|_, app| tree.update(app, |tree, cx| tree.stop_clone(cx)));
+    settle_within(cx, GRACE, |app| tree.read(app).cloning.is_none());
+    assert!(!into.exists(), "Git removed the clone it began");
+    assert!(cx.update(|_, app| tree.read(app).ask.is_none()), "a stop is no failure");
+}
+
+/// Windows may end a hung Git only after 10 s.
+const GRACE: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Git outside its own session; no group stop reaches it.
+#[cfg(unix)]
+fn unstoppable() -> std::process::Child {
+    std::process::Command::new(&super::git().path)
+        .args(["cat-file", "--batch"])
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .expect("Git starts")
+}
+
+#[cfg(unix)]
+#[test]
+fn a_stop_that_fails_names_git_not_the_clone() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let root = committed(dir.path());
+    let silent = std::net::TcpListener::bind("127.0.0.1:0").expect("a port");
+    let url = format!("git://{}/nothing", silent.local_addr().expect("an address"));
+    sh(&root, &["remote", "add", "origin", &url]);
+    let mut cx = TestAppContext::single();
+    let (tree, cx) = window(&mut cx, dir.path());
+    // The window's toasts live on its root.
+    let shell = cx.update(|window, app| {
+        let shell =
+            ely_ui::tool_root(ely_platform::AppId::Tree, tree.clone().into(), Vec::new(), window, app);
+        tree.update(app, |tree, _| tree.root = shell.downgrade());
+        shell
+    });
+    cx.update(|_, app| tree.update(app, |tree, cx| tree.open_path(root.clone(), cx)));
+    settle(cx, |app| branch(tree.read(app)).is_some());
+    cx.update(|_, app| tree.update(app, |tree, cx| tree.fetch_one("origin", cx)));
+    settle(cx, |app| running(&tree, app));
+    let held = connected(&silent);
+    let id = cx.update(|_, app| tree.read(app).active.expect("open"));
+    let stop = crate::running::Stop::over(unstoppable());
+    cx.update(|_, app| {
+        tree.update(app, |tree, cx| {
+            let net = tree.opened_mut(id).and_then(|opened| opened.net.as_mut()).expect("a run");
+            let real = std::mem::replace(&mut net.stop, stop.clone());
+            tree.stop_remote(id, cx);
+            tree.opened_mut(id).and_then(|opened| opened.net.as_mut()).expect("a run").stop = real;
+        })
+    });
+    let said = cx.update(|_, app| ely_ui::i18n::text(app, "tree.error.stop_remote", &[("error", "")]));
+    let toasts = cx.update(|_, app| shell.read(app).toasts(app));
+    assert!(toasts.iter().any(|(text, _)| text.starts_with(said.as_ref())), "{toasts:?}");
+    drop(held);
+    settle(cx, |app| !running(&tree, app));
+    // The fetch's own failure still shows; no stop is claimed.
+    let stopped = cx.update(|_, app| ely_ui::i18n::text(app, "tree.net.stopped", &[]));
+    let toasts = cx.update(|_, app| shell.read(app).toasts(app));
+    assert!(toasts.iter().all(|(text, _)| *text != stopped), "{toasts:?}");
+    assert!(
+        cx.update(|_, app| matches!(tree.read(app).ask, Some(Ask::Failed { .. }))),
+        "the fetch says why it failed"
     );
 }
 

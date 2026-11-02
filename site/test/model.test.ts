@@ -22,8 +22,8 @@ test("the accent covers at most a tenth of the visible tops", () => {
   assert.ok(area(all.filter((b) => b.tone === ACCENT)) / area([desk]) <= 0.1);
 });
 
-test("six apps between the desk and the roads", () => {
-  assert.deepEqual(model.slice(1, -1).map((p) => p.name), ["ElyDoc", "ElyTable", "ElyShow", "ElyPDF", "ElyTree", "ElyMark"]);
+test("seven apps between the desk and the roads", () => {
+  assert.deepEqual(model.slice(1, -1).map((p) => p.name), ["ElyDoc", "ElyTable", "ElyShow", "ElyPDF", "ElyMail", "ElyTree", "ElyMark"]);
 });
 
 type Box = (typeof all)[number];

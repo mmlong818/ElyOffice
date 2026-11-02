@@ -12,11 +12,15 @@ use crate::{AppId, lock::FileLock};
 mod shared;
 pub use shared::{
     APPEARANCE, AUTHOR, Appearance, CHECK_UPDATES, LANGUAGE, Language, MOTION, Motion,
-    OMARCHY_SYNC, Shared, word,
+    OMARCHY_SYNC, Shared, UI_FONT, UI_TEXT_SIZE, UI_TEXT_SIZES, DOC_ZOOM, DOC_ZOOMS, DocZoom,
+    Sides, TWO_SIDED, word,
 };
 
 /// The layout this build reads and writes.
 pub const VERSION: u64 = 1;
+
+/// Taken while a settings file is written.
+pub(crate) const LOCK: &str = ".settings.lock";
 
 /// One settings file; writes keep unknown fields.
 #[derive(Clone, Debug)]
@@ -93,7 +97,7 @@ impl Store {
             .parent()
             .ok_or_else(|| io::Error::other("settings have no folder"))?;
         std::fs::create_dir_all(dir)?;
-        let _held = FileLock::take(&dir.join(".settings.lock"))?;
+        let _held = FileLock::take(&dir.join(LOCK))?;
         // A newer choice made while we waited wins.
         if !still() {
             log::info!("settings: {key} overtaken while waiting");

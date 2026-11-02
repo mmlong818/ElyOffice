@@ -7,7 +7,6 @@ batch=${1:-1}
 dist=${ELY_DIST:-$root/dist}
 version=$(awk -F'"' '/^version = / { print $2; exit }' "$root/Cargo.toml")
 arch=$(uname -m)
-releases=https://git.zacharyzhang.com/ZacharyZhang-NY/ElyOffice/releases
 [ -z "${ELY_NOTARY_PROFILE:-}" ] || [ -n "${ELY_SIGN_IDENTITY:-}" ] || {
   echo "release.sh: notarizing needs ELY_SIGN_IDENTITY, a Developer ID" >&2
   exit 1
@@ -40,11 +39,9 @@ awk -F'\t' -v batch="$batch" '$4 == batch { print $1 "\t" $2 }' "$root/packaging
     out=$dist/$name-$version-$arch.dmg
     dmg "$out" "$name" "$dist/$name.app"
     # What the app's update check reads from the latest release.
-    sha=$(shasum -a 256 "$out" | cut -d' ' -f1)
-    url="$releases/download/v$version/$(basename "$out")"
-    printf '{"version": "%s", "assets": {"macos-%s": {"url": "%s", "sha256": "%s"}}}\n' \
-      "$version" "${arch/arm64/aarch64}" "$url" "$sha" >"$dist/$slug.json"
-    echo "$dist/$slug.json"
+    "$root/packaging/manifest.sh" "$slug" "macos-${arch/arm64/aarch64}" "$out"
+    # Apps up to 0.1.9 read <slug>.json; all are Apple silicon.
+    [ "$arch" != arm64 ] || cp "$dist/$slug-macos-aarch64.json" "$dist/$slug.json"
   done
 # Every app of the batch in one dmg.
 apps=()

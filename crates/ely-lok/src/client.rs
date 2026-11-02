@@ -17,7 +17,11 @@ mod feed;
 mod frames;
 mod install;
 mod load;
+mod stop;
 pub use install::{install_dir, templates};
+pub use stop::Stopper;
+#[cfg(any(test, feature = "test-support"))]
+pub use install::test_install;
 use install::worker_bin;
 #[cfg(windows)]
 pub(crate) mod supervise;
@@ -46,6 +50,7 @@ pub struct Worker {
     request_timeout: std::time::Duration,
     #[cfg(windows)]
     shutdown_timeout: std::time::Duration,
+    pub(crate) stopper: Stopper,
     /// The name new comments sign with, once set.
     author: Option<String>,
 }
@@ -94,6 +99,11 @@ impl Doc {
         self.kind == 1
     }
 
+    /// Whether this is a presentation.
+    pub fn is_deck(&self) -> bool {
+        self.kind == 2
+    }
+
     /// Whether this handle saw a later state than `other`.
     pub fn newer_than(&self, other: &Doc) -> bool {
         self.rev > other.rev
@@ -103,6 +113,11 @@ impl Doc {
 /// Whether `error` refused a request made for an older state.
 pub fn is_stale(error: &io::Error) -> bool {
     error.to_string().starts_with(ipc::STALE)
+}
+
+/// Whether `error` refused an undo or redo with no history.
+pub fn is_nothing(error: &io::Error) -> bool {
+    error.to_string().starts_with(ipc::NOTHING)
 }
 
 static SESSIONS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -164,7 +179,9 @@ impl Worker {
             .arg(profile_dir.as_os_str())
             .env("SAL_FORCE_HIDPI_SCALING", "1")
             // A killed worker's profile lock would hang the next.
-            .env("SAL_NOLOCK_PROFILE", "1");
+            .env("SAL_NOLOCK_PROFILE", "1")
+            // The kernel's OpenCL test can hang in AMD's driver.
+            .env("SAL_DISABLE_OPENCL", "1");
         // Linux tiles via cairo are BGRA; Skia there is RGBA.
         match cfg!(target_os = "linux") {
             true => command.env("SAL_DISABLESKIA", "1"),
@@ -172,6 +189,8 @@ impl Worker {
         };
         // Calc reports in document twips; unipoll lends LOK's loop.
         command.env("SAL_LOK_OPTIONS", "unipoll:sc_print_twips_msgs");
+        // LOK spells no language off this list.
+        command.env("LOK_ALLOWLIST_LANGUAGES", "en");
         if dev {
             command.arg("--dev");
         }
@@ -184,7 +203,8 @@ impl Worker {
         }
         let temp = profile_dir.join("tmp");
         std::fs::create_dir_all(&temp)?;
-        command.env("TMPDIR", &temp);
+        // Unix reads TMPDIR; Windows reads TMP, then TEMP.
+        command.env("TMPDIR", &temp).env("TMP", &temp).env("TEMP", &temp);
         let mut child = command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -210,8 +230,13 @@ impl Worker {
         let (feed, (sender, replies)) = (Feed::default(), mpsc::channel());
         let reading = feed.clone();
         std::thread::spawn(move || frames::read_frames(BufReader::new(stdout), &reading, &sender));
+        #[cfg(windows)]
+        let stopper = Stopper::new(child.id(), supervisor.stop_handle());
+        #[cfg(not(windows))]
+        let stopper = Stopper::new(child.id());
         let worker = Self {
             child,
+            stopper,
             stdin: BufWriter::new(stdin),
             replies,
             feed,
@@ -403,13 +428,17 @@ impl Worker {
     /// A worker whose output failed: stopped, reaped, and why.
     fn broken(&mut self, request: u8, error: io::Error) -> io::Error {
         #[cfg(windows)]
-        self.supervisor.expire();
-        #[cfg(windows)]
-        let status = "job termination requested".to_owned();
+        let status = {
+            *self.stopper.gate() = true;
+            self.supervisor.expire();
+            "job termination requested".to_owned()
+        };
         #[cfg(not(windows))]
-        let _ = self.child.kill();
-        #[cfg(not(windows))]
-        let status = self.child.wait().map(|status| status.to_string()).unwrap_or_else(|wait| wait.to_string());
+        let status = {
+            *self.stopper.gate() = true;
+            let _ = self.child.kill();
+            self.child.wait().map(|status| status.to_string()).unwrap_or_else(|wait| wait.to_string())
+        };
         log::error!("lok: the worker failed on request {request} ({status})");
         let said = self.stderr.last_error().map_or_else(String::new, |said| format!(": {said}"));
         io::Error::new(error.kind(), format!("the lok worker failed: {error} ({status}){said}"))
@@ -476,14 +505,6 @@ impl Worker {
         }
     }
 
-    /// Why the worker process ended, if it has.
-    pub fn ended(&mut self) -> Option<String> {
-        match self.child.try_wait() {
-            Ok(status) => status.map(|status| status.to_string()),
-            Err(error) => Some(error.to_string()),
-        }
-    }
-
     /// Closes the document in the worker.
     pub fn close_doc(&mut self, doc: Doc) -> io::Result<()> {
         self.request(tag::CLOSE_DOC, &Pack::new().u64(self.doc_id(&doc)?).bytes())?;
@@ -497,6 +518,7 @@ impl Worker {
             return Ok(());
         }
         self.down = true;
+        let _close_gate = stop::CloseGate::new(&self.stopper);
         #[cfg(windows)]
         let deadline = self.supervisor.operation(self.shutdown_timeout).ok();
         #[cfg(windows)]
@@ -513,19 +535,25 @@ impl Worker {
             let _ = self.child.kill();
         }
         #[cfg(windows)]
-        let status = match self.supervisor.reap(&mut self.child, outcome.is_err()) {
-            Ok(status) => status,
-            Err(error) => return Err(error),
+        let status = {
+            *self.stopper.gate() = true;
+            match self.supervisor.reap(&mut self.child, outcome.is_err()) {
+                Ok(status) => status,
+                Err(error) => return Err(error),
+            }
         };
         #[cfg(not(windows))]
-        let status = match self.child.wait() {
-            Ok(status) => status,
-            Err(error) => {
-                let _ = self.child.kill();
-                return Err(io::Error::new(
-                    error.kind(),
-                    format!("the lok worker could not be reaped: {error}"),
-                ));
+        let status = {
+            *self.stopper.gate() = true;
+            match self.child.wait() {
+                Ok(status) => status,
+                Err(error) => {
+                    let _ = self.child.kill();
+                    return Err(io::Error::new(
+                        error.kind(),
+                        format!("the lok worker could not be reaped: {error}"),
+                    ));
+                }
             }
         };
         if outcome.is_ok() && !status.success() {

@@ -35,6 +35,10 @@ fn a_bare_relative_name_saves_and_probes() {
 #[test]
 fn a_failed_write_keeps_the_original() {
     use std::os::unix::fs::PermissionsExt;
+    // Root ignores modes; only read-only mounts stop it.
+    if unsafe { libc::geteuid() } == 0 {
+        return eprintln!("SKIP: root ignores the folder's mode");
+    }
     let dir = tempfile::tempdir().expect("a temp dir");
     let target = dir.path().join("keep.md");
     write(&target, "original");
@@ -164,43 +168,6 @@ fn an_export_refuses_path_aliases_of_the_session() {
     assert_eq!(read(&editing), "session");
 }
 
-#[test]
-fn an_import_copies_and_never_deletes() {
-    let dir = tempfile::tempdir().expect("a temp dir");
-    let source = dir.path().join("photo.png");
-    write(&source, "png-bytes");
-    let attachments = dir.path().join("attachments");
-    let first = import_attachment(&source, &attachments).expect("the import lands");
-    assert!(source.try_exists().expect("the source check"));
-    assert_eq!(read(&source), "png-bytes");
-    assert_eq!(read(&first), "png-bytes");
-    let second = import_attachment(&source, &attachments).expect("the second import");
-    assert_ne!(first, second);
-    assert_eq!(read(&first), "png-bytes");
-    assert_eq!(read(&second), "png-bytes");
-}
-
-#[test]
-fn written_bytes_take_a_free_name() {
-    let dir = tempfile::tempdir().expect("a temp dir");
-    let first = write_attachment("pasted.png", b"one", dir.path()).expect("the first write");
-    let second = write_attachment("pasted.png", b"two", dir.path()).expect("the second write");
-    assert_ne!(first, second);
-    assert_eq!((read(&first), read(&second)), ("one".into(), "two".into()));
-}
-
-#[test]
-fn a_numbered_import_name_fits_long_file_names() {
-    let dir = tempfile::tempdir().expect("a temp dir");
-    let source = dir.path().join(format!("{}.png", "x".repeat(251)));
-    write(&source, "png");
-    let attachments = dir.path().join("attachments");
-    import_attachment(&source, &attachments).expect("the first import");
-    let second = import_attachment(&source, &attachments).expect("the second import");
-    let len = second.file_name().expect("a name").len();
-    assert!(len <= 255, "the numbered name fits: {len}");
-    assert_eq!(read(&second), "png");
-}
 
 #[test]
 fn the_save_flow_checks_external_changes_first() {
@@ -510,3 +477,8 @@ fn overwrite_resolves_a_conflict_with_the_local_version() {
 
 #[cfg(windows)]
 mod long;
+
+
+mod names;
+
+mod gone;

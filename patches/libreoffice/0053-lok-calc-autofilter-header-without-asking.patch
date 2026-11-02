@@ -1,0 +1,36 @@
+LOK: AutoFilter takes the first row as header without asking
+
+When Calc cannot tell a header from the data (a whole column of text,
+an empty column), turning on AutoFilter asks whether the first row is
+a header. Under LOK the client closes the box as soon as it opens,
+inside the callback that announces it; the box's async handler then
+applies the filter on a half-built dialog, and the next tile paint
+crashes the process (GitHub ElyOffice #4). LOK asks no question here:
+the first row heads the range, which is the box's default answer and
+what Excel does.
+
+--- a/sc/source/ui/view/dbfunc.cxx
++++ b/sc/source/ui/view/dbfunc.cxx
+@@ -18,6 +18,7 @@
+  */
+ 
+ #include <scitems.hxx>
++#include <comphelper/lok.hxx>
+ #include <sfx2/bindings.hxx>
+ #include <vcl/svapp.hxx>
+ #include <vcl/weld.hxx>
+@@ -340,7 +341,13 @@
+         if ( !rDoc.IsBlockEmpty( aParam.nCol1, aParam.nRow1,
+                                  aParam.nCol2, aParam.nRow2, nTab ) )
+         {
+-            if (!bHeader)
++            if (!bHeader && comphelper::LibreOfficeKit::isActive())
++            {
++                // LOK asks nothing: the first row heads, the box's default.
++                pDBData->SetHeader( true );
++                ApplyAutoFilter(*pDocSh, rViewData, pDBData, nRow, nTab, aParam);
++            }
++            else if (!bHeader)
+             {
+                 std::shared_ptr<weld::MessageDialog> xBox(Application::CreateMessageDialog(rViewData.GetDialogParent(),
+                                                                                            VclMessageType::Question,

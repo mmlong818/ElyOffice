@@ -16,15 +16,16 @@ pub struct Lines {
     pub offset: i32,
     pub inner: Vec<Line>,
     /// Bounds of the first and last lines, when sent.
-    pub ends: Option<[(i32, i32); 2]>,
+    pub ends: Option<[(i64, i64); 2]>,
 }
 
 /// An inner line and the kernel's bounds for it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Line {
     pub position: i32,
-    pub min: i32,
-    pub max: i32,
+    /// Writer's `long`: 64 bits off Windows.
+    pub min: i64,
+    pub max: i64,
     pub hidden: bool,
 }
 
@@ -44,11 +45,12 @@ pub fn read(text: &str) -> Result<Option<Table>, String> {
         return Ok(None);
     }
     // Impress writes every value as text (boost's property tree).
-    let int = |value: Option<&Value>| match value? {
-        Value::Number(number) => i32::try_from(number.as_i64()?).ok(),
+    let long = |value: Option<&Value>| match value? {
+        Value::Number(number) => number.as_i64(),
         Value::String(text) => text.parse().ok(),
         _ => None,
     };
+    let int = |value: Option<&Value>| i32::try_from(long(value)?).ok();
     let flag = |value: Option<&Value>| match value? {
         Value::Bool(on) => Some(*on),
         Value::String(text) => text.parse().ok(),
@@ -65,12 +67,12 @@ pub fn read(text: &str) -> Result<Option<Table>, String> {
         let inner = entries.iter().map(|entry| {
             Some(Line {
                 position: int(entry.get("position"))?,
-                min: int(entry.get("min"))?,
-                max: int(entry.get("max"))?,
+                min: long(entry.get("min"))?,
+                max: long(entry.get("max"))?,
                 hidden: flag(entry.get("hidden"))?,
             })
         });
-        let bound = |key: &str| int(axis.get(key));
+        let bound = |key: &str| long(axis.get(key));
         let ends = match ["leftMin", "leftMax", "rightMin", "rightMax"].map(|key| axis.get(key).is_some()) {
             [false, false, false, false] => None,
             [true, true, true, true] => {
@@ -104,12 +106,12 @@ impl Table {
                 .u64(axis.inner.len() as u64);
             let pack = match axis.ends {
                 None => pack.u64(0),
-                Some(ends) => ends.iter().fold(pack.u64(1), |pack, &(low, high)| pack.i64(low.into()).i64(high.into())),
+                Some(ends) => ends.iter().fold(pack.u64(1), |pack, &(low, high)| pack.i64(low).i64(high)),
             };
             axis.inner.iter().fold(pack, |pack, line| {
                 pack.i64(line.position.into())
-                    .i64(line.min.into())
-                    .i64(line.max.into())
+                    .i64(line.min)
+                    .i64(line.max)
                     .u64(line.hidden as u64)
             })
         })
@@ -125,15 +127,12 @@ impl Table {
             let count = unpack.u64()?;
             let ends = match unpack.u64()? {
                 0 => None,
-                _ => {
-                    let mut int = || i32::try_from(unpack.i64()?).map_err(io::Error::other);
-                    Some([(int()?, int()?), (int()?, int()?)])
-                }
+                _ => Some([(unpack.i64()?, unpack.i64()?), (unpack.i64()?, unpack.i64()?)]),
             };
             let inner = (0..count)
                 .map(|_| {
-                    let mut int = || i32::try_from(unpack.i64()?).map_err(io::Error::other);
-                    let (position, min, max) = (int()?, int()?, int()?);
+                    let position = i32::try_from(unpack.i64()?).map_err(io::Error::other)?;
+                    let (min, max) = (unpack.i64()?, unpack.i64()?);
                     Ok(Line { position, min, max, hidden: unpack.u64()? != 0 })
                 })
                 .collect::<io::Result<_>>()?;
@@ -174,6 +173,19 @@ mod tests {
         assert_eq!(table.rows.ends, Some([(-152_183_880, 28), (517, 152_183_880)]));
         assert!(read(&ONE_ROW.replace("\"entries\": \"\"", "\"entries\": \"x\"")).is_err(), "text is no list");
         assert!(read(&ONE_ROW.replace("\"leftMin\": \"-152183880\", ", "")).is_err(), "ends come in fours");
+        let bytes = Table::pack(Some(&table), Pack::new()).bytes();
+        assert_eq!(Table::unpack(&mut Unpack::new(&bytes)).expect("unpacks"), Some(table));
+    }
+
+    /// As Writer sent it on macOS: `long` is 64 bits.
+    const LP64: &str = r#"{ "columns": { "left": 0, "right": 9972, "tableOffset": 1418, "entries": [ { "position": 4985, "min": 0, "max": 9972, "hidden": false}]}, "rows": { "left": 0, "right": 552, "tableOffset": 1694, "entries": [ { "position": 276, "min": 0, "max": 9223372036854775807, "hidden": false}]}}"#;
+
+    #[test]
+    fn an_unbounded_line_on_64_bit_long_reads() {
+        let table = read(LP64).expect("readable").expect("a table");
+        assert_eq!(table.rows.inner.len(), 1);
+        assert_eq!(table.rows.inner[0].position, 276);
+        assert_eq!(table.rows.inner[0].max, i64::MAX, "LONG_MAX is no bound");
         let bytes = Table::pack(Some(&table), Pack::new()).bytes();
         assert_eq!(Table::unpack(&mut Unpack::new(&bytes)).expect("unpacks"), Some(table));
     }

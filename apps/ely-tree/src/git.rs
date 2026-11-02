@@ -61,9 +61,14 @@ impl Git {
         // Writing apart from reading cannot fill both pipes.
         let writer = std::thread::spawn(move || stdin.write_all(&input));
         let output = child.wait_with_output()?;
-        writer
+        let written = writer
             .join()
-            .map_err(|_| io::Error::other("the stdin writer panicked"))??;
+            .map_err(|_| io::Error::other("the stdin writer panicked"))?;
+        // Git that quits unread breaks the pipe; its words matter.
+        if !output.status.success() {
+            return checked(args, output);
+        }
+        written?;
         checked(args, output)
     }
 
@@ -78,8 +83,10 @@ impl Git {
         // Only Git's line end goes; a name keeps every byte.
         let branch = branch.strip_suffix('\n').unwrap_or(&branch).to_owned();
         let found = self.command(dir, &["for-each-ref", "--format=%(refname)", &branch]).output()?;
+        // The pattern also matches refs below it.
+        let held = found.stdout.split(|&byte| byte == b'\n').any(|name| name == branch.as_bytes());
         let unborn = branch.starts_with("refs/heads/") && found.status.success();
-        if unborn && found.stdout.is_empty() && found.stderr.is_empty() {
+        if unborn && !held && found.stderr.is_empty() {
             return Ok(false);
         }
         let mut why = format!("HEAD names {branch}: no commit, and no branch yet to begin");

@@ -8,7 +8,7 @@ use super::Rect;
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct A11y {
     pub text: String,
-    /// Caret and selection in chars; LOK's -1 is None.
+    /// Caret and selection in UTF-16 units; LOK's -1 is None.
     pub caret: Option<usize>,
     pub selection: Option<(usize, usize)>,
 }
@@ -34,6 +34,57 @@ pub fn rect_of(text: &str) -> Result<Option<Rect>, Unreadable> {
     let mut parts = text.split(',').map(|part| part.trim().parse::<i32>());
     let mut next = || parts.next().and_then(Result::ok).ok_or(Unreadable);
     Ok(Some((next()?, next()?, next()?, next()?)))
+}
+
+/// A print-twips anchor, when the kernel gives one.
+pub type Anchor = Option<(i32, i32)>;
+
+/// The visible text cursor, with its optional print-twips anchor.
+pub fn cursor_of(text: &str) -> Result<(Option<Rect>, Anchor), Unreadable> {
+    if !text.trim_start().starts_with('{') {
+        return Ok((rect_of(text)?, None));
+    }
+    let json: Value = serde_json::from_str(text).map_err(|_| Unreadable)?;
+    if json.get("relrect").is_some() || json.get("refpoint").is_some() {
+        let rect = rect_of(json["relrect"].as_str().ok_or(Unreadable)?)?.ok_or(Unreadable)?;
+        let anchor = point_of(json["refpoint"].as_str().ok_or(Unreadable)?)?;
+        Ok((Some(rect), Some(anchor)))
+    } else {
+        Ok((
+            rect_of(json["rectangle"].as_str().ok_or(Unreadable)?)?,
+            None,
+        ))
+    }
+}
+
+/// Text selection rectangles sharing an optional print-twips anchor.
+pub fn selection_of(text: &str) -> Result<(Vec<Rect>, Anchor), Unreadable> {
+    let (text, anchor) = match text.split_once("::") {
+        Some((rects, point)) => (rects, Some(point_of(point)?)),
+        None => (text, None),
+    };
+    let rects = text
+        .split(';')
+        .map(rect_of)
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok((rects.into_iter().flatten().collect(), anchor))
+}
+
+fn point_of(text: &str) -> Result<(i32, i32), Unreadable> {
+    let mut parts = text.split(',');
+    let mut next = || {
+        parts
+            .next()
+            .ok_or(Unreadable)?
+            .trim()
+            .parse()
+            .map_err(|_| Unreadable)
+    };
+    let point = (next()?, next()?);
+    if parts.next().is_some() {
+        return Err(Unreadable);
+    }
+    Ok(point)
 }
 
 /// A search's matches, each by its first rectangle.
@@ -191,6 +242,59 @@ pub fn a11y_update(a11y: &mut A11y, kind: i32, text: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_formula_selection_keeps_its_shared_reference_point() {
+        assert_eq!(
+            selection_of("402, 0, 157, 292::6373, 380"),
+            Ok((vec![(402, 0, 157, 292)], Some((6373, 380))))
+        );
+        assert_eq!(
+            selection_of("1, 2, 3, 4; 5, 6, 7, 8:: 5491, 380"),
+            Ok((vec![(1, 2, 3, 4), (5, 6, 7, 8)], Some((5491, 380))))
+        );
+    }
+
+    #[test]
+    fn a_formula_cursor_uses_relative_coordinates() {
+        let payload = r#"{"viewId":"0","rectangle":"6690, 28045, 0, 292","relrect":"317, 15, 0, 292","refpoint":"6373, 29160"}"#;
+        assert_eq!(
+            cursor_of(payload),
+            Ok((Some((317, 15, 0, 292)), Some((6373, 29160))))
+        );
+    }
+
+    #[test]
+    fn ordinary_text_geometry_stays_absolute() {
+        assert_eq!(cursor_of("1, 2, 0, 4"), Ok((Some((1, 2, 0, 4)), None)));
+        assert_eq!(
+            cursor_of(r#"{"rectangle":"1, 2, 0, 4","viewId":"0"}"#),
+            Ok((Some((1, 2, 0, 4)), None))
+        );
+        assert_eq!(
+            selection_of("1, 2, 3, 4; 5, 6, 7, 8"),
+            Ok((vec![(1, 2, 3, 4), (5, 6, 7, 8)], None))
+        );
+        assert_eq!(cursor_of("EMPTY"), Ok((None, None)));
+        assert_eq!(selection_of(""), Ok((Vec::new(), None)));
+    }
+
+    #[test]
+    fn a_bad_reference_point_is_an_error() {
+        for point in ["", "1", "x, 2", "1, 2, 3", "2147483648, 2"] {
+            assert_eq!(
+                selection_of(&format!("1, 2, 3, 4::{point}")),
+                Err(Unreadable)
+            );
+        }
+        for payload in [
+            r#"{"rectangle":"1,2,0,4","relrect":"1,2,0,4"}"#,
+            r#"{"rectangle":"1,2,0,4","refpoint":"1,2"}"#,
+            r#"{"rectangle":"1,2,0,4","relrect":"EMPTY","refpoint":"1,2"}"#,
+        ] {
+            assert_eq!(cursor_of(payload), Err(Unreadable));
+        }
+    }
 
     #[test]
     fn a_rectangle_reads_strictly() {

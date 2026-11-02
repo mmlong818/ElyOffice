@@ -17,8 +17,17 @@ fn packaging_table_lists_the_apps_in_prd_order() {
             "{} has no desktop categories",
             app.slug()
         );
-        // Mail and Agent ship in the second batch.
-        let batch = if matches!(app, Mail | Agent) { "2" } else { "1" };
+        // Agent ships in the second batch.
+        let batch = if matches!(app, Agent) { "2" } else { "1" };
         assert_eq!(row[3], batch, "{} is in the wrong batch", app.slug());
+        // Each engine it bundles keeps its licence.
+        let license = match app {
+            Doc | Table | Show => "MIT AND MPL-2.0",
+            Pdf => "MIT AND AGPL-3.0-or-later",
+            Tree => "MIT AND GPL-2.0-only",
+            Mark => "MIT AND AGPL-3.0-or-later AND GPL-2.0-only",
+            Mail | Agent => "MIT",
+        };
+        assert_eq!(row[4], license, "{}", app.slug());
     }
 }

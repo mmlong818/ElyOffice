@@ -6,7 +6,7 @@ use super::*;
 use crate::output::Format;
 
 /// The active tab's kernel read, after its input.
-fn read<T>(
+pub(super) fn read<T>(
     cx: &mut TestAppContext,
     book: &Entity<Book>,
     parse: fn(&str) -> std::io::Result<T>,
@@ -21,7 +21,7 @@ fn read<T>(
     })
 }
 
-fn type_in(
+pub(super) fn type_in(
     cx: &mut TestAppContext,
     book: &Entity<Book>,
     field: fn(&Dialog) -> &Entity<TextInput>,
@@ -113,15 +113,17 @@ fn exports_write_the_shown_sheet_as_text() {
     run(&mut cx, &book, "cell.goto", &["B1"]);
     run(&mut cx, &book, "cell.enter", &["a;b"]);
     let id = cx.update(|app| book.read(app).core.tabs[0].id);
+    // The kernel ends rows the system's way.
+    let end = if cfg!(windows) { "\r\n" } else { "\n" };
     for (format, name, text) in [
-        (Format::Csv, "out.csv", "3,a;b\n"),
-        (Format::Tsv, "out.tsv", "3\ta;b\n"),
+        (Format::Csv, "out.csv", "3,a;b"),
+        (Format::Tsv, "out.tsv", "3\ta;b"),
     ] {
         let path = dir.path().join(name);
         update(&mut cx, &book, |book, cx| book.export_to(id, path.clone(), format, cx));
         settle(&cx, |_| path.exists());
         quiet(&cx, &book);
-        assert_eq!(std::fs::read_to_string(&path).expect("reads"), text);
+        assert_eq!(std::fs::read_to_string(&path).expect("reads"), format!("{text}{end}"));
     }
     let pdf = dir.path().join("out.pdf");
     update(&mut cx, &book, |book, cx| book.export_to(id, pdf.clone(), Format::Pdf, cx));
@@ -173,57 +175,6 @@ fn page_setup_applies_titles_area_and_page() {
     assert_eq!(layout.areas, ["$A$1:$C$4"]);
     assert_eq!(layout.rows, Some((1, 1)));
     assert_eq!((layout.landscape, layout.scale), (true, Scale::Fit(1, 0)));
-}
-
-fn password(dialog: &Dialog) -> &Entity<TextInput> {
-    match dialog {
-        Dialog::Protect { protecting, .. } => &protecting.password,
-        _ => unreachable!("a protect dialog"),
-    }
-}
-
-fn confirm(dialog: &Dialog) -> &Entity<TextInput> {
-    match dialog {
-        Dialog::Protect { protecting, .. } => &protecting.confirm,
-        _ => unreachable!("a protect dialog"),
-    }
-}
-
-fn protected(cx: &mut TestAppContext, book: &Entity<Book>) -> bool {
-    read(cx, book, sheet::protection, sheet::PROTECTION).protected
-}
-
-#[test]
-fn a_wrong_password_leaves_the_sheet_protected() {
-    let dir = tempfile::tempdir().expect("a temp dir");
-    let mut cx = TestAppContext::single();
-    let Some((_window, book)) = book(&mut cx, dir.path()) else {
-        eprintln!("SKIP: no LOK build");
-        return;
-    };
-    blank(&mut cx, &book);
-    let ask = |cx: &mut TestAppContext| {
-        update(cx, &book, |book, cx| book.ask_protect(cx));
-        asked(cx, &book, |dialog| matches!(dialog, Dialog::Protect { .. }));
-    };
-    ask(&mut cx);
-    type_in(&mut cx, &book, password, "pw");
-    type_in(&mut cx, &book, confirm, "px");
-    update(&mut cx, &book, |book, cx| book.protect_asked(cx));
-    assert!(cx.update(|app| book.read(app).dialog.is_some()), "a mismatch stays");
-    type_in(&mut cx, &book, confirm, "pw");
-    update(&mut cx, &book, |book, cx| book.protect_asked(cx));
-    assert!(protected(&mut cx, &book));
-    ask(&mut cx);
-    type_in(&mut cx, &book, password, "no");
-    update(&mut cx, &book, |book, cx| book.protect_asked(cx));
-    cx.run_until_parked();
-    assert!(protected(&mut cx, &book), "still protected");
-    ask(&mut cx);
-    type_in(&mut cx, &book, password, "pw");
-    update(&mut cx, &book, |book, cx| book.protect_asked(cx));
-    cx.run_until_parked();
-    assert!(!protected(&mut cx, &book));
 }
 
 #[test]

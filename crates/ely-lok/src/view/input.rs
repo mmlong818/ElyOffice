@@ -1,5 +1,6 @@
 //! Keys, mouse, IME and clipboard for LokView (LOK-06, LOK-07).
 
+use ely_gpui_component::secondary;
 use std::{io, sync::Mutex, time::Instant};
 
 use ely_platform::clipboard;
@@ -19,9 +20,9 @@ pub const CONTEXT: &str = "LokView";
 /// Binds the clipboard keys; call once at startup.
 pub fn init(cx: &mut App) {
     cx.bind_keys([
-        KeyBinding::new("secondary-c", Copy, Some(CONTEXT)),
-        KeyBinding::new("secondary-x", Cut, Some(CONTEXT)),
-        KeyBinding::new("secondary-v", Paste, Some(CONTEXT)),
+        KeyBinding::new(secondary!("c"), Copy, Some(CONTEXT)),
+        KeyBinding::new(secondary!("x"), Cut, Some(CONTEXT)),
+        KeyBinding::new(secondary!("v"), Paste, Some(CONTEXT)),
         // The document owns Tab, as office apps do.
         KeyBinding::new("tab", NextField, Some(CONTEXT)),
         KeyBinding::new("shift-tab", PreviousField, Some(CONTEXT)),
@@ -45,8 +46,11 @@ pub(super) enum Input {
     Paste,
     /// Values or formulas alone: `paste.values` or `paste.formulas`.
     PasteOnly(&'static str),
-    /// A function the kernel offered, taken.
-    Complete(String),
+    /// A function the kernel offers then, else Enter or Tab.
+    Complete {
+        name: Option<String>,
+        key: Option<(u32, i32)>,
+    },
     /// The kernel's color scheme; not an edit.
     Theme(&'static str),
     /// Commands in order, from one read.
@@ -72,9 +76,28 @@ pub(super) enum Input {
 pub(super) enum Back {
     Copied(String),
     Shown(usize),
+    /// Whether a function was taken.
+    Completed(bool),
 }
 
 impl Input {
+    /// For the log: the kind, never the text.
+    pub(super) fn kind(&self) -> &'static str {
+        match self {
+            Input::Key { .. } => "key",
+            Input::Mouse(_) => "mouse",
+            Input::Text { .. } => "text",
+            Input::Copy { .. } => "copy",
+            Input::Paste | Input::PasteOnly(_) => "paste",
+            Input::Complete { .. } => "complete",
+            Input::Theme(_) => "theme",
+            Input::Run { commands, .. } => commands.first().map_or("run", |(id, _)| id),
+            Input::Drag { .. } => "drag",
+            Input::Visible(..) => "visible",
+            Input::Part(_) | Input::Turn { .. } => "part",
+        }
+    }
+
     /// Whether the input may change the document.
     pub(super) fn edits(&self) -> bool {
         match self {
@@ -92,7 +115,7 @@ impl Input {
             | Input::Paste
             | Input::PasteOnly(_)
             | Input::Drag { .. }
-            | Input::Complete(_) => true,
+            | Input::Complete { .. } => true,
         }
     }
 }
@@ -201,7 +224,10 @@ fn apply(worker: &mut Worker, doc: &Doc, input: Input) -> io::Result<Option<Back
         Input::Drag { from, to } => worker.drag_graphic(doc, from, to),
         Input::Visible(area, scale) => doc.visible_area(worker, area, scale),
         Input::Part(part) => doc.show_sheet(worker, part),
-        Input::Complete(name) => doc.complete_function(worker, &name),
+        Input::Complete { name, key } => {
+            let taken = doc.complete_function(worker, name.as_deref(), key)?;
+            return Ok(Some(Back::Completed(taken)));
+        }
         Input::Theme(scheme) => worker.run(doc, "view.theme", &[scheme]),
         Input::Text { commit, text } => worker.post_text(doc, commit, &text),
         Input::Copy { cut } => {
@@ -270,6 +296,10 @@ impl LokView {
 
     /// Posts a non-text key; text waits for the IME.
     pub(super) fn key_down(&mut self, keystroke: &Keystroke) -> bool {
+        if keystroke.key == "enter" && keystroke.modifiers == Modifiers::none() {
+            self.complete_or_press(keystroke);
+            return true;
+        }
         let Some((char_code, key_code)) = vcl_key(keystroke) else {
             return false;
         };
@@ -307,10 +337,14 @@ impl LokView {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let completing = self.completion.pending();
         if self.walk(&event.keystroke, cx)
             || self.turn_key(&event.keystroke)
             || self.key_down(&event.keystroke)
         {
+            if !completing && self.completion.pending() {
+                cx.notify();
+            }
             cx.stop_propagation();
         }
     }
@@ -364,7 +398,7 @@ impl LokView {
             return;
         };
         if event.button == MouseButton::Left {
-            self.dragging = false;
+            self.end_drag();
         }
         self.mouse(
             1,
@@ -403,9 +437,8 @@ impl LokView {
             cx.notify();
             return;
         }
-        if self.dragging && event.pressed_button == Some(MouseButton::Left) {
-            self.mouse(2, event.position, 1, 1, &event.modifiers);
-        } else if event.pressed_button.is_none() {
+        // A drag's moves come from the window (render.rs).
+        if event.pressed_button.is_none() {
             // A hover: the kernel answers with its pointer.
             self.mouse(2, event.position, 0, 1, &event.modifiers);
         }
@@ -425,10 +458,14 @@ impl LokView {
         self.send(Input::Paste);
     }
 
-    pub(super) fn on_next_field(&mut self, _: &NextField, _: &mut Window, _: &mut Context<Self>) {
-        if !self.complete() {
-            self.key_down(&Keystroke::parse("tab").expect("a keystroke"));
-        }
+    pub(super) fn on_next_field(&mut self, _: &NextField, _: &mut Window, cx: &mut Context<Self>) {
+        self.next_field();
+        cx.notify();
+    }
+
+    /// Tab takes the offered function, else moves on.
+    pub(super) fn next_field(&mut self) {
+        self.complete_or_press(&Keystroke::parse("tab").expect("a keystroke"));
     }
 
     pub(super) fn on_previous_field(

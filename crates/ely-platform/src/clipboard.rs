@@ -52,31 +52,48 @@ pub fn write(clip: &Clip) -> Result<()> {
 
 /// The richest payload on the clipboard: HTML, image, then text.
 pub fn read() -> Result<Option<Clip>> {
-    with_board(|board| {
-        let text = absent_ok(board.get_text())?;
-        if let Some(html) = absent_ok(board.get().html())? {
-            let text = text.unwrap_or_default();
-            return Ok(Some(Clip::Html { html, text }));
-        }
-        if let Some(image) = absent_ok(board.get_image())? {
-            let rgba = image::RgbaImage::from_raw(
-                image.width as u32,
-                image.height as u32,
-                image.bytes.into_owned(),
-            )
-            .context("the clipboard image has its size")?;
-            let mut png = Vec::new();
-            rgba.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
-                .context("the clipboard image encodes")?;
-            return Ok(Some(Clip::Png(png)));
-        }
-        Ok(text.map(Clip::Text))
-    })
+    let clip = with_board(richest)?;
+    log::info!("clipboard: read {}", clip.as_ref().map_or("nothing", kind));
+    Ok(clip)
+}
+
+fn richest(board: &mut Clipboard) -> Result<Option<Clip>> {
+    let text = absent_ok(board.get_text())?;
+    if let Some(html) = html_of(board)? {
+        let text = text.unwrap_or_default();
+        return Ok(Some(Clip::Html { html, text }));
+    }
+    if let Some(image) = absent_ok(board.get_image())? {
+        let rgba = image::RgbaImage::from_raw(
+            image.width as u32,
+            image.height as u32,
+            image.bytes.into_owned(),
+        )
+        .context("the clipboard image has its size")?;
+        let mut png = Vec::new();
+        rgba.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .context("the clipboard image encodes")?;
+        return Ok(Some(Clip::Png(png)));
+    }
+    Ok(text.map(Clip::Text))
 }
 
 /// The clipboard's HTML, if any; gpui's reads omit it.
 pub fn html() -> Result<Option<String>> {
-    with_board(|board| absent_ok(board.get().html()))
+    with_board(html_of)
+}
+
+fn html_of(board: &mut Clipboard) -> Result<Option<String>> {
+    // arboard reads absent HTML on Windows as an error.
+    #[cfg(windows)]
+    {
+        let format = clipboard_win::register_format("HTML Format")
+            .context("the HTML clipboard format registers")?;
+        if !clipboard_win::is_format_avail(format.get()) {
+            return Ok(None);
+        }
+    }
+    absent_ok(board.get().html())
 }
 
 /// Empty or other-format clipboards read as None.
@@ -110,6 +127,7 @@ mod tests {
         let text = Clip::Text("plain 中文".into());
         write(&text).expect("text writes");
         assert_eq!(read().expect("text reads"), Some(text));
+        assert_eq!(html().expect("no html reads"), None);
         let html = Clip::Html {
             html: "<table><tr><td>a</td></tr></table>".into(),
             text: "a".into(),

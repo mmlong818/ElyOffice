@@ -11,11 +11,9 @@ node_modules/
 /tasks/reviews/.pane
 /.pi/
 /markdown-sample.md
-/docs/engineering-risks.md
-/docs/qa.md
-/docs/acceptance.md
-/docs/test-map.md
 /assets/papirus_icons-master.zip
 /Gitea.md
 /.work/
 /TyporaRef
+/cred.txt
+/update-key.txt

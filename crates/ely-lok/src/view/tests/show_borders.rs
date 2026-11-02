@@ -157,7 +157,7 @@ fn a_still_press_beside_a_minimum_column_sends_nothing() {
     let sent = cx.update(|app| {
         view.update(app, |view, cx| {
             let line = table.columns.inner[0];
-            assert_eq!(line.position, line.max, "the right column is at its minimum");
+            assert_eq!(i64::from(line.position), line.max, "the right column is at its minimum");
             let on = view.window_point((table.columns.offset + line.position, quarter(&table)));
             let sent = view.sent();
             assert!(view.hold_border(on));

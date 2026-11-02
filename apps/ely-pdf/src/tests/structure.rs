@@ -4,7 +4,7 @@ use ely_pdf_engine::{
     Worker,
     sample::{Extras, pdf, pdf_with, scan},
 };
-use gpui::{Entity, Modifiers, MouseButton, TestAppContext, VisualTestContext};
+use gpui::{Entity, Modifiers, MouseButton, ScrollDelta, ScrollEvent, TestAppContext, VisualTestContext, point, px};
 
 use super::input::over;
 use super::{frames, settle, shown, windowed};
@@ -106,6 +106,34 @@ fn bookmarks_add_after_the_pick_rename_and_delete() {
 }
 
 #[test]
+fn a_long_bookmark_list_scrolls_to_its_last_mark() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let mut cx = TestAppContext::single();
+    let path = dir.path().join("long.pdf");
+    let titles: Vec<String> = (0..100).map(|n| format!("Chapter {n}")).collect();
+    let marks: Vec<_> = titles.iter().map(|title| (title.as_str(), 0, &[][..])).collect();
+    std::fs::write(&path, pdf(&[(612.0, 792.0, &["one"])], &marks)).expect("writes");
+    let (viewer, cx) = windowed(&mut cx, dir.path(), &[path], true);
+    let view = shown(cx, &viewer);
+    settle(cx, |app| view.read(app).marks.len() == 100);
+    cx.update(|_, app| viewer.read(app).side.clone()).update(cx, |side, cx| {
+        side.pane = crate::side::Pane::Marks;
+        cx.notify();
+    });
+    frames(cx);
+    let before = cx.debug_bounds("pdf-marks").expect("the bookmarks are drawn");
+    let window = cx.update(|window, _| window.viewport_size());
+    assert!(before.bottom() > window.height, "the list is longer than the window");
+    let at = point(before.left() + px(20.0), px(300.0));
+    for _ in 0..20 {
+        cx.simulate_event(ScrollEvent { position: at, delta: ScrollDelta::Pixels(point(px(0.0), px(-1000.0))), ..Default::default() });
+        frames(cx);
+    }
+    let after = cx.debug_bounds("pdf-marks").expect("the bookmarks are drawn");
+    assert!(after.bottom() <= window.height, "the last mark is in view: {after:?}");
+}
+
+#[test]
 fn properties_show_and_set_what_changed() {
     let dir = tempfile::tempdir().expect("a temp dir");
     let mut cx = TestAppContext::single();
@@ -159,7 +187,7 @@ fn scanned(dir: &std::path::Path) -> std::path::PathBuf {
     let s: f32 = 200.0 / 72.0;
     let (w, h) = ((612.0 * s).ceil() as i32, (792.0 * s).ceil() as i32);
     let bgra = worker.render(doc, 0, (s, 0), [0, 0, w, h]).expect("draws").bgra;
-    let gray: Vec<u8> = bgra.chunks_exact(4).map(|p| ((u16::from(p[0]) + u16::from(p[1]) + u16::from(p[2])) / 3) as u8).collect();
+    let gray: Vec<u8> = bgra.as_chunks::<4>().0.iter().map(|p| ((u16::from(p[0]) + u16::from(p[1]) + u16::from(p[2])) / 3) as u8).collect();
     let path = dir.join("scan.pdf");
     std::fs::write(&path, scan((612.0, 792.0), (w as u32, h as u32), &gray)).expect("writes");
     path

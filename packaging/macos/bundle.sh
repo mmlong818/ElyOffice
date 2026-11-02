@@ -35,7 +35,7 @@ need() { # path, what to run
     exit 1
   }
 }
-build -p "$slug"
+build -p "$(cargo pkgid --manifest-path "$root/apps/$slug/Cargo.toml")"
 icon=$root/assets/icons/$slug.icns
 need "$icon" packaging/icons/build.sh
 
@@ -69,7 +69,7 @@ if uses ely-lok; then
   done < <(find "$app/Contents/Frameworks" -type f)
 fi
 if uses ely-pdf-engine; then
-  build -p ely-pdf-engine --bin ely-pdf-worker
+  build -p ely-pdf-worker
   cp "$root/target/$profile/ely-pdf-worker" "$app/Contents/MacOS/"
   inner+=("$app/Contents/MacOS/ely-pdf-worker")
 fi

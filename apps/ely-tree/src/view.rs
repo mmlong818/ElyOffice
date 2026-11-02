@@ -137,7 +137,7 @@ impl Tree {
             .flex_col()
             .items_center()
             .child(empty)
-            .child(div().w_96().child(List::new().children(recent)))
+            .child(div().w_full().max_w_96().child(List::new().children(recent)))
             .into_any_element()
     }
 
@@ -156,9 +156,6 @@ impl Tree {
             let title = text(cx, "tree.cloning", &[("name", &name(&cloning.into))]);
             let state = EmptyState::new("tree-cloning", IconName::Download, title)
                 .body(cloning.said.clone());
-            if !crate::running::STOPS {
-                return state.into_any_element();
-            }
             let stop = Button::new("tree-clone-stop", text(cx, "tree.clone.stop", &[]))
                 .disabled(cloning.stopping)
                 .on_click(move |_, _, cx| {

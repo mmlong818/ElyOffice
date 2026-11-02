@@ -274,3 +274,23 @@ fn a_header_act_after_a_click_is_not_stale() {
     worker.run(&read, "select.column", &["2", "0"]).expect("the column header still selects");
     worker.run(&read, "columns.width", &["800", "3"]).expect("the column's width still sets");
 }
+
+
+#[test]
+fn the_selection_counts_its_filled_cells() {
+    if install().is_none() {
+        eprintln!("SKIP: no pinned LOK build");
+        return;
+    }
+    let (_dir, mut worker, doc) = super::sheet::open_book(super::input::FODS);
+    let filled = |worker: &mut Worker, range: &str| {
+        worker.run(&doc, "cell.goto", &[range]).expect("the range");
+        let read = worker.values(&doc, sheet::SELECTED).expect("the selection");
+        sheet::selected_range(&read)
+            .expect("parses")
+            .expect("one range")
+            .filled
+    };
+    assert_eq!(filled(&mut worker, "H8:J9"), 0, "an empty range");
+    assert_eq!(filled(&mut worker, "A1:C3"), 1, "A1 alone holds text");
+}

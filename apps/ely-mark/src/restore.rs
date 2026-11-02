@@ -6,15 +6,18 @@ use std::{
     time::SystemTime,
 };
 
-use ely_files::{Crash, Marker, Recovery};
+use ely_files::{Crash, Marker, Recovery, Turns};
 use ely_office::prelude::*;
 use ely_ui::i18n::text;
-use gpui::Context;
+use gpui::{AppContext as _, Context};
 use serde::{Deserialize, Serialize};
 
 use crate::desk::Desk;
 use crate::engine::mark;
 use crate::view::{Mode, Place};
+
+mod store;
+use store::sweep_logged;
 
 /// A kept tab: file, mode, place, recovery folder.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -45,13 +48,15 @@ pub struct Keeping {
     dir: PathBuf,
     crash: Option<Crash>,
     waiting: Vec<Waiting>,
-    written: Option<String>,
+    /// The list last handed to a write.
+    sent: Option<String>,
     /// The kind of session write failure last shown.
     unwritten: Option<io::ErrorKind>,
     /// A quit began: the kept list stays as then.
     pub leaving: bool,
     /// The list as kept when the quit began.
     frozen: Vec<Kept>,
+    turns: Turns,
 }
 
 fn recovery(dir: &Path, slot: &str) -> PathBuf {
@@ -130,10 +135,11 @@ impl Keeping {
             dir: dir.to_path_buf(),
             crash: Some(crash),
             waiting,
-            written: None,
+            sent: None,
             unwritten: None,
             leaving: false,
             frozen: Vec::new(),
+            turns: Turns::default(),
         };
         Ok((keeping, paths, missing))
     }
@@ -187,19 +193,12 @@ impl Keeping {
     }
 }
 
-/// Removes every slot folder in `dir` not in `live`.
-fn sweep(dir: &Path, live: &[&str]) -> io::Result<()> {
-    let entries = match std::fs::read_dir(dir) {
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
-        entries => entries?,
-    };
-    for entry in entries {
-        let entry = entry?;
-        if !live.contains(&entry.file_name().to_string_lossy().as_ref()) {
-            clear(&entry.path())?;
-        }
-    }
-    Ok(())
+fn session_json(saved: Saved) -> String {
+    serde_json::to_string_pretty(&saved).expect("the session serializes")
+}
+
+fn save(file: &Path, json: &str) -> io::Result<()> {
+    ely_files::save_atomic(file, json.as_bytes(), 0).map(drop)
 }
 
 fn clear(dir: &Path) -> io::Result<()> {
@@ -262,6 +261,30 @@ impl Desk {
 
     /// Every ten seconds: unsaved text to points, tabs to disk.
     pub fn keep(&mut self, cx: &mut Context<Self>) {
+        let (_, kept) = self.keep_points(cx);
+        let json = (!self.keeping.leaving)
+            .then(|| {
+                self.keeping.frozen = kept.clone();
+                session_json(Saved { tabs: kept })
+            })
+            .filter(|json| self.keeping.sent.as_ref() != Some(json));
+        let Some(json) = json else { return };
+        self.keeping.sent = Some(json.clone());
+        let turn = self.keeping.turns.take();
+        let file = self.keeping.dir.join("session.json");
+        let turns = self.keeping.turns.clone();
+        // Disk work leaves the window's thread.
+        let task = cx.background_spawn(async move { turns.write(turn, || save(&file, &json)) });
+        cx.spawn(async move |desk, cx| {
+            if let Some(wrote) = task.await {
+                desk.update(cx, |desk, cx| desk.session_written(wrote, cx)).ok();
+            }
+        })
+        .detach();
+    }
+
+    /// Writes due points; the live slots and the kept list.
+    fn keep_points(&mut self, cx: &mut Context<Self>) -> (Vec<String>, Vec<Kept>) {
         let dir = self.keeping.dir.clone();
         let started = std::time::UNIX_EPOCH
             .elapsed()
@@ -304,22 +327,9 @@ impl Desk {
             .detach();
         }
         // Closed or discarded tabs' points go (§6.2).
-        let live = kept.iter().map(|kept| kept.slot.as_str());
-        let live: Vec<&str> = live
-            .chain(
-                self.keeping
-                    .waiting
-                    .iter()
-                    .map(|waiting| waiting.kept.slot.as_str()),
-            )
-            .collect();
-        if let Err(error) = sweep(&dir.join("recovery"), &live) {
-            log::error!("mark: old recovery points stay: {error}");
-        }
-        if !self.keeping.leaving {
-            self.keeping.frozen = kept.clone();
-            self.write_session(Saved { tabs: kept }, cx);
-        }
+        let waiting = self.keeping.waiting.iter().map(|waiting| &waiting.kept);
+        let live = kept.iter().chain(waiting).map(|kept| kept.slot.clone()).collect();
+        (live, kept)
     }
 
     fn pointed(
@@ -367,20 +377,25 @@ impl Desk {
         self.toast_unlogged(said, ely_gpui_component::primitives::Severity::Danger, cx);
     }
 
+    /// Writes the list now: a quit needs it on disk.
     fn write_session(&mut self, saved: Saved, cx: &mut Context<Self>) {
-        let json = serde_json::to_string_pretty(&saved).expect("the session serializes");
-        if self.keeping.written.as_ref() == Some(&json) {
-            return;
-        }
+        // A queued write may differ: this one always lands.
+        let json = session_json(saved);
         let file = self.keeping.dir.join("session.json");
-        let error = match ely_files::save_atomic(&file, json.as_bytes(), 0) {
-            Ok(_) => {
-                self.keeping.written = Some(json);
-                self.keeping.unwritten = None;
-                return;
-            }
+        self.keeping.sent = Some(json.clone());
+        let turn = self.keeping.turns.take();
+        let wrote = (self.keeping.turns.write(turn, || save(&file, &json)))
+            .expect("this thread took the newest turn");
+        self.session_written(wrote, cx);
+    }
+
+    fn session_written(&mut self, wrote: io::Result<()>, cx: &mut Context<Self>) {
+        let error = match wrote {
+            Ok(()) => return self.keeping.unwritten = None,
             Err(error) => error,
         };
+        // The next tick writes the list again.
+        self.keeping.sent = None;
         log::error!("mark: the session did not save: {error}");
         // Each kind of failure shows once; the next tick retries.
         if self.keeping.unwritten != Some(error.kind()) {
@@ -439,8 +454,10 @@ impl Desk {
 
     /// A quit or close begins: the tabs now stay kept.
     pub fn leave(&mut self, cx: &mut Context<Self>) {
-        self.keeping.leaving = false;
-        self.keep(cx);
+        let (live, kept) = self.keep_points(cx);
+        sweep_logged(&self.keeping.dir, &live);
+        self.keeping.frozen = kept.clone();
+        self.write_session(Saved { tabs: kept }, cx);
         self.keeping.leaving = true;
     }
 }

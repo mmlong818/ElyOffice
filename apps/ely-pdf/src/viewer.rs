@@ -8,7 +8,7 @@ use std::{
 use ely_gpui_component::{
     feedback::EmptyState,
     primitives::IconName,
-    shell::{StatusBar, StatusBarItem},
+    shell::{StatusBar, StatusBarItem, ZoomControl},
 };
 use ely_office::{Core, Host, Kind, prelude::*};
 use ely_platform::AppId;
@@ -126,7 +126,7 @@ pub fn open(app: AppId, window: &mut Window, cx: &mut App) -> Entity<Root> {
         opening.update(cx, |viewer, cx| viewer.open_file(path, cx))
     });
     let closing = viewer.clone();
-    window.on_window_should_close(cx, move |window, cx| {
+    ely_gpui_component::shell::guard_close(window, cx, move |window, cx| {
         closing.update(cx, |viewer, cx| viewer.should_close(window, cx))
     });
     root
@@ -209,7 +209,17 @@ impl Viewer {
         let view = view.read(cx);
         let (n, count) = ((view.current + 1).to_string(), view.sizes.len().to_string());
         let page = Self::text(cx, "pdf.status.page", &[("n", &n), ("count", &count)]);
-        StatusBar::new().left(state).left(StatusBarItem::new("pdf-page").label(page))
+        let percent = view.percent();
+        let this = cx.entity().downgrade();
+        let zoom = ZoomControl::new("pdf-zoom").owned(percent, move |step, _, cx| {
+            if let Err(error) = this.update(cx, |viewer, cx| crate::keys::zoom(viewer, step, cx)) {
+                log::warn!("pdf: zoom without a viewer: {error}");
+            }
+        });
+        StatusBar::new()
+            .left(state)
+            .left(StatusBarItem::new("pdf-page").label(page))
+            .right(div().debug_selector(|| "pdf-zoom".into()).child(zoom))
     }
 }
 

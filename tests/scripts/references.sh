@@ -4,7 +4,7 @@ set -euo pipefail
 
 root=$(cd "$(dirname "$0")/../.." && pwd)
 script=$root/scripts/fetch-references.sh
-names="Ely-GPUI-Components zed libreoffice-core mupdf git tesseract mailcore2 libetpan marktext colamd magpie agent-client-protocol markion markdown-rs omarchy"
+names="Ely-GPUI-Components zed libreoffice-core mupdf git tesseract marktext colamd magpie agent-client-protocol markion markdown-rs omarchy"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -26,10 +26,7 @@ for header in \
   libreoffice-core/include/LibreOfficeKit/LibreOfficeKit.h \
   mupdf/include/mupdf/fitz.h \
   mupdf/thirdparty/freetype/include/freetype/freetype.h \
-  tesseract/include/tesseract/capi.h \
-  mailcore2/CMakeLists.txt \
-  libetpan/src/low-level/gmail/mailgmail.h \
-  libetpan/src/low-level/activesync/mailactivesync.h; do
+  tesseract/include/tesseract/capi.h; do
   [ -s "$root/reference/$header" ] || fail "missing reference/$header"
 done
 
@@ -37,12 +34,10 @@ want=$(printf '%s\n' desktop/inc desktop/source/lib include/LibreOfficeKit libre
 have=$(git -C "$root/reference/libreoffice-core" sparse-checkout list | sort)
 [ "$have" = "$want" ] || fail "libreoffice-core sparse set differs: $have"
 
-for name in mupdf mailcore2; do
-  status=$(git -C "$root/reference/$name" submodule status --recursive)
-  [ -n "$status" ] || fail "$name lists no submodules"
-  bad=$(grep '^[-+U]' <<<"$status" || true)
-  [ -z "$bad" ] || fail "$name submodules off their pins: $bad"
-done
+status=$(git -C "$root/reference/mupdf" submodule status --recursive)
+[ -n "$status" ] || fail "mupdf lists no submodules"
+bad=$(grep '^[-+U]' <<<"$status" || true)
+[ -z "$bad" ] || fail "mupdf submodules off their pins: $bad"
 
 grep -q "rev = \"$(pin_of Ely-GPUI-Components)\"" "$root/Cargo.toml" ||
   fail "the component library pin differs from the workspace's"

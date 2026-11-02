@@ -53,6 +53,13 @@ pub(super) const ROWS: &[Command] = &[
         &[Arg::Loose("StringName")],
         Check::Undoable,
     ),
+    // By address, the sheet named; the cursor stays.
+    command(
+        "cell.set",
+        ".uno:EnterString",
+        &[Arg::Text("Address"), Arg::Loose("StringName")],
+        Check::Undoable,
+    ),
     command(
         "rows.insert_above",
         ".uno:InsertRowsBefore",
@@ -148,6 +155,25 @@ pub(super) const ROWS: &[Command] = &[
         "columns.optimal",
         ".uno:SetOptimalColumnWidth",
         &[Arg::Int("aExtraWidth", "unsigned short", 0, 0)],
+        Check::Undoable,
+    ),
+    // A header edge's double click: one, or the marked ones.
+    command(
+        "columns.fit",
+        ".uno:SetOptimalColumnWidth",
+        &[
+            Arg::Int("aExtraWidth", "unsigned short", 0, 0),
+            Arg::Int("Column", "unsigned short", 1, 16384),
+        ],
+        Check::Undoable,
+    ),
+    command(
+        "rows.fit",
+        ".uno:SetOptimalRowHeight",
+        &[
+            Arg::Int("aExtraHeight", "unsigned short", 0, 0),
+            Arg::Int("Row", "long", 1, 1_048_576),
+        ],
         Check::Undoable,
     ),
     // Rows and columns from 0.

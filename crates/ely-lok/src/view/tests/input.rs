@@ -26,7 +26,7 @@ fn saved(view: &Entity<LokView>, cx: &mut TestAppContext) -> Vec<String> {
     paragraphs(&std::fs::read_to_string(&out).expect("the save reads"))
 }
 
-fn typed(key: &str) -> Keystroke {
+fn typed(key: &'static str) -> Keystroke {
     let mut stroke = Keystroke::parse(key).expect("a keystroke");
     stroke.key_char = Some(key.to_string());
     stroke
@@ -145,6 +145,8 @@ fn a_drag_selects_and_events_carry_the_cursor() {
     let (view, _) = cx.update(|app| live_view(app, &install));
     cx.update(|app| {
         view.update(app, |view, _| {
+            // The caret shows only inside the viewport.
+            view.viewport = (800.0, 600.0);
             let none = gpui::Modifiers::default();
             let y = px(view.geom.px_of(1500));
             view.mouse(0, point(px(view.geom.px_of(1500)), y), 1, 1, &none);
@@ -247,6 +249,12 @@ fn the_clipboard_moves_html_tables_and_images() {
         text.contains(&"left".to_string()) && text.contains(&"right".to_string()),
         "{text:?}"
     );
+    // Plain text from another app, with no HTML beside it.
+    clipboard::write(&Clip::Text("outside words".into())).expect("the text writes");
+    cx.update(|app| view.update(app, |view, _| view.send(crate::view::input::Input::Paste)));
+    flush(&cx);
+    let text = saved(&view, &mut cx);
+    assert!(text.iter().any(|line| line.contains("outside words")), "{text:?}");
 
     let mut png = Vec::new();
     image::RgbaImage::from_pixel(4, 4, image::Rgba([255, 0, 0, 255]))

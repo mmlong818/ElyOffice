@@ -20,9 +20,11 @@ gpui.workspace = true
 log.workspace = true
 ely-platform.workspace = true
 ely-ui.workspace = true
+unicase.workspace = true
 
 [dev-dependencies]
 ely-ui = { workspace = true, features = ["test-support"] }
+ely-office = { workspace = true, features = ["test-support"] }
 ely-gpui-component = { workspace = true, features = ["test-support"] }
 tempfile.workspace = true
 gpui = { workspace = true, features = ["test-support"] }

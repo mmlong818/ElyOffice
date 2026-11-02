@@ -1,0 +1,44 @@
+Return-Path: <zhang@example.com>
+X-Custom: kept as sent
+From: =?UTF-8?B?5byg5LiJ?= <zhang@example.com>
+To: Bo Smith <bo@example.com>, cy@example.org
+Cc: Team: dee@example.net;
+Subject: =?UTF-8?Q?Caf=C3=A9_report?=
+Date: Mon, 19 Oct 2026 08:30:00 +0200
+Message-ID: <m1@example.com>
+In-Reply-To: <m0@example.com>
+References: <r1@example.com> <m0@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="mix"
+
+--mix
+Content-Type: multipart/related; boundary="rel"
+
+--rel
+Content-Type: multipart/alternative; boundary="alt"
+
+--alt
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+Caf=C3=A9 numbers attached.
+--alt
+Content-Type: text/html; charset=utf-8
+
+<p>Caf&eacute; <img src="cid:logo@example.com"></p>
+--alt--
+--rel
+Content-Type: image/png
+Content-ID: <logo@example.com>
+Content-Transfer-Encoding: base64
+
+iVBORw0KGgo=
+--rel--
+--mix
+Content-Type: application/pdf; name="report.pdf"
+Content-Disposition: attachment; filename="report.pdf"
+Content-ID: <att@example.com>
+Content-Transfer-Encoding: base64
+
+JVBERi0xLjQK
+--mix--

@@ -96,7 +96,10 @@ pub trait Opening: Host {
 
     fn failed_open(&self, name: &str, error: &io::Error, cx: &mut gpui::App) {
         log::error!("{}: {name} did not open: {error}", Self::KIND.app.slug());
-        let error = error.to_string();
+        let error = match error.get_ref().and_then(|inner| inner.downcast_ref::<files::NotPackage>()) {
+            Some(files::NotPackage(ext)) => text(cx, "office.error.not_package", &[("ext", ext)]).to_string(),
+            None => error.to_string(),
+        };
         let text = text(
             cx,
             "office.error.open",
@@ -127,12 +130,14 @@ pub trait Opening: Host {
         let written = path.clone();
         self.core_mut().loading.push((id, file_name(&path)));
         cx.notify();
+        crate::Stopping::watch_slow(self, id, cx);
         let worker = Arc::clone(&self.core().worker);
         cx.spawn(async move |this, cx| {
             let loaded = cx
                 .background_spawn(async move {
-                    if let Some((bytes, _)) = &text {
-                        std::fs::write(&written, bytes.as_slice())?;
+                    match &text {
+                        Some((bytes, _)) => std::fs::write(&written, bytes.as_slice())?,
+                        None => files::check_package(&written)?,
                     }
                     let mut worker = worker.lock().expect("the worker lock");
                     let from = match &text {
@@ -160,6 +165,9 @@ pub trait Opening: Host {
         self.core_mut()
             .loading
             .retain(|(loading, _)| *loading != id);
+        if self.core().slow == Some(id) {
+            self.core_mut().slow = None;
+        }
         let imported = matches!(source, Source::Import(..));
         let (path, registry, tried) = match source {
             Source::File(path, registry, password) => (path, Some(registry), !password.is_empty()),
@@ -169,7 +177,7 @@ pub trait Opening: Host {
         let opened = loaded.and_then(|loaded| {
             let risk = match files::macro_risk(&Self::KIND, &path)? {
                 true => Some(crate::Risk::Macros),
-                false => Self::Engine::risk(&loaded),
+                false => files::section_risk(&Self::KIND, &path)?.or_else(|| Self::Engine::risk(&loaded)),
             };
             let (work, session) = match registry {
                 Some(_) => (
@@ -195,6 +203,8 @@ pub trait Opening: Host {
                 if error.kind() == io::ErrorKind::PermissionDenied && !imported {
                     return crate::Dialogs::ask_password(self, path, tried, registry.is_none(), window, cx);
                 }
+                // A stopped or crashed engine fails the load first.
+                crate::Stopping::check_engine(self, cx);
                 return self.failed_open(&path.display().to_string(), &error, cx);
             }
         };
@@ -207,13 +217,11 @@ pub trait Opening: Host {
                 text(cx, "office.untitled", &[("n", &n)])
             }
         };
-        log::info!(
-            "{}: opened {name} as tab {id}, risk {risk:?}",
-            Self::KIND.app.slug()
-        );
         self.watch(id, &view, cx);
         window.focus(&Self::Engine::focus(view.read(cx)), cx);
-        self.core_mut().tabs.push(Tab {
+        // Tabs keep the order their loads began.
+        let at = self.core().tabs.partition_point(|tab| tab.id < id);
+        self.core_mut().tabs.insert(at, Tab {
             id,
             view,
             doc,
@@ -230,7 +238,14 @@ pub trait Opening: Host {
         });
         self.core_mut().active = Some(id);
         // Points from now on; a crash copy comes back unsaved.
-        let named = self.tab(id).expect("just opened").name.clone();
+        let tab = self.tab(id).expect("just opened");
+        let named = tab.name.clone();
+        log::info!(
+            "{}: opened {named} as tab {id}, risk {:?}, {} tabs open",
+            Self::KIND.app.slug(),
+            tab.risk,
+            self.core().tabs.len()
+        );
         crate::Recovering::keep_tab(self, id, &named, tried, cx);
         crate::Recovering::reopened(self, id, &path, cx);
         cx.notify();

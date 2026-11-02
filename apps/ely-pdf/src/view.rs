@@ -6,10 +6,12 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use ely_gpui_component::primitives::FocusRing as _;
 use ely_pdf_engine::{Bookmark, Char, Doc, Worker};
 use gpui::{
     Context, EventEmitter, FocusHandle, InteractiveElement as _, IntoElement, ParentElement as _,
-    Render, RenderImage, ScrollHandle, Styled as _, Window, div,
+    Render, RenderImage, Role, ScrollHandle, StatefulInteractiveElement as _, Styled as _, Window,
+    div, prelude::FluentBuilder as _,
 };
 
 use crate::engine::{Loaded, MEASURE, Mupdf};
@@ -97,6 +99,8 @@ pub struct PdfView {
     /// Pages picked in the side panel, and the anchor.
     pub picked: BTreeSet<usize>,
     pub anchor: Option<usize>,
+    /// The drop zone under a drag: page, lower half.
+    pub aimed: Option<(usize, bool)>,
     pub tool: crate::content::Tool,
     /// What pages hold, read while editing.
     pub layers: crate::content::Layers,
@@ -202,7 +206,7 @@ impl PdfView {
             painting: false,
             room: gpui::Bounds::default(),
             wheel: 0.0,
-            focus: cx.focus_handle(),
+            focus: cx.focus_handle().tab_stop(true),
             version: 0,
             edited: 0,
             queue: VecDeque::new(),
@@ -217,6 +221,7 @@ impl PdfView {
             thumbing: false,
             picked: BTreeSet::new(),
             anchor: None,
+            aimed: None,
             tool: crate::content::Tool::Read,
             layers: HashMap::new(),
             reading_layer: false,
@@ -328,15 +333,22 @@ impl PdfView {
         let laid = self.laid_out();
         if let Some(place) = laid.placed.iter().find(|place| place.page == page) {
             let (_, top, _, _) = rect_on([0.0, y, 0.0, y], self.sizes[page], self.rotate, laid.scale);
-            // Across: stay unless the page's left is out of view.
-            let (left, wide) = (-f32::from(self.scroll.offset().x), f32::from(self.room.size.width));
-            let x = match place.x >= left && place.x < left + wide {
-                true => left,
-                false => (place.x - crate::layout::GAP).max(0.0),
+            let x = match self.mode {
+                Mode::Horizontal => (place.x - crate::layout::GAP).max(0.0),
+                _ => self.across(place),
             };
             self.go_to = Some((x, (place.y + top - crate::layout::GAP * 2.0).max(0.0)));
         }
         cx.notify();
+    }
+
+    /// Across: stay unless the page's left is out of view.
+    fn across(&self, place: &crate::layout::Placed) -> f32 {
+        let (left, wide) = (-f32::from(self.scroll.offset().x), f32::from(self.room.size.width));
+        match place.x >= left && place.x < left + wide {
+            true => left,
+            false => (place.x - crate::layout::GAP).max(0.0),
+        }
     }
 
     /// Every page tile goes; images are freed next render.
@@ -349,20 +361,55 @@ impl PdfView {
         }
     }
 
-    /// Changes how pages show; the page read stays in view.
+    /// Changes how pages show; the spot read stays put.
     pub fn change(&mut self, change: impl FnOnce(&mut Self, f32), cx: &mut Context<Self>) {
-        let scale = self.laid_out().scale;
-        change(self, scale);
+        // A scroll not yet drawn counts.
+        let offset = self.scroll.offset();
+        let (left, top) = self.go_to.unwrap_or((-f32::from(offset.x), -f32::from(offset.y)));
+        let laid = self.laid_out();
+        // The page nearest the top left: across first, then down.
+        let near = |place: &crate::layout::Placed| {
+            let across = (place.x - left).max(left - place.x - place.w).max(0.0);
+            (across, (place.y - top).max(0.0))
+        };
+        let anchor = (laid.placed.iter().filter(|place| place.y + place.h > top))
+            .min_by(|a, b| {
+                let ((a_across, a_down), (b_across, b_down)) = (near(a), near(b));
+                a_across.total_cmp(&b_across).then(a_down.total_cmp(&b_down))
+            });
+        // Down the page as a share; above it in pixels.
+        let (anchor, spot) = anchor.map_or((self.current, (0.0, 0.0, 0.0)), |place| {
+            let down = ((top - place.y) / place.h).max(0.0);
+            (place.page, ((left - place.x) / place.w, down, (top - place.y).min(0.0)))
+        });
+        change(self, laid.scale);
         self.retire_tiles();
-        self.show(self.current, 0.0, cx);
+        let laid = self.laid_out();
+        // Else the page read, at its top.
+        let held = match laid.placed.iter().find(|place| place.page == anchor) {
+            Some(place) => Some((place, spot)),
+            None => laid.placed.iter().find(|place| place.page == self.current).map(|place| (place, (spot.0, 0.0, 0.0))),
+        };
+        if let Some((place, (x, down, above))) = held {
+            self.go_to = Some(((place.x + x * place.w).max(0.0), (place.y + down * place.h + above).max(0.0)));
+            log::info!("pdf: view changed; page {} held at {x:.2}, {down:.2}, {above:.0} px at scale {:.2}", place.page + 1, laid.scale);
+        }
+        cx.notify();
     }
 
     /// Ctrl (Cmd on macOS) and the wheel step the zoom.
-    pub fn wheel_zoom(&mut self, event: &gpui::ScrollWheelEvent, cx: &mut Context<Self>) {
+    pub fn wheel_zoom(&mut self, event: &gpui::ScrollEvent, cx: &mut Context<Self>) {
         let steps = ely_ui::wheel::steps(event, &mut self.wheel);
         for _ in 0..steps.unsigned_abs() {
             self.change(|view, now| view.zoom = Zoom::Scale(crate::keys::stepped(now, steps > 0)), cx);
         }
+    }
+
+    /// Shown pages' text for a reader; missing text asked.
+    fn reading(&mut self, shown: Vec<usize>, cx: &mut Context<Self>) -> impl FnOnce(&mut gpui::A11ySubtreeBuilder) + 'static {
+        let texts = shown.into_iter().filter_map(|page| Some((page, self.page_text(page, cx)?))).collect();
+        let span = self.selection.and_then(|selection| selection.span(|page| self.text.get(&page).map(|chars| chars.as_slice())));
+        crate::reading::pages(texts, span)
     }
 
     /// Moves `by` pages; continuous views scroll there.
@@ -376,7 +423,18 @@ impl PdfView {
 impl Render for PdfView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.retired.release(window);
-        let pages = self.page_view(window, cx);
-        div().size_full().track_focus(&self.focus).child(pages)
+        let (pages, shown) = self.page_view(window, cx);
+        let reading = window.is_a11y_active().then(|| self.reading(shown, cx));
+        div()
+            .id("pdf-view")
+            .role(Role::Document)
+            .aria_label(ely_ui::i18n::text(cx, "pdf.document", &[]))
+            .size_full()
+            .border_1()
+            .border_color(gpui::transparent_black())
+            .focus_ring(cx)
+            .track_focus(&self.focus)
+            .when_some(reading, |view, reading| view.a11y_synthetic_children(reading))
+            .child(pages)
     }
 }

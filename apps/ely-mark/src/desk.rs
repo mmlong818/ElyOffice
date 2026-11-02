@@ -13,13 +13,14 @@ use ely_gpui_component::{
     primitives::IconName,
     shell::{StatusBar, StatusBarItem},
     theme::ControlSize,
+    typography::tabular,
 };
 use ely_office::{Core, Host, Kind, prelude::*};
 use ely_platform::{AppId, startup};
 use ely_ui::{Root, Shell, commands, i18n::text};
 use gpui::{
     App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
-    ParentElement as _, PathPromptOptions, Render, Styled as _, Window, div,
+    ParentElement as _, PathPromptOptions, Render, SharedString, Styled as _, Window, div,
 };
 
 use crate::engine::Mark;
@@ -46,6 +47,8 @@ pub struct Desk {
     /// The folders the watcher covers.
     pub watched: Vec<PathBuf>,
     pub comparing: Option<crate::compare::Comparing>,
+    /// The body font picker, while open.
+    pub font_picking: Option<Entity<ely_gpui_component::forms::TextInput>>,
     pub keeping: crate::restore::Keeping,
     pub look: crate::look::Look,
     pub look_file: PathBuf,
@@ -58,6 +61,7 @@ pub struct Desk {
     pub(crate) finding: Option<crate::finding::Find>,
     /// The copy being converted; a newer one drops it.
     pub(crate) copying: Option<gpui::Task<()>>,
+    pub(crate) tab_asked: Option<ely_ui::menu::Offer<PathBuf>>,
 }
 
 impl Host for Desk {
@@ -102,6 +106,7 @@ impl Host for Desk {
     /// A closed tab's unsaved text is gone for good (§6.2).
     fn tab_closed(&mut self, tab: &ely_office::Tab<Self::Extra, Mark>, cx: &mut Context<Self>) {
         let path = tab.session.path().map(std::path::Path::to_path_buf);
+        self.remembered.remove(&tab.id);
         self.drop_slot(&tab.extra.slot, path, tab.name.to_string(), cx);
     }
 
@@ -110,6 +115,7 @@ impl Host for Desk {
         self.watch_folders(cx);
         self.look_once(id, cx);
         let changed = view.read(cx).changed();
+        self.recount(id, changed, cx);
         self.autosave(id, changed, cx);
         let recheck = self.tab_mut(id).is_some_and(|tab| {
             if !tab.dirty(cx) {
@@ -200,6 +206,7 @@ pub(crate) fn open_in(
             watcher: None,
             watched: Vec::new(),
             comparing: None,
+            font_picking: None,
             keeping,
             look: look.clone(),
             look_file,
@@ -208,8 +215,10 @@ pub(crate) fn open_in(
             asked_print: None,
             finding: None,
             copying: None,
+            tab_asked: None,
         }
     });
+    crate::remote::listen(&desk, cx);
     let menus = crate::keys::menus(&look, cx);
     let root = ely_ui::document_root(
         app,
@@ -296,7 +305,7 @@ pub(crate) fn open_in(
         opening.update(cx, |desk, cx| desk.open_path(path, cx))
     });
     let closing = desk.clone();
-    window.on_window_should_close(cx, move |window, cx| {
+    ely_gpui_component::shell::guard_close(window, cx, move |window, cx| {
         closing.update(cx, |desk, cx| {
             desk.leave(cx);
             desk.should_close(window, cx)
@@ -365,6 +374,14 @@ impl Desk {
         .detach();
     }
 
+    /// The caret's line and column, from one, in every mode.
+    pub(crate) fn caret_said(&self, cx: &App) -> Option<SharedString> {
+        let view = self.active_view()?;
+        let (line, column) = view.read(cx).document().read(cx).caret(cx);
+        let (line, column) = ((line + 1).to_string(), (column + 1).to_string());
+        Some(text(cx, "mark.caret", &[("line", &line), ("column", &column)]))
+    }
+
     fn status(&self, cx: &mut Context<Self>) -> StatusBar {
         let state = StatusBarItem::new("mark-state").label(self.save_state(cx));
         let Some(view) = self.active_view() else {
@@ -393,12 +410,18 @@ impl Desk {
             Some(git) => bar.left(git),
             None => bar,
         };
-        bar.right(modes)
+        let caret = self.caret_said(cx).expect("a tab");
+        let bar = match self.count_item(cx) {
+            Some(count) => bar.right(count),
+            None => bar,
+        };
+        bar.right(StatusBarItem::new("mark-caret").label(caret)).right(modes)
     }
 }
 
 impl Render for Desk {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.count_selection(cx);
         let tab = self.active_tab();
         let title = tab.map_or_else(|| AppId::Mark.name().into(), |tab| tab.name.clone());
         let body = match tab {
@@ -408,7 +431,8 @@ impl Render for Desk {
                 .flex_col()
                 .children(self.outside_banner(cx))
                 .children(large_banner(&tab.view, cx))
-                .child(div().flex_1().min_h_0().child(tab.view.clone()))
+                // Digits keep one width, so columns line up.
+                .child(tabular(div().flex_1().min_h_0()).child(tab.view.clone()))
                 .into_any_element(),
             None => {
                 let none = text(cx, "command.blocked.no_document", &[]);
@@ -419,7 +443,7 @@ impl Render for Desk {
         let shell = match self.look.focus {
             true => Shell::new(title, &self.core.focus),
             false => Shell::new(title, &self.core.focus)
-                .tabs(self.tab_strip(cx))
+                .tabs(self.tabs(cx))
                 .left(Some(self.side.clone().into()))
                 .status(self.status(cx)),
         }
@@ -439,8 +463,10 @@ impl Render for Desk {
             .children(self.core_dialog(cx))
             .children(self.naming_element(cx))
             .children(self.compare_dialog(cx))
+            .children(self.font_dialog(cx))
             .children(self.find_box(cx))
-            .children(self.export_dialog(cx));
+            .children(self.export_dialog(cx))
+            .children(self.tab_menu(cx));
         let root = Self::mode_actions(Self::look_actions(root, cx), cx);
         let root = Self::block_actions(Self::table_actions(root, cx), cx);
         Self::output_actions(Self::clip_actions(root, cx), cx)

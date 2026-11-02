@@ -193,11 +193,16 @@ fn run_checked(
     let before = if command.check == Check::History {
         let count = history_count(doc, &history)?;
         if count == 0 {
-            return refuse(format!("{history} is 0"));
+            return Err(io::Error::other(format!("{}{}: {history} is 0", ipc::NOTHING, command.id)));
         }
         count
     } else {
         0
+    };
+    // Writer's font state shows the caret's script only.
+    let fonts_before = match command.args.first() {
+        Some(Arg::Font(_)) if doc.kind() == 0 => Some(char_fonts(doc)?),
+        _ => None,
     };
     let undo_before = undo_entries(doc)?;
     #[cfg(windows)]
@@ -274,6 +279,20 @@ fn run_checked(
             0 => refuse("the undo history did not move".into()),
             _ => Ok(()),
         },
+        Check::FinishedUndoable => {
+            #[cfg(windows)]
+            let completed = completion.as_ref().is_some_and(|(success, _)| success.is_some());
+            #[cfg(not(windows))]
+            let completed = crate::events::take_result(id).is_some();
+            if !completed {
+                refuse("the kernel reported no completion".into())
+            } else {
+                match new_steps(&undo_before, &undo_entries(doc)?) {
+                    0 => refuse("the undo history did not move".into()),
+                    _ => Ok(()),
+                }
+            }
+        }
         Check::Listed => {
             let json = doc.command_values(".uno:StyleApply")?;
             let styles = crate::commands::styles(&json, values[1])?;
@@ -302,13 +321,32 @@ fn run_checked(
             true => Ok(()),
             false => refuse("the image did not enter crop mode".into()),
         },
-        Check::Reports => {
-            let want = reported_form(&command.args[0], values[0]);
-            match crate::events::wait_state(id, command.uno, &want, STATE_WAIT) {
-                Some(state) if state == want => Ok(()),
-                state => refuse(format!("the kernel reports {state:?}, not {want}")),
+        Check::Reports => match &fonts_before {
+            // As Word: Western set, Asian set or kept.
+            Some(Some([_, asian_before])) => match char_fonts(doc)? {
+                Some([western, asian])
+                    if western == values[0] && (asian == values[0] || asian == *asian_before) =>
+                {
+                    Ok(())
+                }
+                fonts => refuse(format!("the fonts are {fonts:?}, not {}", values[0])),
+            },
+            // Too long to read: the history must move.
+            Some(None) => match new_steps(&undo_before, &undo_entries(doc)?) {
+                0 => refuse("the undo history did not move".into()),
+                _ => {
+                    log::info!("lok-worker: {} past the font lookup limit", command.id);
+                    Ok(())
+                }
+            },
+            None => {
+                let want = reported_form(&command.args[0], values[0]);
+                match crate::events::wait_state(id, command.uno, &want, STATE_WAIT) {
+                    Some(state) if state == want => Ok(()),
+                    state => refuse(format!("the kernel reports {state:?}, not {want}")),
+                }
             }
-        }
+        },
     };
     if checked.is_err() && command.check != Check::History {
         let steps = new_steps(&undo_before, &undo_entries(doc)?);
@@ -334,10 +372,9 @@ fn sheet_history(id: u64, doc: &Document, command: &Command, args: Option<&str>)
     }
     let after = crate::events::wait_a11y_change(id, &text, STATE_WAIT).ok_or_else(gone)?;
     if after == text {
-        return Err(io::Error::other(format!(
-            "{}: neither {history} nor the cell edit moved",
-            command.id
-        )));
+        // An empty history in no cell edit: nothing to do.
+        let nothing = if count == 0 { ipc::NOTHING } else { "" };
+        return Err(io::Error::other(format!("{nothing}{}: neither {history} nor the cell edit moved", command.id)));
     }
     log::info!("lok-worker: {} in a cell edit", command.id);
     Ok(())
@@ -360,6 +397,11 @@ fn reported_form(arg: &Arg, value: &str) -> String {
             .map_or_else(|_| value.to_string(), |points| points.to_string()),
         _ => value.to_string(),
     }
+}
+
+/// Writer's Western and Asian fonts, unless past its lookup limit.
+fn char_fonts(doc: &Document) -> io::Result<Option<[String; 2]>> {
+    crate::commands::char_fonts(&doc.command_values(".uno:CharFonts")?)
 }
 
 /// Whether the kernel's font list names `family`.

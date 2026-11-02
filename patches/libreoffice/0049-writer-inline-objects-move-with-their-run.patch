@@ -30,19 +30,20 @@ The w:position arithmetic moves into one helper both use.
              @param _ObjBoundHeight
 --- a/sw/source/core/objectpositioning/ascharanchoredobjectposition.cxx
 +++ b/sw/source/core/objectpositioning/ascharanchoredobjectposition.cxx
-@@ -29,6 +29,11 @@
+@@ -29,6 +29,12 @@
  #include <editeng/ulspitem.hxx>
  #include <osl/diagnose.h>
  #include <fmtornt.hxx>
 +#include <fmtanchr.hxx>
 +#include <ndtxt.hxx>
++#include <doc.hxx>
 +#include <hintids.hxx>
 +#include <editeng/escapementitem.hxx>
 +#include <editeng/fhgtitem.hxx>
  
  
  using namespace ::com::sun::star;
-@@ -60,6 +65,23 @@ SwAsCharAnchoredObjectPosition::SwAsCharAnchoredObjectPosition(
+@@ -60,6 +66,23 @@ SwAsCharAnchoredObjectPosition::SwAsCharAnchoredObjectPosition(
  SwAsCharAnchoredObjectPosition::~SwAsCharAnchoredObjectPosition()
  {}
  
@@ -66,7 +67,7 @@ The w:position arithmetic moves into one helper both use.
  /** method to cast <SwAnchoredObjectPosition::GetAnchorFrame()> to needed type */
  const SwTextFrame& SwAsCharAnchoredObjectPosition::GetAnchorTextFrame() const
  {
-@@ -162,7 +184,8 @@ void SwAsCharAnchoredObjectPosition::CalcPosition()
+@@ -162,7 +185,8 @@ void SwAsCharAnchoredObjectPosition::CalcPosition()
      const SwTwips nObjBoundHeight = ( mnFlags & AsCharFlags::Rotate )
                                      ? aObjBoundRect.Width()
                                      : aObjBoundRect.Height();

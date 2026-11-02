@@ -22,6 +22,7 @@ image.workspace = true
 [features]
 view = ["dep:gpui", "dep:ely-gpui-component", "dep:ely-platform", "dep:futures"]
 supervisor-test = []
+test-support = []
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true

@@ -262,6 +262,23 @@ fn docx_edits_saves_reopens_and_shuts_down() {
             b"ElyOffice DOCX persisted edit",
         )
         .expect("replace selected DOCX text");
+    worker
+        .run(
+            &doc,
+            "text.replace",
+            &["persisted edit", "false", "3", "0", "0", "1", "persisted replacement", "true"],
+        )
+        .expect("exact replace receives its completion and adds an undo step");
+    assert!(
+        worker
+            .run(
+                &doc,
+                "text.replace",
+                &["missing needle", "false", "3", "0", "0", "1", "unexpected", "true"],
+            )
+            .is_err(),
+        "an exact replace with no match creates no undo step"
+    );
     let edit_revision = assert_revision_advanced(&mut worker, &doc, before_revision);
     assert_event_after_edit(&mut worker, &doc, &baseline_events, edit_revision);
     doc.save_as(&mut worker, &crate::file_url(&case.output), "docx")
@@ -275,7 +292,7 @@ fn docx_edits_saves_reopens_and_shuts_down() {
         reopened
             .selection_text(&mut worker)
             .expect("reopened DOCX text"),
-        "ElyOffice DOCX persisted edit",
+        "ElyOffice DOCX persisted replacement",
         "the edit persists in the reopened DOCX model"
     );
     let selected = super::poll_until(

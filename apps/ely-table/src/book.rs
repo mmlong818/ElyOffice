@@ -1,12 +1,13 @@
 //! ElyTable's window: workbooks over one LOK worker (§9.1).
 
+use ely_gpui_component::secondary;
 use std::{
     path::PathBuf,
     sync::{Arc, Mutex},
 };
 
 use ely_gpui_component::{
-    feedback::{Banner, EmptyState},
+    feedback::Banner,
     primitives::{IconName, Severity},
     shell::{StatusBar, StatusBarItem},
 };
@@ -21,7 +22,7 @@ use gpui::{
 };
 
 use crate::bars::Bars;
-use crate::format::{FormatPanel, Panel};
+use crate::format::Panel;
 use crate::grid::Drag;
 
 /// A cell: sheet count, address, edit count.
@@ -48,6 +49,8 @@ pub struct Extra {
     pub ruling: bool,
     /// Linked sources shown as saved.
     pub links: Vec<String>,
+    /// Cells showing the file's results: unknown functions.
+    pub kept: Vec<String>,
     /// The edit count the links were last asked at.
     pub linked: Option<u64>,
     /// A links read is on its way.
@@ -62,12 +65,13 @@ pub struct Book {
     /// The sheet menu's request: number and place.
     pub sheet_menu: Option<(u64, gpui::Point<gpui::Pixels>)>,
     /// The grid or header menu.
-    pub menu: Option<ely_office::menu::Offer<crate::menu::What>>,
+    pub menu: Option<ely_ui::menu::Offer<crate::menu::What>>,
     pub panel: Entity<Panel>,
-    pub panel_shown: bool,
     pub choices: Option<crate::rules::Choices>,
     /// Read text files waiting for the import dialog.
     pub imports: std::collections::VecDeque<crate::text::Pending>,
+    /// Undo and Redo as the menus show them.
+    pub undo_menu: (bool, bool),
 }
 
 impl Host for Book {
@@ -117,6 +121,22 @@ impl Host for Book {
     }
 }
 
+/// ElyTable's menus after File; `undo` greys Undo and Redo.
+fn menus(undo: (bool, bool), cx: &App) -> Vec<gpui::Menu> {
+    vec![
+        gpui::Menu::new(ely_ui::i18n::text(cx, "menu.edit", &[])).items(ely_office::undo_items(undo, cx)),
+        gpui::Menu::new(ely_ui::i18n::text(cx, "menu.view", &[]))
+            .items(ely_office::zoom_items(false, cx).into_iter().chain([gpui::MenuItem::separator(), ely_ui::commands::right_panel_item(cx)])),
+        crate::sheets::menu(cx),
+        crate::cells::menu(cx),
+        crate::analysis::menu(cx),
+        crate::format::menu(cx),
+        crate::formulas::menu(cx),
+        crate::data::menu(cx),
+        crate::page::menu(cx),
+    ]
+}
+
 /// The window root with a blank workbook.
 pub fn open(app: AppId, window: &mut Window, cx: &mut App) -> Entity<Root> {
     ely_lok::init(cx);
@@ -133,28 +153,19 @@ pub fn open(app: AppId, window: &mut Window, cx: &mut App) -> Entity<Root> {
     });
     cx.bind_keys([
         KeyBinding::new(
-            "secondary-f",
+            secondary!("f"),
             ely_office::FindReplace,
             Some(commands::CONTEXT),
         ),
         KeyBinding::new(
-            "secondary-shift-v",
+            secondary!("shift-v"),
             crate::data::PasteValues,
             Some(commands::CONTEXT),
         ),
     ]);
     ely_office::bind_zoom_keys(cx);
-    let menus = vec![
-        gpui::Menu::new(ely_ui::i18n::text(cx, "menu.view", &[])).items(ely_office::zoom_items(false, cx)),
-        crate::sheets::menu(cx),
-        crate::cells::menu(cx),
-        crate::analysis::menu(cx),
-        crate::format::menu(cx),
-        crate::formulas::menu(cx),
-        crate::data::menu(cx),
-        crate::page::menu(cx),
-    ];
-    let root = ely_ui::document_root(app, book.clone().into(), &ely_ui::commands::FILE, menus, window, cx);
+    ely_office::bind_undo_keys(cx);
+    let root = ely_ui::document_root(app, book.clone().into(), &ely_ui::commands::FILE, menus((false, false), cx), window, cx);
     book.update(cx, |book, cx| {
         book.core.root = root.downgrade();
         book.own_window(window, cx);
@@ -165,12 +176,14 @@ pub fn open(app: AppId, window: &mut Window, cx: &mut App) -> Entity<Root> {
         true => book.new_blank(cx),
         false => launched.into_iter().for_each(|path| book.open_asked(path, cx)),
     });
+    let asked = book.clone();
+    ely_ui::on_ask(cx, move |ask, cx| asked.update(cx, |book, cx| book.answer(ask, cx)));
     let opening = book.clone();
     ely_ui::on_open(cx, move |path, cx| {
         opening.update(cx, |book, cx| book.open_asked(path, cx))
     });
     let closing = book.clone();
-    window.on_window_should_close(cx, move |window, cx| {
+    ely_gpui_component::shell::guard_close(window, cx, move |window, cx| {
         closing.update(cx, |book, cx| book.should_close(window, cx))
     });
     root
@@ -195,9 +208,22 @@ impl Book {
             sheet_menu: None,
             menu: None,
             panel,
-            panel_shown: true,
             choices: None,
             imports: Default::default(),
+            undo_menu: (false, false),
+        }
+    }
+
+    /// Greys Undo and Redo as the active workbook's kernel says.
+    fn sync_menus(&mut self, cx: &mut Context<Self>) {
+        let able = self.active_tab().map_or((false, false), |tab| ely_office::undo_able(tab.view.read(cx)));
+        if able != self.undo_menu {
+            self.undo_menu = able;
+            log::info!("table: undo {}, redo {}", able.0, able.1);
+            cx.defer(move |cx| {
+                ely_ui::set_document_menus(AppId::Table, &ely_ui::commands::FILE, menus(able, cx), cx);
+                cx.refresh_windows();
+            });
         }
     }
 
@@ -263,7 +289,7 @@ impl Book {
         );
     }
 
-    /// Rereads the linked sources after each edit.
+    /// Rereads linked sources and kept results after each edit.
     fn read_links(&mut self, id: u64, view: &Entity<LokView>, cx: &mut Context<Self>) {
         let edited = view.read(cx).edited();
         let Some(tab) = self.tab_mut(id) else {
@@ -277,7 +303,10 @@ impl Book {
         ely_lok::read_off(
             &self.core.worker,
             &doc,
-            |worker, doc| ely_lok::sheet::links(&worker.values(doc, ely_lok::sheet::LINKS)?),
+            |worker, doc| {
+                let links = ely_lok::sheet::links(&worker.values(doc, ely_lok::sheet::LINKS)?)?;
+                Ok((links, ely_lok::sheet::kept(&worker.values(doc, ely_lok::sheet::KEPT)?)?))
+            },
             move |book: &mut Self, read, cx| {
                 let Some(tab) = book.tab_mut(id) else {
                     return;
@@ -285,9 +314,9 @@ impl Book {
                 tab.extra.linking = false;
                 let view = tab.view.clone();
                 match read {
-                    Ok(links) => {
-                        log::info!("table: tab {id} links {} sources", links.len());
-                        tab.extra.links = links;
+                    Ok((links, kept)) => {
+                        log::info!("table: tab {id} links {} sources, {} kept results", links.len(), kept.len());
+                        (tab.extra.links, tab.extra.kept) = (links, kept);
                     }
                     Err(error) => book.engine_failed(&error.to_string(), cx),
                 }
@@ -308,6 +337,16 @@ impl Book {
         let sources = links.join(", ");
         let text = Self::text(cx, "table.links.stale", &[("sources", &sources)]);
         Some(Banner::new("table-links", Severity::Info, text))
+    }
+
+    /// Results Calc cannot compute stay as saved (§9.3, D-02).
+    fn kept_banner(&self, cx: &mut Context<Self>) -> Option<Banner> {
+        let kept = &self.active_tab()?.extra.kept;
+        if kept.is_empty() {
+            return None;
+        }
+        let text = Self::text(cx, "table.kept.stale", &[("cells", &listed(kept))]);
+        Some(Banner::new("table-kept", Severity::Info, text))
     }
 
     /// Holds the kernel's frozen rows and columns in place.
@@ -347,11 +386,7 @@ impl Book {
 
     fn body(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         if self.active_tab().is_none() {
-            let title = match self.core.loading.first() {
-                Some((_, name)) => Self::text(cx, "office.loading", &[("name", name)]),
-                None => Self::text(cx, "command.blocked.no_document", &[]),
-            };
-            return EmptyState::new("table-empty", IconName::Table, title).into_any_element();
+            return self.empty_body("table-empty", IconName::Table, cx);
         }
         let risk = self.stopped_banner(cx).or_else(|| self.risk_banner(cx));
         div()
@@ -360,6 +395,7 @@ impl Book {
             .flex_col()
             .children(risk)
             .children(self.links_banner(cx))
+            .children(self.kept_banner(cx))
             .child(self.bars.render(cx))
             .child(self.grid(window, cx))
             .child(self.sheet_strip(cx))
@@ -367,10 +403,20 @@ impl Book {
     }
 }
 
+/// The first five cells, then how many in all.
+pub(crate) fn listed(cells: &[String]) -> String {
+    let mut listed = cells.iter().take(5).cloned().collect::<Vec<_>>().join(", ");
+    if cells.len() > 5 {
+        listed.push_str(&format!(", … ({})", cells.len()));
+    }
+    listed
+}
+
 impl Render for Book {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // Another workbook may have become active.
         self.refill(cx);
+        self.sync_menus(cx);
         let title = self
             .active_tab()
             .map_or_else(|| AppId::Table.name().into(), |tab| tab.name.clone());
@@ -395,14 +441,11 @@ impl Render for Book {
             .children(self.dialog_element(cx))
             .children(self.context_menu(cx));
         let root = Self::bind_zoom(crate::cells::bind(crate::sheets::bind(root, cx), cx), cx);
+        let root = Self::bind_undo(root, cx);
         let root = crate::data::bind(crate::formulas::bind(root, cx), cx);
         let root = crate::page::bind(crate::protect::bind(root, cx), cx);
         crate::analysis::bind(crate::rules::bind(root, cx), cx)
             .on_action(cx.listener(Self::on_find))
-            .on_action(cx.listener(|book, _: &FormatPanel, _, cx| {
-                book.panel_shown = !book.panel_shown;
-                cx.notify();
-            }))
     }
 }
 
@@ -414,7 +457,7 @@ impl Book {
             .map(|tab| (tab.view.clone(), tab.doc.clone()));
         let tab = shown.as_ref().map(|(view, doc)| (view, doc));
         self.panel.update(cx, |panel, cx| panel.show(tab, cx));
-        (shown.is_some() && self.panel_shown).then(|| self.panel.clone().into())
+        shown.is_some().then(|| self.panel.clone().into())
     }
 }
 
